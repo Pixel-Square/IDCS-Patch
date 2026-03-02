@@ -56,6 +56,8 @@ export default function TeachingAssignmentsPage(){
   const [userDepartments, setUserDepartments] = useState<{ id: number; name?: string; code?: string; short_name?: string }[]>([])
   const [selectedDept, setSelectedDept] = useState<number | null>(null)
   const [selectedElectiveDept, setSelectedElectiveDept] = useState<number | null>(null)
+  const [selectedElectiveRegulation, setSelectedElectiveRegulation] = useState<string | null>(null)
+  const [selectedElectiveSemester, setSelectedElectiveSemester] = useState<number | null>(null)
   const [curriculum, setCurriculum] = useState<CurriculumRow[]>([])
   const [assignments, setAssignments] = useState<TeachingAssignment[]>([])
   const [electiveOptions, setElectiveOptions] = useState<any[]>([])
@@ -63,6 +65,8 @@ export default function TeachingAssignmentsPage(){
   const [loading, setLoading] = useState(true)
   const [editingAssignments, setEditingAssignments] = useState<Set<string>>(new Set())
   const [editingElectives, setEditingElectives] = useState<Set<string>>(new Set())
+  const [isBulkEditMode, setIsBulkEditMode] = useState<boolean>(false)
+  const [isBulkElectiveEditMode, setIsBulkElectiveEditMode] = useState<boolean>(false)
 
   // derive staff list for elective dropdowns: prefer elective-specific filter, else top filter
   const getFilteredStaffForElective = () => {
@@ -456,7 +460,8 @@ export default function TeachingAssignmentsPage(){
   // Bulk edit functions
   const startBulkEditing = () => {
     const bulkKeys = new Set<string>();
-    const visibleSections = selectedDept ? sections.filter(s => s.department_id === selectedDept) : sections
+    // Show all sections - department filter only affects staff dropdown
+    const visibleSections = sections
     visibleSections.forEach(section => {
       const sectionSubjects = curriculum.filter(c => 
         (section.semester ? (c.semester === section.semester) : true) &&
@@ -482,7 +487,8 @@ export default function TeachingAssignmentsPage(){
     let failureCount = 0;
     
     try {
-      const visibleSections = selectedDept ? sections.filter(s => s.department_id === selectedDept) : sections
+      // Show all sections - department filter only affects staff dropdown
+      const visibleSections = sections
       for (const section of visibleSections) {
         const sectionSubjects = curriculum.filter(c => 
           (section.semester ? (c.semester === section.semester) : true) &&
@@ -728,9 +734,8 @@ export default function TeachingAssignmentsPage(){
           </div>
           
           {(() => {
-            const visibleSections = selectedDept
-              ? sections.filter(s => s.department_id === selectedDept)
-              : sections
+            // Show all sections - department filter only affects staff dropdown
+            const visibleSections = sections
             if (visibleSections.length === 0) return (
               <div className="text-center py-8">
                 <div className="text-gray-500 text-sm">
