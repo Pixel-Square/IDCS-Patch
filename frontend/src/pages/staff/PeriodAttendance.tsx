@@ -924,13 +924,11 @@ export default function PeriodAttendance(){
     }
   }
 
-  // Handle attendance status change with auto-save
+  // Handle attendance status change (local state only, no auto-save)
   function handleAttendanceStatusChange(studentId: number, newStatus: string) {
     // Update local state immediately for responsive UI
     setAttendanceStatus(prev => ({ ...prev, [studentId]: newStatus }))
-    
-    // Auto-save to backend
-    autoSaveStudentAttendance(studentId, newStatus)
+    // Note: Changes are now saved only when "Save Daily Attendance" button is clicked
   }
 
   // Remove OD/Leave badge and records
@@ -1955,19 +1953,14 @@ export default function PeriodAttendance(){
                                 <select
                                   value={status}
                                   onChange={(e) => handleAttendanceStatusChange(student.student_id, e.target.value)}
-                                  disabled={dailySessionData?.is_locked || dailySessionData?.is_read_only || autoSavingStudentId === student.student_id}
-                                  className={`px-2 sm:px-3 py-1.5 rounded-lg border text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full ${statusClasses[status]} ${(dailySessionData?.is_locked || dailySessionData?.is_read_only || autoSavingStudentId === student.student_id) ? 'disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed' : ''}`}
+                                  disabled={dailySessionData?.is_locked || dailySessionData?.is_read_only}
+                                  className={`px-2 sm:px-3 py-1.5 rounded-lg border text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full ${statusClasses[status]} ${(dailySessionData?.is_locked || dailySessionData?.is_read_only) ? 'disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed' : ''}`}
                                 >
                                   <option value="P">Present</option>
                                   <option value="OD">On Duty</option>
                                   <option value="LATE">Late</option>
                                   <option value="LEAVE">Leave</option>
                                 </select>
-                                {autoSavingStudentId === student.student_id && (
-                                  <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                                    <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
-                                  </div>
-                                )}
                               </div>
                               {/* Mobile remarks input */}
                               <div className="mt-2 sm:hidden">
