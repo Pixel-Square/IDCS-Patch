@@ -2052,22 +2052,64 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
               {markManagerError ? <div style={{ marginTop: 8, fontSize: 12, color: '#991b1b' }}>{markManagerError}</div> : null}
             </div>
 
-            <div
-              className="obe-table-wrapper"
-              style={{
-                width: '100%',
-                maxWidth: '100%',
-                overflowX: 'scroll',
-                overflowY: 'hidden',
-                WebkitOverflowScrolling: 'touch',
-                overscrollBehaviorX: 'contain',
-                scrollbarGutter: 'stable',
-                border: '1px solid #e5e7eb',
-                borderRadius: 12,
-              }}
-            >
-              <table className="obe-table" style={{ width: 'max-content', minWidth: '100%', tableLayout: 'auto', borderCollapse: 'collapse' }}>
-                <thead>
+            {tableBlocked && !globalLocked ? (
+              <div
+                style={{
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 12,
+                  padding: 20,
+                  background: '#fff',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  marginBottom: 10,
+                }}
+              >
+                <div style={{ width: 'min(760px,100%)', textAlign: 'center', padding: '24px 12px' }}>
+                  <div style={{ fontSize: 36 }}>🔒</div>
+                  <div style={{ fontWeight: 800, fontSize: 18, marginTop: 8 }}>{isPublished ? 'Published — Locked' : 'Table Locked'}</div>
+                  <div style={{ color: '#6b7280', marginTop: 6 }}>
+                    {isPublished
+                      ? 'Marks are published. Use View to inspect or Request Edit to ask IQAC for access.'
+                      : 'Confirm the Mark Manager to unlock the student list.'}
+                  </div>
+                  {isPublished && editRequestMessage ? <div style={{ marginTop: 8, fontSize: 13, color: '#065f46' }}>{editRequestMessage}</div> : null}
+                  <div style={{ marginTop: 14 }}>
+                    {!isPublished ? (
+                      <button className="obe-btn obe-btn-success" onClick={() => setMarkManagerModal({ mode: 'confirm' })} disabled={!subjectId || markManagerBusy}>
+                        Save Mark Manager
+                      </button>
+                    ) : (
+                      <>
+                        <button className="obe-btn" onClick={() => setViewMarksModalOpen(true)} style={{ marginRight: 8 }}>
+                          View
+                        </button>
+                        <button className="obe-btn obe-btn-success" onClick={async () => { await openEditRequestModal(); }} disabled={editRequestBusy || markEntryReqPending}>
+                          {markEntryReqPending ? 'Request Pending' : 'Request Edit'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {!tableBlocked ? (
+              <div
+                className="obe-table-wrapper"
+                style={{
+                  width: '100%',
+                  maxWidth: '100%',
+                  overflowX: 'scroll',
+                  overflowY: 'hidden',
+                  WebkitOverflowScrolling: 'touch',
+                  overscrollBehaviorX: 'contain',
+                  scrollbarGutter: 'stable',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 12,
+                }}
+              >
+                <table className="obe-table" style={{ width: 'max-content', minWidth: '100%', tableLayout: 'auto', borderCollapse: 'collapse' }}>
+                  <thead>
               <tr>
                 <th style={cellTh} colSpan={4 + questions.length + 1 + 4 + visibleBtls.length * 2}>
                   {sheet.termLabel} &nbsp;&nbsp;|&nbsp;&nbsp; {sheet.batchLabel} &nbsp;&nbsp;|&nbsp;&nbsp; {assessmentLabel}
@@ -2353,74 +2395,9 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
               })}
             </tbody>
           </table>
-          </div>
-          </PublishLockOverlay>
-
-          {tableBlocked && !globalLocked ? (
-            <>
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  background: isPublished ? 'rgba(240,253,244,0.55)' : 'rgba(239,246,255,0.65)',
-                  border: `1px solid ${isPublished ? 'rgba(22,163,74,0.25)' : 'rgba(59,130,246,0.25)'}`,
-                  borderRadius: 12,
-                  pointerEvents: 'none',
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: 16,
-                  transform: 'translateX(-50%)',
-                  zIndex: 40,
-                  width: 320,
-                  background: '#fff',
-                  border: '1px solid #e5e7eb',
-                  padding: 12,
-                  borderRadius: 12,
-                  boxShadow: '0 6px 18px rgba(17,24,39,0.06)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10,
-                  alignItems: 'stretch',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 950, color: '#111827' }}>{isPublished ? 'Published — Locked' : 'Table Locked'}</div>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                    {isPublished ? 'Marks are published. Use View to inspect or Request Edit to ask IQAC for access.' : 'Confirm the Mark Manager to unlock student entry.'}
-                  </div>
-                  {isPublished && editRequestMessage ? <div style={{ marginTop: 8, fontSize: 12, color: '#065f46' }}>{editRequestMessage}</div> : null}
-                </div>
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  {!isPublished ? (
-                    <>
-                      <button className="obe-btn obe-btn-success" onClick={() => setMarkManagerModal({ mode: 'confirm' })} disabled={!subjectId || markManagerBusy}>
-                        Save Mark Manager
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button className="obe-btn" onClick={() => setViewMarksModalOpen(true)}>
-                        View
-                      </button>
-                      <button
-                        className="obe-btn obe-btn-success"
-                        onClick={async () => {
-                          await openEditRequestModal();
-                        }}
-                        disabled={editRequestBusy || markEntryReqPending}
-                      >
-                        {markEntryReqPending ? 'Request Pending' : 'Request Edit'}
-                      </button>
-                    </>
-                  )}
-                </div>
               </div>
-            </>
-          ) : null}
+            ) : null}
+          </PublishLockOverlay>
         </div>
       )}
 
