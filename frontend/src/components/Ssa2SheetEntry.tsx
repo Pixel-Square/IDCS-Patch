@@ -2098,9 +2098,6 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
                     <button className="obe-btn obe-btn-success" onClick={() => setMarkManagerModal({ mode: 'confirm' })} disabled={!subjectId || markManagerBusy}>
                       Save Mark Manager
                     </button>
-                    <button className="obe-btn" onClick={() => requestMarkManagerEdit()} disabled={markManagerBusy}>
-                      Request Access
-                    </button>
                   </>
                 )}
               </div>
