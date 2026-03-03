@@ -344,4 +344,3 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'rohit08sk@gmail.com')
 # Allow Django admin popups to work properly by setting X-Frame-Options to SAMEORIGIN
 # This prevents the "Cannot read properties of null (reading 'dismissAddRelatedObjectPopup')" error
 X_FRAME_OPTIONS = 'SAMEORIGIN'
-
