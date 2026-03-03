@@ -1,0 +1,14 @@
+2026/03/03-12:05:23.977 122a73 Creating DB /home/iqac/IDCS-Restart/iqac-whatsapp/session/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb since it was missing.
+2026/03/03-12:05:23.992 122a73 Reusing MANIFEST /home/iqac/IDCS-Restart/iqac-whatsapp/session/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/03/03-12:05:23.992 122a73 Recovering log #26182
+2026/03/03-12:05:24.017 122a73 Reusing old log /home/iqac/IDCS-Restart/iqac-whatsapp/session/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/026182.log 
+2026/03/03-12:05:24.017 122a73 Delete type=2 #26218
+2026/03/03-12:05:24.017 122a73 Delete type=2 #26219
+2026/03/03-12:05:24.018 122a73 Delete type=2 #26217
+2026/03/03-12:05:24.018 122a73 Delete type=2 #26214
+2026/03/03-12:05:24.018 122a73 Delete type=2 #26213
+2026/03/03-12:05:24.018 122a73 Delete type=2 #26215
+2026/03/03-12:05:24.018 122a73 Delete type=2 #26216
+2026/03/03-12:05:58.162 122a74 Level-0 table #26184: started
+2026/03/03-12:05:58.173 122a74 Level-0 table #26184: 1107735 bytes OK
+2026/03/03-12:05:58.178 122a74 Delete type=0 #26182
