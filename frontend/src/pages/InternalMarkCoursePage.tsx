@@ -315,6 +315,16 @@ function buildInternalSchema(classType: string | null, enabledSet: Set<string>):
     });
   }
 
+  if (ct === 'PROJECT') {
+    // PROJECT uses Review 1 / Review 2 / Model Review.
+    // Reuse the FA slots for Review1/Review2 (same columns as TCPR), and ME-CO5 for Model Review.
+    visible = [2, 5, 8, 11, 16];
+    const header = ['CO1', 'CO2', 'CO3', 'CO4', 'CO5'];
+    const cyc = ['Review 1', 'Review 1', 'Review 2', 'Review 2', 'Model Review'];
+    const lab = ['CO1-Review1', 'CO2-Review1', 'CO3-Review2', 'CO4-Review2', 'CO5-ModelReview'];
+    return { visible, header, cycles: cyc, labels: lab };
+  }
+
   if (ct === 'LAB' || ct === 'PRACTICAL') {
     // Only CIA (lab-style) + MODEL(CO5) are used.
     visible = [1, 4, 7, 10, 16];
@@ -593,6 +603,7 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments }:
         const taId = selectedTaId ?? undefined;
         const isTcpl = ct === 'TCPL';
         const isTcpr = ct === 'TCPR';
+        const isProject = ct === 'PROJECT';
         const isLabLike = ct === 'LAB' || ct === 'PRACTICAL';
         const isSpecial = ct === 'SPECIAL' && enabledSet.size;
         const allow = (k: string) => (!isSpecial ? true : enabledSet.has(String(k).toLowerCase()));
@@ -680,27 +691,28 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments }:
         }
 
         // Prefer entered/draft marks (staff view), fallback to published.
-        if (allow('ssa1')) {
+        // PROJECT does not use SSA/Formative in Internal Marks.
+        if (!isProject && allow('ssa1')) {
           try {
             const d = await fetchDraft('ssa1', courseId, taId);
             if (d?.draft && (d.draft as any).marks) ssa1Res = { marks: (d.draft as any).marks };
           } catch {}
         }
-        if (allow('ssa2')) {
+        if (!isProject && allow('ssa2')) {
           try {
             const d = await fetchDraft('ssa2', courseId, taId);
             if (d?.draft && (d.draft as any).marks) ssa2Res = { marks: (d.draft as any).marks };
           } catch {}
         }
 
-        if (allow('ssa1') && !ssa1Res?.marks) {
+        if (!isProject && allow('ssa1') && !ssa1Res?.marks) {
           try { ssa1Res = await fetchPublishedSsa1(courseId, taId); } catch { ssa1Res = null; }
         }
-        if (allow('ssa2') && !ssa2Res?.marks) {
+        if (!isProject && allow('ssa2') && !ssa2Res?.marks) {
           try { ssa2Res = await fetchPublishedSsa2(courseId, taId); } catch { ssa2Res = null; }
         }
 
-        if (isTcpr) {
+        if (isTcpr || isProject) {
           try { const d = await fetchDraft('review1', courseId, taId); if (d?.draft && (d.draft as any).marks) review1Res = { marks: (d.draft as any).marks }; } catch {}
           try { const d = await fetchDraft('review2', courseId, taId); if (d?.draft && (d.draft as any).marks) review2Res = { marks: (d.draft as any).marks }; } catch {}
           if (!review1Res?.marks) {
@@ -726,13 +738,13 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments }:
           if (!mounted) return;
           setPublishedTcplLab({ lab1: (tcplLab1Res as any)?.data ?? null, lab2: (tcplLab2Res as any)?.data ?? null });
         } else {
-          if (!isTcpr && allow('formative1')) {
+          if (!isTcpr && !isProject && allow('formative1')) {
             try { const d = await fetchDraft('formative1', courseId, taId); if (d?.draft && (d.draft as any).marks) f1Res = { marks: (d.draft as any).marks }; } catch {}
             if (!f1Res?.marks) {
               try { f1Res = await fetchPublishedFormative('formative1', courseId, taId); } catch { f1Res = null; }
             }
           }
-          if (!isTcpr && allow('formative2')) {
+          if (!isTcpr && !isProject && allow('formative2')) {
             try { const d = await fetchDraft('formative2', courseId, taId); if (d?.draft && (d.draft as any).marks) f2Res = { marks: (d.draft as any).marks }; } catch {}
             if (!f2Res?.marks) {
               try { f2Res = await fetchPublishedFormative('formative2', courseId, taId); } catch { f2Res = null; }
@@ -740,13 +752,13 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments }:
           }
         }
 
-        if (allow('cia1')) {
+        if (!isProject && allow('cia1')) {
           try { const d = await fetchDraft('cia1', courseId, taId); if (d?.draft) cia1Res = { data: (d.draft as any).data ?? d.draft }; } catch {}
           if (!cia1Res?.data) {
             try { cia1Res = await fetchPublishedCiaSheet('cia1', courseId, taId); } catch { cia1Res = null; }
           }
         }
-        if (allow('cia2')) {
+        if (!isProject && allow('cia2')) {
           try { const d = await fetchDraft('cia2', courseId, taId); if (d?.draft) cia2Res = { data: (d.draft as any).data ?? d.draft }; } catch {}
           if (!cia2Res?.data) {
             try { cia2Res = await fetchPublishedCiaSheet('cia2', courseId, taId); } catch { cia2Res = null; }
@@ -1445,14 +1457,14 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments }:
       // CO1/CO2 split into SSA/CIA/FA columns.
       const co1Ssa = scale(ssa1Co1Mark, maxes.ssa1.co1, wCo1Ssa);
       const co1Cia = scale(ciaCo1, maxes.cia1.co1, wCo1Cia);
-      const co1Fa = ct === 'TCPR'
+      const co1Fa = ct === 'TCPR' || ct === 'PROJECT'
         ? scale(review1Co1, maxes.review1.co1, wCo1Fa)
         : ct === 'TCPL'
           ? scale(tcplLab1Co1, tcplLab1?.CO_MAX_A ?? maxes.f1.co1, wCo1Fa)
           : scale(f1Co1, maxes.f1.co1, wCo1Fa);
       const co2Ssa = scale(ssa1Co2Mark, maxes.ssa1.co2, wCo2Ssa);
       const co2Cia = scale(ciaCo2, maxes.cia1.co2, wCo2Cia);
-      const co2Fa = ct === 'TCPR'
+      const co2Fa = ct === 'TCPR' || ct === 'PROJECT'
         ? scale(review1Co2, maxes.review1.co2, wCo2Fa)
         : ct === 'TCPL'
           ? scale(tcplLab1Co2, tcplLab1?.CO_MAX_B ?? maxes.f1.co2, wCo2Fa)
@@ -1460,14 +1472,14 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments }:
 
       const co3Ssa = scale(ssa2Co3Mark, maxes.ssa2.co3, wCo3Ssa);
       const co3Cia = scale(ciaCo3, maxes.cia2.co3, wCo3Cia);
-      const co3Fa = ct === 'TCPR'
+      const co3Fa = ct === 'TCPR' || ct === 'PROJECT'
         ? scale(review2Co3, maxes.review2.co3, wCo3Fa)
         : ct === 'TCPL'
           ? scale(tcplLab2Co3, tcplLab2?.CO_MAX_A ?? maxes.f2.co3, wCo3Fa)
           : scale(f2Co3, maxes.f2.co3, wCo3Fa);
       const co4Ssa = scale(ssa2Co4Mark, maxes.ssa2.co4, wCo4Ssa);
       const co4Cia = scale(ciaCo4, maxes.cia2.co4, wCo4Cia);
-      const co4Fa = ct === 'TCPR'
+      const co4Fa = ct === 'TCPR' || ct === 'PROJECT'
         ? scale(review2Co4, maxes.review2.co4, wCo4Fa)
         : ct === 'TCPL'
           ? scale(tcplLab2Co4, tcplLab2?.CO_MAX_B ?? maxes.f2.co4, wCo4Fa)

@@ -27,9 +27,34 @@ type Me = {
   };
 };
 
+const DEFAULT_COUNTRY_CODE = '91';
+
+function normalizeMobileForApi(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  let digits = s.replace(/\D+/g, '');
+  if (!digits) return '';
+
+  // Local formats -> add country code
+  if (digits.length === 10) {
+    digits = `${DEFAULT_COUNTRY_CODE}${digits}`;
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = `${DEFAULT_COUNTRY_CODE}${digits.slice(1)}`;
+  }
+
+  // Guard against accidental double country-code prefix (e.g. 9191XXXXXXXXXX)
+  if (digits.startsWith(DEFAULT_COUNTRY_CODE + DEFAULT_COUNTRY_CODE) && digits.length === (DEFAULT_COUNTRY_CODE.length * 2 + 10)) {
+    digits = digits.slice(DEFAULT_COUNTRY_CODE.length);
+  }
+
+  if (digits.length < 11 || digits.length > 15) return '';
+  return `+${digits}`;
+}
+
 function normalizeMobileForUi(raw: unknown): string {
   const s = String(raw ?? '').trim();
-  return s;
+  if (!s) return '';
+  return normalizeMobileForApi(s) || s;
 }
 
 export default function ProfilePage({ user: initialUser }: { user?: Me | null }) {
@@ -83,8 +108,7 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
 
   useEffect(() => {
     const current = profileMobile || '';
-    const normalized = current.trim() ? (current.startsWith('+91') ? current : `+91${current.replace(/^\+91\s*/, '')}`) : '';
-    setMobileDraft(normalized);
+    setMobileDraft(normalizeMobileForUi(current));
     setMobileEditing(!profileMobileVerified || !current);
     setOtpSent(false);
     setOtpDraft('');
@@ -183,12 +207,9 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
     setOtpError(null);
     setOtpInfo(null);
 
-    let nextMobile = String(mobileDraft || '').trim();
-    if (nextMobile && !nextMobile.startsWith('+91')) {
-      nextMobile = `+91${nextMobile}`;
-    }
-    if (!nextMobile || nextMobile === '+91') {
-      setOtpError('Enter mobile number.');
+    const nextMobile = normalizeMobileForApi(mobileDraft);
+    if (!nextMobile) {
+      setOtpError('Enter a valid mobile number.');
       return;
     }
     try {
@@ -196,19 +217,36 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
       const res = await requestMobileOtp(nextMobile);
       setOtpSent(true);
 
+      // In dev, backend may include debug OTP when SMS_BACKEND=console.
+      const debugOtp = String((res as any)?.debug_otp || '').trim();
+      if (debugOtp) {
+        setOtpDraft(debugOtp);
+      }
+
+      const deliveryError = String((res as any)?.delivery_error || '').trim();
+
       const expiresIn = Number(res?.expires_in_seconds ?? 0);
       if (Number.isFinite(expiresIn) && expiresIn > 0) {
         setOtpExpiresAtMs(Date.now() + expiresIn * 1000);
         setOtpSecondsLeft(Math.ceil(expiresIn));
         const mins = Math.ceil(expiresIn / 60);
-        setOtpInfo(`OTP sent. Valid for ${mins} minute${mins === 1 ? '' : 's'}.`);
+        setOtpInfo(deliveryError
+          ? `OTP generated, but delivery failed (${deliveryError}). Valid for ${mins} minute${mins === 1 ? '' : 's'}.`
+          : `OTP sent. Valid for ${mins} minute${mins === 1 ? '' : 's'}.`
+        );
       } else {
         setOtpExpiresAtMs(null);
         setOtpSecondsLeft(0);
-        setOtpInfo('OTP sent.');
+        setOtpInfo(deliveryError ? `OTP generated, but delivery failed (${deliveryError}).` : 'OTP sent.');
       }
     } catch (e: any) {
       const statusCode = Number(e?.response?.status || 0);
+      if (statusCode === 429) {
+        const retryAfter = Number(e?.response?.data?.retry_after_seconds || 0);
+        const hint = retryAfter > 0 ? ` Try again in ${retryAfter}s.` : '';
+        setOtpError(`Please wait before requesting another OTP.${hint}`);
+        return;
+      }
       const msg = statusCode === 401
         ? 'Session expired. Please login again and retry OTP request.'
         : String(e?.response?.data?.detail || e?.message || e || 'Failed to send OTP');
@@ -221,13 +259,10 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
   async function handleVerifyOtp() {
     setOtpError(null);
     setOtpInfo(null);
-    let nextMobile = String(mobileDraft || '').trim();
-    if (nextMobile && !nextMobile.startsWith('+91')) {
-      nextMobile = `+91${nextMobile}`;
-    }
+    const nextMobile = normalizeMobileForApi(mobileDraft);
     const otp = String(otpDraft || '').trim();
-    if (!nextMobile || nextMobile === '+91') {
-      setOtpError('Enter mobile number.');
+    if (!nextMobile) {
+      setOtpError('Enter a valid mobile number.');
       return;
     }
     if (!otp) {
@@ -766,6 +801,14 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                       {otpBusy ? 'Sending…' : 'Request OTP'}
                     </button>
                   </div>
+
+                  {otpInfo && (
+                    <div className="mt-2 text-sm text-emerald-700">{otpInfo}</div>
+                  )}
+
+                  {otpError && !otpSent && (
+                    <div className="mt-2 text-sm text-red-600">{otpError}</div>
+                  )}
 
                   {otpSent && (
                     <div className="mt-3">

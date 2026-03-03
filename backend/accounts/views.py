@@ -17,6 +17,8 @@ from datetime import timedelta
 import re
 import logging
 from django.conf import settings
+from urllib.parse import urlparse
+import posixpath
 
 from .models import MobileOtp, NotificationTemplate, UserQuery, Role
 from .services.sms import send_sms, send_whatsapp, verify_otp
@@ -46,21 +48,46 @@ class MeView(APIView):
 
 
 def _normalize_mobile_number(raw: str) -> str:
+    """Normalize a user-entered mobile into a consistent E.164-like form.
+
+    - Returns a string starting with '+' and digits only.
+    - Accepts common Indian local formats and adds default country code.
+    - Returns '' if invalid.
+
+    NOTE: This is used for OTP send/verify and profile storage.
+    """
+
     s = str(raw or '').strip()
     if not s:
         return ''
-    # keep leading +, strip everything else to digits
-    plus = s.startswith('+')
-    digits = re.sub(r'[^0-9]', '', s)
-    if plus:
-        s2 = f'+{digits}'
-    else:
-        s2 = digits
-    # Basic sanity: allow 10-15 digits (E.164-like)
-    digits_only = re.sub(r'[^0-9]', '', s2)
-    if len(digits_only) < 10 or len(digits_only) > 15:
+
+    # Strip everything to digits, then re-add '+' prefix.
+    digits = re.sub(r'\D+', '', s)
+    if not digits:
         return ''
-    return s2
+
+    default_cc = str(getattr(settings, 'OBE_WHATSAPP_DEFAULT_COUNTRY_CODE', '91') or '91').strip()
+    default_cc = re.sub(r'\D+', '', default_cc) or '91'
+
+    # Local formats
+    if len(digits) == 10:
+        digits = f'{default_cc}{digits}'
+    elif len(digits) == 11 and digits.startswith('0'):
+        digits = f'{default_cc}{digits[1:]}'
+
+    # Guard against accidental double country-code prefix (e.g. 9191XXXXXXXXXX)
+    # caused by clients that prepend the default country code to an already-prefixed number.
+    try:
+        cc_len = len(default_cc)
+        if cc_len and digits.startswith(default_cc + default_cc) and len(digits) == (cc_len * 2 + 10):
+            digits = digits[cc_len:]
+    except Exception:
+        pass
+
+    # E.164 sanity (country code + national number)
+    if len(digits) < 11 or len(digits) > 15:
+        return ''
+    return f'+{digits}'
 
 
 def _set_verified_mobile_on_profile(user, mobile_number: str, verified_at):
@@ -152,6 +179,28 @@ class MobileOtpRequestView(APIView):
                 sms_message = sms_message.replace(k, v)
         sms = send_sms(mobile, sms_message)
         if not sms.ok:
+            # In production, hard-fail when OTP delivery fails.
+            # In DEBUG, keep the OTP row and return the OTP for local testing,
+            # because WhatsApp microservice may not be running/paired yet.
+            if bool(getattr(settings, 'DEBUG', False)):
+                detail = ''
+                try:
+                    detail = str(getattr(sms, 'message', '') or '')
+                except Exception:
+                    detail = ''
+
+                return Response(
+                    {
+                        'ok': True,
+                        'mobile_number': mobile,
+                        'expires_in_seconds': ttl_minutes * 60,
+                        'cooldown_seconds': cooldown_seconds,
+                        'delivery_backend': backend,
+                        'delivery_error': detail,
+                        'debug_otp': code,
+                    }
+                )
+
             otp.delete()
             # surface delivery error (useful when WhatsApp client is not ready)
             detail = 'Failed to send OTP. Please try again.'
@@ -162,14 +211,23 @@ class MobileOtpRequestView(APIView):
                 pass
             return Response({'detail': detail}, status=status.HTTP_502_BAD_GATEWAY)
 
-        return Response(
-            {
-                'ok': True,
-                'mobile_number': mobile,
-                'expires_in_seconds': ttl_minutes * 60,
-                'cooldown_seconds': cooldown_seconds,
-            }
-        )
+        resp = {
+            'ok': True,
+            'mobile_number': mobile,
+            'expires_in_seconds': ttl_minutes * 60,
+            'cooldown_seconds': cooldown_seconds,
+            'delivery_backend': backend,
+        }
+
+        # Developer ergonomics: when using console backend in DEBUG, include the OTP
+        # in the response so local setups can complete verification without a real SMS gateway.
+        try:
+            if backend == 'console' and bool(getattr(settings, 'DEBUG', False)):
+                resp['debug_otp'] = code
+        except Exception:
+            pass
+
+        return Response(resp)
 
 
 class NotificationTemplateApiView(APIView):
@@ -418,41 +476,333 @@ class ProfileUpdateView(APIView):
         last_name = request.data.get('last_name')
         email = request.data.get('email')
         username = request.data.get('username')
-        
+
         # Update user fields if provided
         updated = False
-        
+
         if first_name is not None:
             user.first_name = str(first_name).strip()
             updated = True
-            
+
         if last_name is not None:
             user.last_name = str(last_name).strip()
             updated = True
-            
+
         if email is not None:
             user.email = str(email).strip()
             updated = True
-        
+
         if username is not None:
             new_username = str(username).strip()
             if not new_username:
                 return Response({'detail': 'Username cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
             # Check if username is already taken by another user
             User = get_user_model()
             if User.objects.filter(username=new_username).exclude(pk=user.pk).exists():
                 return Response({'detail': 'Username already exists.'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
             user.username = new_username
             updated = True
-        
+
         if updated:
             user.save()
-            
+
         # Return updated user data
         serializer = MeSerializer(user)
         return Response({'ok': True, 'user': serializer.data}, status=status.HTTP_200_OK)
+
+
+def _user_is_iqac(user) -> bool:
+    try:
+        if not user or not getattr(user, 'is_authenticated', False):
+            return False
+        return user.roles.filter(name__iexact='IQAC').exists() or bool(getattr(user, 'is_superuser', False))
+    except Exception:
+        return False
+
+
+def _whatsapp_gateway_base_url() -> str:
+    """Return the base URL where the WhatsApp gateway is hosted.
+
+    Supports either:
+    - settings.OBE_WHATSAPP_GATEWAY_BASE_URL (preferred; explicit)
+    - derived from settings.OBE_WHATSAPP_API_URL (legacy)
+
+    If OBE_WHATSAPP_API_URL includes a path (e.g. https://db.krgi.co.in/whatsapp/send),
+    this returns the directory base (https://db.krgi.co.in/whatsapp).
+    """
+
+    explicit_base = str(getattr(settings, 'OBE_WHATSAPP_GATEWAY_BASE_URL', '') or '').strip()
+    if explicit_base:
+        try:
+            parsed = urlparse(explicit_base)
+            if not parsed.scheme or not parsed.netloc:
+                return ''
+            path = (parsed.path or '').rstrip('/')
+            return f"{parsed.scheme}://{parsed.netloc}{path}" if path else f"{parsed.scheme}://{parsed.netloc}"
+        except Exception:
+            return ''
+
+    endpoint = str(getattr(settings, 'OBE_WHATSAPP_API_URL', '') or '').strip()
+    if not endpoint:
+        return ''
+    try:
+        parsed = urlparse(endpoint)
+        if not parsed.scheme or not parsed.netloc:
+            return ''
+
+        path = parsed.path or ''
+        if not path or path == '/':
+            base_path = ''
+        else:
+            # If URL is a specific endpoint, return its directory.
+            # Example: /whatsapp/send-message -> /whatsapp
+            normalized = path.rstrip('/')
+            base_path = posixpath.dirname(normalized)
+            if base_path == '/':
+                base_path = ''
+
+        return f"{parsed.scheme}://{parsed.netloc}{base_path}" if base_path else f"{parsed.scheme}://{parsed.netloc}"
+    except Exception:
+        return ''
+
+
+def _derive_gateway_base_from_api_url(endpoint: str) -> str:
+    endpoint = str(endpoint or '').strip()
+    if not endpoint:
+        return ''
+    try:
+        parsed = urlparse(endpoint)
+        if not parsed.scheme or not parsed.netloc:
+            return ''
+
+        path = parsed.path or ''
+        if not path or path == '/':
+            base_path = ''
+        else:
+            normalized = path.rstrip('/')
+            base_path = posixpath.dirname(normalized)
+            if base_path == '/':
+                base_path = ''
+
+        return f"{parsed.scheme}://{parsed.netloc}{base_path}" if base_path else f"{parsed.scheme}://{parsed.netloc}"
+    except Exception:
+        return ''
+
+
+def _whatsapp_gateway_base_url_candidates() -> list[str]:
+    """Ordered base URLs to try for the WhatsApp gateway status/QR proxy."""
+
+    bases: list[str] = []
+
+    explicit = str(getattr(settings, 'OBE_WHATSAPP_GATEWAY_BASE_URL', '') or '').strip()
+    fallback = str(getattr(settings, 'OBE_WHATSAPP_GATEWAY_BASE_URL_FALLBACK', '') or '').strip()
+    api_url = str(getattr(settings, 'OBE_WHATSAPP_API_URL', '') or '').strip()
+    api_url_fallback = str(getattr(settings, 'OBE_WHATSAPP_API_URL_FALLBACK', '') or '').strip()
+
+    for candidate in (explicit, _derive_gateway_base_from_api_url(api_url), fallback, _derive_gateway_base_from_api_url(api_url_fallback)):
+        c = str(candidate or '').strip().rstrip('/')
+        if not c:
+            continue
+        if c not in bases:
+            bases.append(c)
+
+    return bases
+
+
+def _friendly_gateway_error_message(exc: Exception) -> str:
+    raw = str(exc or '').strip()
+    if not raw:
+        raw = exc.__class__.__name__
+
+    lowered = raw.lower()
+    if 'winerror 10061' in lowered or 'connection refused' in lowered:
+        return 'Gateway connection refused (service not running or blocked).'
+    if 'name or service not known' in lowered or 'getaddrinfo failed' in lowered:
+        return 'Gateway hostname could not be resolved.'
+    if 'timed out' in lowered or 'read timed out' in lowered or 'connect timeout' in lowered:
+        return 'Gateway request timed out.'
+    return 'Gateway request failed.'
+
+
+def _normalize_gateway_path(value: str, default: str) -> str:
+    s = str(value or '').strip()
+    if not s:
+        s = default
+    if not s.startswith('/'):
+        s = '/' + s
+    return s
+
+
+class WhatsAppGatewayStatusView(APIView):
+    """IQAC-only: best-effort status proxy for the WhatsApp gateway microservice."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        if not _user_is_iqac(request.user):
+            return Response({'detail': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
+
+        bases = _whatsapp_gateway_base_url_candidates()
+        if not bases:
+            return Response({'ok': False, 'detail': 'WhatsApp gateway is not configured.', 'gateway_base_url': ''})
+
+        # Try a conventional status endpoint. If not available, just verify reachability.
+        try:
+            import requests
+
+            timeout = float(getattr(settings, 'OBE_WHATSAPP_TIMEOUT_SECONDS', 8.0) or 8.0)
+
+            status_path = _normalize_gateway_path(
+                getattr(settings, 'OBE_WHATSAPP_GATEWAY_STATUS_PATH', '/status'),
+                '/status',
+            )
+
+            last_error: Exception | None = None
+            for base in bases:
+                try:
+                    url = f'{base}{status_path}'
+                    r = requests.get(url, timeout=timeout)
+                    if 200 <= int(r.status_code or 0) < 300:
+                        try:
+                            payload = r.json()
+                        except Exception:
+                            payload = {'raw': (r.text or '').strip()}
+                        return Response({'ok': True, 'gateway_base_url': base, 'status': payload})
+
+                    # If status endpoint isn't implemented (404), still try reachability below.
+
+                    # Fallback: attempt hitting base
+                    r2 = requests.get(base, timeout=timeout)
+                    if 200 <= int(r2.status_code or 0) < 500:
+                        return Response({'ok': True, 'gateway_base_url': base, 'status': {'http_status': int(r2.status_code or 0)}})
+                    last_error = Exception(f'Gateway HTTP {int(r2.status_code or 0)}')
+                except Exception as e:
+                    last_error = e
+                    continue
+
+            # All candidates failed
+            base0 = bases[0] if bases else ''
+            detail = _friendly_gateway_error_message(last_error) if last_error else 'Gateway request failed.'
+            payload = {'ok': False, 'gateway_base_url': base0, 'detail': detail}
+            if bool(getattr(settings, 'DEBUG', False)) and last_error is not None:
+                payload['debug_error'] = str(last_error)
+            return Response(payload)
+        except Exception as e:
+            log.exception('WhatsApp gateway status check failed')
+            base0 = bases[0] if bases else ''
+            payload = {
+                'ok': False,
+                'gateway_base_url': base0,
+                'detail': _friendly_gateway_error_message(e),
+            }
+            if bool(getattr(settings, 'DEBUG', False)):
+                payload['debug_error'] = str(e)
+            return Response(payload)
+
+
+class WhatsAppGatewayQrView(APIView):
+    """IQAC-only: best-effort QR proxy.
+
+    Supports common gateway patterns:
+    - GET /qr.png -> image
+    - GET /qr -> JSON with {qr|qr_text|data_url} or plain text QR payload
+    """
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        if not _user_is_iqac(request.user):
+            return Response({'detail': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
+
+        bases = _whatsapp_gateway_base_url_candidates()
+        if not bases:
+            return Response({'ok': False, 'detail': 'WhatsApp gateway is not configured.', 'gateway_base_url': ''})
+
+        try:
+            import base64
+            import requests
+
+            timeout = float(getattr(settings, 'OBE_WHATSAPP_TIMEOUT_SECONDS', 8.0) or 8.0)
+
+            img_path = _normalize_gateway_path(
+                getattr(settings, 'OBE_WHATSAPP_GATEWAY_QR_IMAGE_PATH', '/qr.png'),
+                '/qr.png',
+            )
+            qr_path = _normalize_gateway_path(
+                getattr(settings, 'OBE_WHATSAPP_GATEWAY_QR_PATH', '/qr'),
+                '/qr',
+            )
+
+            last_error: Exception | None = None
+            for base in bases:
+                try:
+                    # 1) Image endpoint
+                    img_url = f'{base}{img_path}'
+                    r = requests.get(img_url, timeout=timeout)
+                    ct = str(r.headers.get('content-type', '') or '').lower()
+                    if 200 <= int(r.status_code or 0) < 300 and ct.startswith('image/'):
+                        b64 = base64.b64encode(r.content or b'').decode('ascii')
+                        return Response({'ok': True, 'mode': 'image', 'gateway_base_url': base, 'data_url': f'data:{ct};base64,{b64}'})
+
+                    # 2) JSON/text endpoint
+                    qr_url = f'{base}{qr_path}'
+                    r2 = requests.get(qr_url, timeout=timeout)
+                    if not (200 <= int(r2.status_code or 0) < 300):
+                        # Common case: gateway doesn't implement these endpoints.
+                        if int(r2.status_code or 0) == 404:
+                            last_error = Exception('QR endpoint is not available on this gateway. Use Open Pairing Page.')
+                        else:
+                            last_error = Exception(f'QR endpoint HTTP {int(r2.status_code or 0)}')
+                        continue
+
+                    ct2 = str(r2.headers.get('content-type', '') or '').lower()
+                    if 'application/json' in ct2:
+                        try:
+                            payload = r2.json() or {}
+                        except Exception:
+                            payload = {}
+
+                        data_url = str(payload.get('data_url') or payload.get('qr_data_url') or '').strip()
+                        if data_url.startswith('data:image/'):
+                            return Response({'ok': True, 'mode': 'image', 'gateway_base_url': base, 'data_url': data_url})
+
+                        qr_text = str(payload.get('qr') or payload.get('qr_text') or payload.get('text') or '').strip()
+                        if qr_text:
+                            return Response({'ok': True, 'mode': 'text', 'gateway_base_url': base, 'qr_text': qr_text})
+
+                        last_error = Exception('QR payload not available from gateway.')
+                        continue
+
+                    # Plain text QR payload
+                    text = str(r2.text or '').strip()
+                    if text:
+                        return Response({'ok': True, 'mode': 'text', 'gateway_base_url': base, 'qr_text': text})
+
+                    last_error = Exception('QR not available.')
+                    continue
+                except Exception as e:
+                    last_error = e
+                    continue
+
+            base0 = bases[0] if bases else ''
+            detail = _friendly_gateway_error_message(last_error) if last_error else 'Gateway request failed.'
+            payload = {'ok': False, 'gateway_base_url': base0, 'detail': detail}
+            if bool(getattr(settings, 'DEBUG', False)) and last_error is not None:
+                payload['debug_error'] = str(last_error)
+            return Response(payload)
+        except Exception as e:
+            log.exception('WhatsApp gateway QR fetch failed')
+            base0 = bases[0] if bases else ''
+            payload = {
+                'ok': False,
+                'gateway_base_url': base0,
+                'detail': _friendly_gateway_error_message(e),
+            }
+            if bool(getattr(settings, 'DEBUG', False)):
+                payload['debug_error'] = str(e)
+            return Response(payload)
 
 
 class UserQueryListCreateView(APIView):

@@ -5857,7 +5857,6 @@ def publish_requests_history(request):
 
 
 @api_view(['GET'])
-@api_view(['GET'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def publish_requests_pending_count(request):
