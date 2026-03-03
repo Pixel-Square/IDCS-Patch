@@ -524,6 +524,7 @@ export default function LabCourseMarksEntry({
   const normalizedClassType = useMemo(() => normalizeClassType(classType), [classType]);
   const isLabCourse = useMemo(() => isLabClassType(classType), [classType]);
   const isTcpr = normalizedClassType === 'TCPR';
+  const isTcpl = normalizedClassType === 'TCPL';
   const isTcplOrReviewBased = useMemo(
     () => normalizedClassType === 'LAB' || normalizedClassType === 'TCPL' || normalizedClassType === 'TCPR' || normalizedClassType === 'PRACTICAL' || normalizedClassType === 'PROJECT',
     [normalizedClassType],
@@ -960,12 +961,24 @@ export default function LabCourseMarksEntry({
 
   const coConfigs = useMemo(() => ensureCoConfigs(draft.sheet), [draft.sheet]);
   const markManagerLocked = Boolean(draft.sheet.markManagerLocked);
-  const ciaExamEnabled = ciaAvailable ? draft.sheet.ciaExamEnabled !== false : false;
+  const ciaExamEnabled = ciaAvailable ? (isTcpl ? true : draft.sheet.ciaExamEnabled !== false) : false;
   const ciaExamMaxEffective = useMemo(() => {
     if (!isTcpr) return DEFAULT_CIA_EXAM_MAX;
     return clampInt(Number((draft.sheet as any).ciaExamMax ?? DEFAULT_CIA_EXAM_MAX), 0, 100);
   }, [isTcpr, (draft.sheet as any).ciaExamMax]);
   const markManagerCurrentSnapshot = useMemo(() => markManagerSnapshotOf(coConfigs, ciaExamEnabled), [coConfigs, ciaExamEnabled]);
+
+  // TCPL policy: CIA Exam is mandatory (always enabled).
+  useEffect(() => {
+    if (!ciaAvailable) return;
+    if (!isTcpl) return;
+    if (draft.sheet.ciaExamEnabled === false) {
+      setDraft((p) => ({
+        ...p,
+        sheet: { ...p.sheet, ciaExamEnabled: true },
+      }));
+    }
+  }, [ciaAvailable, isTcpl, draft.sheet.ciaExamEnabled]);
 
   // DB controls post-publish; local confirmation controls pre-publish.
   // Deterministic: block whenever backend says entry is not open.
@@ -2951,7 +2964,16 @@ export default function LabCourseMarksEntry({
             <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 800, fontSize: 12, color: '#111827' }}>
               {ciaAvailable ? (
                 <>
-                  <input type="checkbox" checked={ciaExamEnabled} disabled={markManagerLocked} onChange={(e) => setCiaExamEnabled(e.target.checked)} style={bigCheckboxStyle} />
+                  <input
+                    type="checkbox"
+                    checked={ciaExamEnabled}
+                    disabled={markManagerLocked || isTcpl}
+                    onChange={(e) => {
+                      if (isTcpl) return;
+                      setCiaExamEnabled(e.target.checked);
+                    }}
+                    style={bigCheckboxStyle}
+                  />
                   CIA Exam
                 </>
               ) : null}

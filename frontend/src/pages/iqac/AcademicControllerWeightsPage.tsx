@@ -3,7 +3,22 @@ import CLASS_TYPES from '../../constants/classTypes';
 import { normalizeClassType } from '../../constants/classTypes';
 import { lsGet, lsSet } from '../../utils/localStorage';
 
-const DEFAULT_INTERNAL_MARK_WEIGHTS = [1.5, 3.0, 2.5, 1.5, 3.0, 2.5, 1.5, 3.0, 2.5, 1.5, 3.0, 2.5, 2.0, 2.0, 2.0, 2.0, 4.0];
+const DEFAULT_INTERNAL_MARK_WEIGHTS_17 = [1.5, 3.0, 2.5, 1.5, 3.0, 2.5, 1.5, 3.0, 2.5, 1.5, 3.0, 2.5, 2.0, 2.0, 2.0, 2.0, 4.0];
+
+// TCPL has an extra column per CO: CIA Exam (split from LAB/Formative slot).
+// Slot order (21):
+// CO1: SSA, CIA, LAB, CIA Exam
+// CO2: SSA, CIA, LAB, CIA Exam
+// CO3: SSA, CIA, LAB, CIA Exam
+// CO4: SSA, CIA, LAB, CIA Exam
+// ME: CO1..CO5
+const DEFAULT_INTERNAL_MARK_WEIGHTS_TCPL_21 = [
+  1.0, 3.25, 3.5, 0,
+  1.0, 3.25, 3.5, 0,
+  1.0, 3.25, 3.5, 0,
+  1.0, 3.25, 3.5, 0,
+  3.0, 3.0, 3.0, 3.0, 7.0,
+];
 
 const INTERNAL_MARK_TABLE_CLASS_TYPES = ['THEORY', 'TCPR', 'TCPL', 'LAB', 'AUDIT', 'PRACTICAL', 'SPECIAL'] as const;
 
@@ -27,10 +42,23 @@ function displayClassTypeName(ct: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
-function ensureInternalWeightsLen17(arr: Array<number | string> | null | undefined): Array<number | string> {
-  const next = Array.isArray(arr) ? [...arr] : [...DEFAULT_INTERNAL_MARK_WEIGHTS];
-  while (next.length < 17) next.push('');
-  return next.slice(0, 17);
+function internalWeightsExpectedLen(classType: string): number {
+  const k = normalizeClassType(classType);
+  return k === 'TCPL' ? 21 : 17;
+}
+
+function defaultInternalWeightsForClassType(classType: string): Array<number | string> {
+  const k = normalizeClassType(classType);
+  if (k === 'TCPL') return [...DEFAULT_INTERNAL_MARK_WEIGHTS_TCPL_21];
+  return [...DEFAULT_INTERNAL_MARK_WEIGHTS_17];
+}
+
+function ensureInternalWeightsLen(classType: string, arr: Array<number | string> | null | undefined): Array<number | string> {
+  const expected = internalWeightsExpectedLen(classType);
+  const base = defaultInternalWeightsForClassType(classType);
+  const next = Array.isArray(arr) ? [...arr] : [...base];
+  while (next.length < expected) next.push('');
+  return next.slice(0, expected);
 }
 
 function splitCycleWeight(total: unknown, ssaW: unknown, ciaW: unknown, faW: unknown): [number, number, number] {
@@ -46,11 +74,13 @@ function splitCycleWeight(total: unknown, ssaW: unknown, ciaW: unknown, faW: unk
   return [a, b, d];
 }
 
-function normalizeInternalWeightsLen17(
+function normalizeInternalWeights(
+  classType: string,
   arr: Array<number | string> | null | undefined,
   row?: { ssa1?: any; cia1?: any; formative1?: any },
   classType?: string,
 ): Array<number | string> {
+<<<<<<< HEAD
   let next = Array.isArray(arr) ? [...arr] : [...DEFAULT_INTERNAL_MARK_WEIGHTS];
   const k = normalizeClassType(classType || '');
   const sanitizeLabPractical = (input: Array<number | string>) => {
@@ -75,6 +105,12 @@ function normalizeInternalWeightsLen17(
     }
     return out;
   };
+=======
+  const k = normalizeClassType(classType);
+  const defaults = defaultInternalWeightsForClassType(k);
+  let next = Array.isArray(arr) ? [...arr] : [...defaults];
+
+>>>>>>> 4dd36089cc953007cf37a62eae126a75c501fea0
   // Backward compatibility: old format had 13 weights with CO1/CO2 as single cycle columns.
   if (next.length === 13) {
     if (k === 'LAB' || k === 'PRACTICAL') {
@@ -98,10 +134,26 @@ function normalizeInternalWeightsLen17(
       next = [co1Ssa, co1Cia, co1Fa, co2Ssa, co2Cia, co2Fa, ...next.slice(2)];
     }
   }
+<<<<<<< HEAD
   next = ensureInternalWeightsLen17(next);
   if (k === 'LAB' || k === 'PRACTICAL') {
     next = sanitizeLabPractical(next);
   }
+=======
+
+  // TCPL upgrade: old 17-slot schema -> new 21-slot schema by inserting CIA Exam weights.
+  if (k === 'TCPL' && next.length === 17) {
+    const out: Array<number | string> = [];
+    for (let co = 0; co < 4; co++) {
+      const baseIdx = co * 3;
+      out.push(next[baseIdx] ?? '', next[baseIdx + 1] ?? '', next[baseIdx + 2] ?? '', '');
+    }
+    out.push(...next.slice(12, 17));
+    next = out;
+  }
+
+  next = ensureInternalWeightsLen(k, next);
+>>>>>>> 4dd36089cc953007cf37a62eae126a75c501fea0
   return next;
 }
 
@@ -130,6 +182,35 @@ function buildInternalWeightsGroups(classType: string): InternalWeightsGroup[] {
 
   const ciaLabelForCo = (coNum: 1 | 2 | 3 | 4) => (coNum === 1 || coNum === 2 ? 'CIA 1' : 'CIA 2');
   const ssaLabelForCo = (coNum: 1 | 2 | 3 | 4) => (coNum === 1 || coNum === 2 ? 'SSA 1' : 'SSA 2');
+
+  if (k === 'TCPL') {
+    const coGroupTcpl = (coNum: 1 | 2 | 3 | 4, baseIndex: number): InternalWeightsGroup => ({
+      header: `CO${coNum}`,
+      cols: [
+        { label: ssaLabelForCo(coNum), index: baseIndex },
+        { label: ciaLabelForCo(coNum), index: baseIndex + 1 },
+        { label: thirdLabelForCo(coNum), index: baseIndex + 2 },
+        { label: 'CIA Exam', index: baseIndex + 3 },
+      ],
+    });
+
+    return [
+      coGroupTcpl(1, 0),
+      coGroupTcpl(2, 4),
+      coGroupTcpl(3, 8),
+      coGroupTcpl(4, 12),
+      {
+        header: 'ME',
+        cols: [
+          { label: 'CO1', index: 16 },
+          { label: 'CO2', index: 17 },
+          { label: 'CO3', index: 18 },
+          { label: 'CO4', index: 19 },
+          { label: 'CO5', index: 20 },
+        ],
+      },
+    ];
+  }
 
   const coGroup = (coNum: 1 | 2 | 3 | 4, baseIndex: number): InternalWeightsGroup => ({
     header: `CO${coNum}`,
@@ -192,13 +273,13 @@ export default function AcademicControllerWeightsPage() {
           }
 
           // build internal weights: for theory-like classes we use a 17-value pattern
-          let internalWeights: Array<number | string> = [...DEFAULT_INTERNAL_MARK_WEIGHTS];
+          let internalWeights: Array<number | string> = [...DEFAULT_INTERNAL_MARK_WEIGHTS_17];
           if (k === 'THEORY') {
-            internalWeights = [...DEFAULT_INTERNAL_MARK_WEIGHTS];
+            internalWeights = [...DEFAULT_INTERNAL_MARK_WEIGHTS_17];
           } else if (k === 'TCPL') {
-            // CO1..CO4 => SSA/CIA/FA repeated, ME COs => 3,3,3,3,7
+            // CO1..CO4 => SSA/CIA/LAB/CIAExam repeated, ME COs => 3,3,3,3,7
             internalWeights = [];
-            for (let i = 0; i < 4; i++) internalWeights.push(ssaDef, ciaDef, formDef);
+            for (let i = 0; i < 4; i++) internalWeights.push(ssaDef, ciaDef, formDef, 0);
             internalWeights.push(3.0, 3.0, 3.0, 3.0, 7.0);
           } else if (k === 'TCPR') {
             // CO1..CO4 => SSA/CIA/FA repeated, ME COs => 3,3,3,3,10
@@ -221,7 +302,7 @@ export default function AcademicControllerWeightsPage() {
             ssa1: 1.5,
             cia1: 3,
             formative1: 2.5,
-            internal_mark_weights: [...DEFAULT_INTERNAL_MARK_WEIGHTS],
+            internal_mark_weights: [...DEFAULT_INTERNAL_MARK_WEIGHTS_17],
           };
         }
 
@@ -253,7 +334,11 @@ export default function AcademicControllerWeightsPage() {
             ssa1: seedRow.ssa1,
             cia1: seedRow.cia1,
             formative1: seedRow.formative1,
+<<<<<<< HEAD
             internal_mark_weights: normalizeInternalWeightsLen17((im && im.length ? im : out[k].internal_mark_weights) as any, seedRow, k),
+=======
+            internal_mark_weights: normalizeInternalWeights(k, (im && im.length ? im : out[k].internal_mark_weights) as any, seedRow),
+>>>>>>> 4dd36089cc953007cf37a62eae126a75c501fea0
           };
         }
         return out;
@@ -295,9 +380,10 @@ export default function AcademicControllerWeightsPage() {
 
   const handleInternalWeightChange = (classType: string, index: number, value: string) => {
     setWeights((prev) => {
-      const row = prev[classType] || ({ ssa1: '', cia1: '', formative1: '', internal_mark_weights: [...DEFAULT_INTERNAL_MARK_WEIGHTS] } as WeightsRow);
-      const next = Array.isArray(row.internal_mark_weights) ? [...row.internal_mark_weights] : [...DEFAULT_INTERNAL_MARK_WEIGHTS];
-      while (next.length < 17) next.push('');
+      const row = prev[classType] || ({ ssa1: '', cia1: '', formative1: '', internal_mark_weights: defaultInternalWeightsForClassType(classType) } as WeightsRow);
+      const next = Array.isArray(row.internal_mark_weights) ? [...row.internal_mark_weights] : defaultInternalWeightsForClassType(classType);
+      const expected = internalWeightsExpectedLen(classType);
+      while (next.length < expected) next.push('');
       next[index] = value;
       return {
         ...prev,
@@ -320,20 +406,28 @@ export default function AcademicControllerWeightsPage() {
 
       for (const k of keysToSave) {
         const w = (weights[k] ?? weights[k.toLowerCase()] ?? weights[k.toUpperCase()] ?? {}) as any;
-        const normalizedIm = normalizeInternalWeightsLen17(
-          Array.isArray(w?.internal_mark_weights) ? w.internal_mark_weights : DEFAULT_INTERNAL_MARK_WEIGHTS,
+        const normalizedIm = normalizeInternalWeights(
+          k,
+          Array.isArray(w?.internal_mark_weights) ? w.internal_mark_weights : defaultInternalWeightsForClassType(k),
           { ssa1: w?.ssa1, cia1: w?.cia1, formative1: w?.formative1 },
           k,
         );
+        const expected = internalWeightsExpectedLen(k);
+        const defaults = defaultInternalWeightsForClassType(k) as number[];
         normalized[k] = {
           ssa1: Number(w?.ssa1) || 0,
           cia1: Number(w?.cia1) || 0,
           formative1: Number(w?.formative1) || 0,
-          internal_mark_weights: ensureInternalWeightsLen17(normalizedIm).map((x: any, i: number) => {
+          internal_mark_weights: ensureInternalWeightsLen(k, normalizedIm).map((x: any, i: number) => {
             const v = Number(x);
-            return Number.isFinite(v) ? v : (DEFAULT_INTERNAL_MARK_WEIGHTS[i] ?? 0);
+            return Number.isFinite(v) ? v : (defaults[i] ?? 0);
           }),
         };
+
+        // Safety: ensure exact length persisted.
+        if (Array.isArray(normalized[k].internal_mark_weights)) {
+          normalized[k].internal_mark_weights = normalized[k].internal_mark_weights.slice(0, expected);
+        }
       }
 
       // Ensure single THEORY key exists
@@ -423,7 +517,11 @@ export default function AcademicControllerWeightsPage() {
             {INTERNAL_MARK_TABLE_CLASS_TYPES.map((ct) => {
               const key = normalizeClassType(String(ct));
               const row = weights[key];
+<<<<<<< HEAD
               const arr = normalizeInternalWeightsLen17(Array.isArray(row?.internal_mark_weights) ? row.internal_mark_weights : DEFAULT_INTERNAL_MARK_WEIGHTS, row, key);
+=======
+              const arr = normalizeInternalWeights(key, Array.isArray(row?.internal_mark_weights) ? row.internal_mark_weights : defaultInternalWeightsForClassType(key), row);
+>>>>>>> 4dd36089cc953007cf37a62eae126a75c501fea0
               const groups = buildInternalWeightsGroups(key);
               const cols = groups.flatMap((g) => g.cols);
               return (

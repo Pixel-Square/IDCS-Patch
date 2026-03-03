@@ -13,6 +13,8 @@ from .views import (
     UserQueryDetailView,
     AllQueriesListView,
     QueryUpdateView,
+    WhatsAppGatewayStatusView,
+    WhatsAppGatewayQrView,
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 from .api.dashboard import DashboardView
@@ -33,4 +35,8 @@ urlpatterns = [
     path('queries/<int:pk>/', UserQueryDetailView.as_view(), name='user_query_detail'),
     path('queries/all/', AllQueriesListView.as_view(), name='all_queries'),
     path('queries/<int:pk>/update/', QueryUpdateView.as_view(), name='query_update'),
+
+    # IQAC Settings: WhatsApp gateway pairing/status
+    path('settings/whatsapp/status/', WhatsAppGatewayStatusView.as_view(), name='settings_whatsapp_status'),
+    path('settings/whatsapp/qr/', WhatsAppGatewayQrView.as_view(), name='settings_whatsapp_qr'),
 ]

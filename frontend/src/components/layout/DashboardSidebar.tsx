@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 
 
 import useDashboard from '../../hooks/useDashboard';
-import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare } from 'lucide-react';
+import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings } from 'lucide-react';
 
 import { useSidebar } from './SidebarContext';
 import { fetchPendingPublishRequestCount } from '../../services/obe';
@@ -40,6 +40,7 @@ import { fetchPendingPublishRequestCount } from '../../services/obe';
   academic_calendar: Calendar,
   pbas: ClipboardList,
   pbas_manager: Layout,
+  settings: Settings,
 
 };
 
@@ -168,7 +169,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
 
   // Student: show My Attendance link for students
   if (flags.is_student) {
-    items.push({ key: 'student_academics', label: 'Academics', to: '/student/academics' });
+    items.push({ key: 'student_academics', label: 'My Marks', to: '/student/academics' });
     items.push({ key: 'student_attendance', label: 'My Attendance', to: '/student/attendance' });
     items.push({ key: 'pbas', label: 'My Progress', to: '/student/pbas' });
   }
@@ -210,6 +211,11 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   // Show notifications for IQAC role only
   if (isIqac) {
     items.push({ key: 'notifications', label: 'Notifications', to: '/notifications' });
+  }
+
+  // Settings (IQAC only)
+  if (isIqac && !items.some((item) => item.key === 'settings')) {
+    items.push({ key: 'settings', label: 'Settings', to: '/settings' });
   }
 
   // Only add OBE once
