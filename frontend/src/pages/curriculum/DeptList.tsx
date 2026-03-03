@@ -80,6 +80,7 @@ export default function DeptList() {
   const electives = rows.filter(r => r.is_elective && (!currentDept || r.department.id === currentDept) && (!selectedReg || r.regulation === selectedReg) && (!selectedSem || r.semester === selectedSem));
 
   const [electiveSubjects, setElectiveSubjects] = useState<any[]>([]);
+  const [departmentGroups, setDepartmentGroups] = useState<any[]>([]);
 
   useEffect(() => {
     // load elective subjects for current filters
@@ -88,10 +89,19 @@ export default function DeptList() {
       .catch(() => setElectiveSubjects([]));
   }, [currentDept, selectedReg, selectedSem, rows]);
 
+  useEffect(() => {
+    // Fetch department groups
+    fetchWithAuth('/api/curriculum/department-groups/')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setDepartmentGroups(Array.isArray(data) ? data : data.results || []))
+      .catch(() => setDepartmentGroups([]));
+  }, []);
+
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addForm, setAddForm] = useState<any>({
     parent: null,
     department_id: currentDept || null,
+    department_group_id: null,
     regulation: selectedReg || null,
     semester_id: selectedSem || null,
     course_code: '',
@@ -454,16 +464,37 @@ export default function DeptList() {
       {/* Elective options section */}
       <div className="mt-6">
         <h3 className="text-xl font-bold text-gray-900 mb-4">Elective Options</h3>
-        {electives.length === 0 ? (
+        {electives.length === 0 && electiveSubjects.filter(es => es.is_cross_department).length === 0 ? (
           <div className="text-gray-400 py-4">No elective options for selected department/semester.</div>
         ) : (
           <div className="space-y-6">
+            {/* Department's own elective slots with merged cross-department subjects */}
             {electives.map(parent => {
-              const options = electiveSubjects.filter(es => es.parent === parent.id);
+              // Get subjects that belong directly to this parent
+              const ownSubjects = electiveSubjects.filter(es => es.parent === parent.id);
+              
+              // Get cross-department subjects with matching parent names
+              const parentName = parent.course_name || parent.course_code || '';
+              const crossDeptMatches = electiveSubjects.filter(es => 
+                es.is_cross_department && 
+                es.parent_name && 
+                (es.parent_name === parentName || es.parent_name.toLowerCase() === parentName.toLowerCase())
+              );
+              
+              // Combine both lists
+              const allOptions = [...ownSubjects, ...crossDeptMatches];
+              
               return (
                 <div key={parent.id} className="bg-white rounded-lg shadow-md p-4">
                   <div className="flex items-center justify-between mb-4">
-                    <div className="text-lg font-bold text-gray-900">{parent.course_name || parent.course_code || 'Elective'}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-lg font-bold text-gray-900">{parent.course_name || parent.course_code || 'Elective'}</div>
+                      {crossDeptMatches.length > 0 && (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800" title="Includes shared subjects from other departments">
+                          +{crossDeptMatches.length} shared
+                        </span>
+                      )}
+                    </div>
                     <button 
                       onClick={() => openAddModal(parent)} 
                       className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
@@ -477,6 +508,7 @@ export default function DeptList() {
                         <tr>
                           <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Code</th>
                           <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Course</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Dept</th>
                           <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">CAT</th>
                           <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Class</th>
                           <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">L</th>
@@ -493,13 +525,22 @@ export default function DeptList() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-100">
-                        {options.length === 0 ? (
-                          <tr><td colSpan={15} className="px-3 py-4 text-gray-400 text-center">No subjects added yet.</td></tr>
+                        {allOptions.length === 0 ? (
+                          <tr><td colSpan={16} className="px-3 py-4 text-gray-400 text-center">No subjects added yet.</td></tr>
                         ) : (
-                          options.map(o => (
-                            <tr key={o.id} className="hover:bg-gray-50 transition-colors">
+                          allOptions.map(o => (
+                            <tr key={o.id} className={`hover:bg-gray-50 transition-colors ${o.is_cross_department ? 'bg-blue-50/30' : ''}`}>
                               <td className="px-3 py-2 whitespace-nowrap text-sm">{o.course_code || '-'}</td>
                               <td className="px-3 py-2 whitespace-nowrap text-sm">{o.course_name || '-'}</td>
+                              <td className="px-3 py-2 whitespace-nowrap text-sm">
+                                {o.is_cross_department ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title={`From ${o.owner_department_name}`}>
+                                    {o.owner_department_name?.split(' - ')[1] || o.owner_department_name?.split(' - ')[0] || 'Other'}
+                                  </span>
+                                ) : (
+                                  '-'
+                                )}
+                              </td>
                               <td className="px-3 py-2 whitespace-nowrap text-sm">{o.category || '-'}</td>
                               <td className="px-3 py-2 whitespace-nowrap text-sm">{o.class_type || '-'}</td>
                               <td className="px-3 py-2 whitespace-nowrap text-sm">{o.l ?? 0}</td>
@@ -515,13 +556,15 @@ export default function DeptList() {
                               <td className="px-3 py-2 whitespace-nowrap">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm">{o.editable ? <span className="text-emerald-600 font-semibold">Yes</span> : <span className="text-gray-400">No</span>}</span>
-                                  <button
-                                    onClick={() => openEditElective(o)}
-                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                    title="Edit"
-                                  >
-                                    <Edit className="w-4 h-4" />
-                                  </button>
+                                  {!o.is_cross_department && (
+                                    <button
+                                      onClick={() => openEditElective(o)}
+                                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                      title="Edit"
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -533,6 +576,113 @@ export default function DeptList() {
                 </div>
               );
             })}
+            
+            {/* Show unmatched cross-department electives (those without a matching parent slot in this dept) */}
+            {(() => {
+              const crossDeptElectives = electiveSubjects.filter(es => es.is_cross_department);
+              if (crossDeptElectives.length === 0) return null;
+              
+              // Get all parent names from this department's electives
+              const deptParentNames = electives.map(p => (p.course_name || p.course_code || '').toLowerCase());
+              
+              // Find cross-dept electives that don't match any of the department's parent names
+              const unmatchedCrossDept = crossDeptElectives.filter(es => {
+                const parentName = (es.parent_name || '').toLowerCase();
+                return !deptParentNames.includes(parentName);
+              });
+              
+              if (unmatchedCrossDept.length === 0) return null;
+              
+              // Group unmatched by parent name
+              const groupedByParent = unmatchedCrossDept.reduce((acc: any, elective: any) => {
+                const parentName = elective.parent_name || 'Unknown Elective';
+                if (!acc[parentName]) {
+                  acc[parentName] = [];
+                }
+                acc[parentName].push(elective);
+                return acc;
+              }, {});
+              
+              return (
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg shadow-md p-4 border-2 border-amber-200">
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-lg font-bold text-gray-900">Other Shared Electives</h4>
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                        {unmatchedCrossDept.length} {unmatchedCrossDept.length === 1 ? 'subject' : 'subjects'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">These electives don't match your department's elective slots but are available via group mappings</p>
+                  </div>
+                  <div className="space-y-4">
+                    {Object.entries(groupedByParent).map(([parentName, electives]: [string, any]) => (
+                      <div key={parentName} className="bg-white rounded-lg shadow-sm p-4">
+                        <h5 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
+                          <span className="inline-flex items-center px-2 py-1 rounded bg-amber-100 text-amber-700 text-sm">
+                            Elective Slot:
+                          </span>
+                          {parentName}
+                        </h5>
+                        <div className="w-full overflow-x-auto">
+                          <table className="w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Code</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Course</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">From Dept</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Group</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">CAT</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Class</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">L</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">T</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">P</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">S</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">C</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">INT</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">EXT</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">TTL</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase whitespace-nowrap">Hours</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-100">
+                              {electives.map((o: any) => (
+                                <tr key={o.id} className="hover:bg-amber-50/50 transition-colors">
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm font-medium">{o.course_code || '-'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.course_name || '-'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-600 text-white shadow-sm" title={o.owner_department_name}>
+                                      {o.owner_department_name?.split(' - ')[1] || o.owner_department_name?.split(' - ')[0] || 'Other'}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">
+                                    {o.department_group ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">
+                                        {o.department_group.code}
+                                      </span>
+                                    ) : '-'}
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.category || '-'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.class_type || '-'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.l ?? 0}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.t ?? 0}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.p ?? 0}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.s ?? 0}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.c ?? 0}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.internal_mark ?? '-'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.external_mark ?? '-'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.total_mark ?? '-'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-sm">{o.total_hours ?? '-'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -557,6 +707,22 @@ export default function DeptList() {
                   onChange={e => setAddForm(f => ({ ...f, course_code: e.target.value }))} 
                   className="w-full min-w-[200px] px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Department Group <span className="text-xs text-gray-500">(optional)</span>
+                </label>
+                <select 
+                  value={addForm.department_group_id || ''} 
+                  onChange={e => setAddForm(f => ({ ...f, department_group_id: e.target.value ? Number(e.target.value) : null }))} 
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">None</option>
+                  {departmentGroups.map(g => (
+                    <option key={g.id} value={g.id}>{g.code} - {g.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Assign to a group to share with other departments</p>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Class Type</label>
@@ -718,6 +884,22 @@ export default function DeptList() {
                   onChange={e => setEditElectiveForm((f:any) => ({ ...f, course_code: e.target.value }))} 
                   className="w-full min-w-[200px] px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Department Group <span className="text-xs text-gray-500">(optional)</span>
+                </label>
+                <select 
+                  value={editElectiveForm.department_group_id || ''} 
+                  onChange={e => setEditElectiveForm((f:any) => ({ ...f, department_group_id: e.target.value ? Number(e.target.value) : null }))} 
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">None</option>
+                  {departmentGroups.map(g => (
+                    <option key={g.id} value={g.id}>{g.code} - {g.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Assign to a group to share with other departments</p>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Class Type</label>

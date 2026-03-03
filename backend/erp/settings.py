@@ -200,6 +200,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'accounts.User'
 
+# Username is a display name only; login uses email/reg_no/staff_id.
+# Suppress the warning about USERNAME_FIELD not being unique.
+SILENCED_SYSTEM_CHECKS = ['auth.W004']
+
 AUTHENTICATION_BACKENDS = [
     'powerbi_portal.auth_backends.PowerBIIdentifierBackend',
     'django.contrib.auth.backends.ModelBackend',

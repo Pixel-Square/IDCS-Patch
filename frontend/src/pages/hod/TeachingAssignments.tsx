@@ -194,7 +194,6 @@ export default function TeachingAssignmentsPage(){
         }
       }
       const curRes = await fetchWithAuth('/api/curriculum/department/?page_size=0')
-      const electRes = await fetchWithAuth('/api/curriculum/elective/?page_size=0')
       const taRes = await fetchWithAuth('/api/academics/teaching-assignments/?page_size=0')
 
       const safeJson = async (r: Response) => {
@@ -279,11 +278,42 @@ export default function TeachingAssignmentsPage(){
             setDepartments(departmentsData)
           }
         }
-      }
-      if (electRes.ok){ 
-        const d = await safeJson(electRes); 
-        electiveOptionsData = d.results || d
-        setElectiveOptions(electiveOptionsData) 
+
+        // Fetch electives for each user department to get cross-department mappings
+        // Without department_id query param, backend won't return cross-dept electives
+        try {
+          const deptIdsToFetch = Array.from(deptMap.keys());
+          if (deptIdsToFetch.length > 0) {
+            const allElectiveFetches = await Promise.all(
+              deptIdsToFetch.map(dId =>
+                fetchWithAuth(`/api/curriculum/elective/?page_size=0&department_id=${dId}`)
+                  .then(r => r.ok ? safeJson(r) : { results: [] })
+                  .then(d => d.results || d)
+                  .catch(() => [])
+              )
+            );
+            // Merge, deduplicating by ID (keep cross-dept version when both exist)
+            const mergedMap = new Map<number, any>();
+            allElectiveFetches.forEach(arr => {
+              arr.forEach((elective: any) => {
+                const existing = mergedMap.get(elective.id);
+                if (!existing || (!existing.is_cross_department && elective.is_cross_department)) {
+                  mergedMap.set(elective.id, elective);
+                }
+              });
+            });
+            electiveOptionsData = Array.from(mergedMap.values());
+          } else {
+            const electRes = await fetchWithAuth('/api/curriculum/elective/?page_size=0');
+            if (electRes.ok) {
+              const d = await safeJson(electRes);
+              electiveOptionsData = d.results || d;
+            }
+          }
+          setElectiveOptions(electiveOptionsData);
+        } catch (e) {
+          console.error('Failed to fetch electives', e);
+        }
       }
       if (taRes.ok){ 
         const d = await safeJson(taRes); 
@@ -335,6 +365,34 @@ export default function TeachingAssignmentsPage(){
     }
     loadStaff()
   }, [selectedDept])
+
+  // Reload elective options when selected elective department changes
+  useEffect(() => {
+    async function loadElectives() {
+      try {
+        let url = '/api/curriculum/elective/?page_size=0';
+        // If specific department selected, include it in query to get group-mapped electives
+        if (selectedElectiveDept) {
+          url += `&department_id=${selectedElectiveDept}`;
+        }
+        const res = await fetchWithAuth(url);
+        if (res.ok) {
+          const data = await res.json();
+          const electiveOptionsData = data.results || data;
+          setElectiveOptions(electiveOptionsData);
+          console.log(`Loaded ${electiveOptionsData.length} electives for dept ${selectedElectiveDept || 'all'}`);
+          // Debug: log cross-department electives
+          const crossDept = electiveOptionsData.filter((e: any) => e.is_cross_department);
+          if (crossDept.length > 0) {
+            console.log(`Found ${crossDept.length} cross-department electives:`, crossDept.map((e: any) => `${e.course_code} from ${e.owner_department_name}`));
+          }
+        }
+      } catch (e) {
+        console.error('loadElectives failed', e);
+      }
+    }
+    loadElectives();
+  }, [selectedElectiveDept])
 
   // Helper functions for assignment management
   const findExistingAssignment = (sectionId: number, curricularRowId: number) => {
@@ -563,7 +621,7 @@ export default function TeachingAssignmentsPage(){
     const bulkElectiveKeys = new Set<string>();
     getFilteredElectiveParents().forEach(parent => {
       electiveOptions
-        .filter((e: any) => e.parent === parent.id)
+        .filter((e: any) => e.parent === parent.id && !e.is_cross_department)
         .forEach((opt: any) => {
           const key = getElectiveAssignmentKey(opt.id);
           bulkElectiveKeys.add(key);
@@ -592,6 +650,8 @@ export default function TeachingAssignmentsPage(){
         const options = electiveOptions.filter((e: any) => e.parent === parent.id);
         
         for (const opt of options) {
+          // Skip cross-department electives — they are read-only for this department
+          if (opt.is_cross_department) continue;
           const staffSel = document.getElementById(`elective-staff-${opt.id}`) as HTMLSelectElement;
           if (!staffSel?.value) continue;
 
@@ -1075,26 +1135,50 @@ export default function TeachingAssignmentsPage(){
                     </div>
                   </div>
                   <div className="space-y-3">
-                    {(electiveOptions && electiveOptions.filter((e: any) => e.parent === parent.id)).map((opt: any) => {
+                    {(() => {
+                      // Get own electives matching this parent by ID
+                      const ownElectives = (electiveOptions || []).filter((e: any) => e.parent === parent.id);
+                      // Get cross-dept electives matching this parent by name
+                      const parentName = (parent.course_name || parent.course_code || '').toLowerCase();
+                      const crossDeptElectives = (electiveOptions || []).filter((e: any) => 
+                        e.is_cross_department && 
+                        e.parent_name && 
+                        e.parent_name.toLowerCase() === parentName
+                      );
+                      // Deduplicate: cross-dept electives shouldn't appear in own list
+                      const allElectives = [
+                        ...ownElectives,
+                        ...crossDeptElectives.filter(ce => !ownElectives.some(oe => oe.id === ce.id))
+                      ];
+                      if (allElectives.length === 0) {
+                        return <div className="text-gray-400 text-sm py-2">No elective subjects added yet.</div>;
+                      }
+                      return allElectives.map((opt: any) => {
                       const existingElectiveAssignment = findExistingElectiveAssignment(opt.id);
                       const editingElective = isEditingElective(opt.id);
-                      
-                      // Debug logging
-                      console.log(`Elective ${opt.course_code} (ID: ${opt.id}):`, {
-                        opt,
-                        existingElectiveAssignment,
-                        allAssignments: assignments.filter(a => 
-                          a.subject && (a.subject.includes(opt.course_code) || a.subject.includes(opt.course_name))
-                        )
-                      });
-                      
                       return (
-                        <div key={opt.id} className="flex flex-col md:flex-row md:items-center gap-3 p-3 bg-white rounded-lg border border-gray-200">
-                          <div className="flex-1 text-sm font-medium text-gray-900">
-                            {opt.course_code || '-'} — {opt.course_name || '-'}
+                        <div key={opt.id} className={`flex flex-col md:flex-row md:items-center gap-3 p-3 rounded-lg border border-gray-200 ${opt.is_cross_department ? 'bg-blue-50/30' : 'bg-white'}`}>
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                              <span>{opt.course_code || '-'} — {opt.course_name || '-'}</span>
+                              {opt.is_cross_department && opt.owner_department_name && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title={`Shared from ${opt.owner_department_name}`}>
+                                  {opt.owner_department_name.split(' - ')[1] || opt.owner_department_name.split(' - ')[0] || 'Shared'}
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div className="w-full md:min-w-[200px] md:w-auto">
-                            {editingElective ? (
+                            {opt.is_cross_department ? (
+                              // Cross-dept electives are read-only — managed by the owning department
+                              existingElectiveAssignment ? (
+                                <div className="text-sm text-gray-900 font-medium">
+                                  {existingElectiveAssignment.staff_details?.staff_id} - {getAssignmentStaffName(existingElectiveAssignment.staff_details)}
+                                </div>
+                              ) : (
+                                <div className="text-sm text-gray-400 italic">Managed by {opt.owner_department_name?.split(' - ')[1] || opt.owner_department_name?.split(' - ')[0] || 'owner dept'}</div>
+                              )
+                            ) : editingElective ? (
                               <select 
                                 id={`elective-staff-${opt.id}`}
                                 defaultValue={existingElectiveAssignment?.staff_details?.id || existingElectiveAssignment?.staff || ''}
@@ -1114,7 +1198,10 @@ export default function TeachingAssignmentsPage(){
                             )}
                           </div>
                           <div className="flex items-center gap-2 justify-end md:justify-start">
-                            {!editingElective && !isBulkElectiveEditMode ? (
+                            {opt.is_cross_department ? (
+                              // No edit actions for cross-dept electives
+                              <span className="text-xs text-gray-400 italic">View only</span>
+                            ) : !editingElective && !isBulkElectiveEditMode ? (
                               <>
                                 <button 
                                   onClick={() => startEditingElective(opt.id)}
@@ -1132,14 +1219,9 @@ export default function TeachingAssignmentsPage(){
                                     if (!canAssignElectives) return alert('No permission to assign electives');
                                     const staffSel = document.getElementById(`elective-staff-${opt.id}`) as HTMLSelectElement;
                                     if (!staffSel?.value) return alert('Select staff member');
-                                    
                                     assignElective(opt.id, Number(staffSel.value), existingElectiveAssignment?.id)
-                                      .then(() => {
-                                        cancelEditingElective(opt.id);
-                                      })
-                                      .catch(() => {
-                                        // Error handling is already in assignElective function
-                                      });
+                                      .then(() => { cancelEditingElective(opt.id); })
+                                      .catch(() => {});
                                   }}
                                   className={`p-2 rounded-lg transition-colors ${
                                     canAssignElectives 
@@ -1183,11 +1265,65 @@ export default function TeachingAssignmentsPage(){
                           </div>
                         </div>
                       );
-                    })}
+                    });
+                  })()}
                   </div>
                 </div>
               ))
             )}
+
+            {/* Cross-dept electives with no matching parent in this dept */}
+            {(() => {
+              const deptParentNames = electiveParents.map(p => (p.course_name || p.course_code || '').toLowerCase());
+              const deptParentIds = electiveParents.map(p => p.id);
+              const orphanedCross = (electiveOptions || []).filter((e: any) =>
+                e.is_cross_department &&
+                !deptParentIds.includes(e.parent) &&
+                (!e.parent_name || !deptParentNames.includes(e.parent_name.toLowerCase()))
+              );
+              if (orphanedCross.length === 0) return null;
+              return (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    Other Shared Electives
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">{orphanedCross.length} subject{orphanedCross.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="space-y-3">
+                    {orphanedCross.map((opt: any) => {
+                      const existingElectiveAssignment = findExistingElectiveAssignment(opt.id);
+                      const editingElective = isEditingElective(opt.id);
+                      return (
+                        <div key={opt.id} className="flex flex-col md:flex-row md:items-center gap-3 p-3 bg-white rounded-lg border border-amber-200">
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                              <span>{opt.course_code || '-'} — {opt.course_name || '-'}</span>
+                              {opt.parent_name && <span className="text-xs text-gray-500">({opt.parent_name})</span>}
+                              {opt.owner_department_name && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title={`Shared from ${opt.owner_department_name}`}>
+                                  {opt.owner_department_name.split(' - ')[1] || opt.owner_department_name.split(' - ')[0] || 'Shared'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="w-full md:min-w-[200px] md:w-auto">
+                            {editingElective ? (
+                              <select id={`elective-staff-${opt.id}`} defaultValue={existingElectiveAssignment?.staff_details?.id || existingElectiveAssignment?.staff || ''} className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-700 text-sm">
+                                <option value="">-- select staff --</option>
+                                {getFilteredStaffForElective().map(st => (<option key={st.id} value={st.id}>{st.staff_id} - {getStaffDisplayName(st)}</option>))}
+                              </select>
+                            ) : existingElectiveAssignment ? (
+                              <div className="text-sm text-gray-900 font-medium">{existingElectiveAssignment.staff_details?.staff_id} - {getAssignmentStaffName(existingElectiveAssignment.staff_details)}</div>
+                            ) : (
+                              <div className="text-sm text-gray-500 italic">Not assigned</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
