@@ -20,6 +20,7 @@ import MarkAnalysisSheetPage, { SheetCol, SheetRow } from './MarkAnalysisSheetPa
 import BellGraphPage from './BellGraphPage';
 import RangeAnalysisPage from './RangeAnalysisPage';
 import RankingPage from './RankingPage';
+import DownloadReportModal from './DownloadReportModal';
 
 type Props = {
   courseId: string;
@@ -43,6 +44,7 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
   /* ── UI State ── */
   const [activeCycle, setActiveCycle] = useState<CycleKey>('cycle1');
   const [activeView, setActiveView] = useState<ViewKey>('sheet');
+  const [showDownload, setShowDownload] = useState(false);
 
   /* ── Section / TA ── */
   const [tas, setTas] = useState<TeachingAssignmentItem[]>([]);
@@ -351,6 +353,13 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
     rank: '🏆 Ranking',
   };
 
+  /* ── Derived for download ── */
+  const selectedTa = tas.find((t) => t.id === selectedTaId);
+  const sectionName = selectedTa?.section_name || selectedTa?.subject_code || courseId;
+  const staffName = (() => {
+    try { const u = JSON.parse(localStorage.getItem('user') || '{}'); return u.name || u.full_name || u.username || ''; } catch { return ''; }
+  })();
+
   return (
     <div style={{ background: '#f8fafc', minHeight: 'calc(100vh - 280px)', width: '100%' }}>
       {/* ─── Page Header ─── */}
@@ -381,6 +390,28 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
               </select>
             </label>
           )}
+          {/* ── Download Button ── */}
+          <button
+            onClick={() => setShowDownload(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7,
+              padding: '8px 18px',
+              borderRadius: 9,
+              border: '1.5px solid rgba(255,255,255,0.35)',
+              background: 'rgba(255,255,255,0.13)',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: 'pointer',
+              transition: 'background 0.15s',
+              backdropFilter: 'blur(4px)',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.22)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.13)'; }}
+          >
+            <span style={{ fontSize: 17 }}>⬇️</span>
+            <span>Download</span>
+          </button>
         </div>
 
         {/* ── Cycle Tabs ── */}
@@ -487,6 +518,21 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
           />
         )}
       </div>
+
+      {/* ── Download Report Modal ── */}
+      <DownloadReportModal
+        open={showDownload}
+        onClose={() => setShowDownload(false)}
+        courseId={courseId}
+        ct={ct}
+        sectionName={sectionName}
+        staffName={staffName}
+        studentCount={students.length}
+        cycleName={cycleLabels[activeCycle]}
+        cols={activeCols}
+        rows={activeRows}
+        totals={activeTotals}
+      />
     </div>
   );
 }

@@ -34,6 +34,7 @@ import OBERequestPage from './pages/obe/OBERequestPage';
 import AdvisorAssignments from './pages/hod/AdvisorAssignments';
 import TeachingAssignmentsPage from './pages/hod/TeachingAssignments';
 import ObeEditRequestsPage from './pages/hod/ObeEditRequestsPage';
+import HodResultAnalysisPage from './pages/hod/HodResultAnalysisPage';
 import StudentsPage from './pages/staff/Students';
 import StudentTimetable from './pages/student/TimetableView';
 import StaffTimetable from './pages/staff/TimetableView';
@@ -192,6 +193,10 @@ export default function App() {
                 <Route
                   path="/hod/obe-requests"
                   element={<ProtectedRoute user={user} requiredRoles={["HOD"]} requiredPermissions={["academics.assign_advisor"]} element={<ObeEditRequestsPage />} />}
+                />
+                <Route
+                  path="/hod/result-analysis"
+                  element={<ProtectedRoute user={user} requiredRoles={["HOD", "ADVISOR"]} element={<HodResultAnalysisPage />} />}
                 />
                 <Route
                   path="/staffs"

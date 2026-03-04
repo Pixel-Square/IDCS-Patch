@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 
 
 import useDashboard from '../../hooks/useDashboard';
-import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings } from 'lucide-react';
+import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2 } from 'lucide-react';
 
 import { useSidebar } from './SidebarContext';
 import { fetchPendingPublishRequestCount } from '../../services/obe';
@@ -35,6 +35,7 @@ import { fetchPendingPublishRequestCount } from '../../services/obe';
   obe_due_dates: CalendarClock,
   obe_requests: Bell,
   hod_obe_requests: Bell,
+  hod_result_analysis: BarChart2,
   academic_controller: Layout,
   notifications: Bell,
   academic_calendar: Calendar,
@@ -141,6 +142,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if (entry.hod_teaching && (rolesUpper.includes('ADVISOR') || permsLower.includes('academics.assign_teaching'))) items.push({ key: 'hod_teaching', label: 'Teaching Assign', to: '/advisor/teaching' });
   const canHodObeRequests = Boolean((entry as any)?.hod_obe_requests) || rolesUpper.includes('HOD');
   if (canHodObeRequests) items.push({ key: 'hod_obe_requests', label: 'HOD: OBE Requests', to: '/hod/obe-requests' });
+  if (rolesUpper.includes('HOD') || rolesUpper.includes('ADVISOR')) items.push({ key: 'hod_result_analysis', label: 'Result Analysis', to: '/hod/result-analysis' });
 
   // Staffs page: require explicit view permission
   if (permsLower.includes('academics.view_staffs_page')) {
