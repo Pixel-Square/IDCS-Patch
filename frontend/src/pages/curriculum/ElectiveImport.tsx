@@ -66,21 +66,27 @@ export default function ElectiveImport() {
 
   const loadFilterOptions = async () => {
     try {
-      const data = await fetchElectives();
-      if (!data || !Array.isArray(data)) return;
+      const [electivesData, deptsResponse] = await Promise.all([
+        fetchElectives(),
+        fetchWithAuth('/api/curriculum/departments/')
+      ]);
+      
+      // Load departments from curriculum API (respects curriculum permissions)
+      const deptsData = await deptsResponse.json();
+      const allDepts = (deptsData.results || []) as Department[];
+      setDepartments(allDepts.sort((a, b) => (a.code || '').localeCompare(b.code || '')));
 
-      const uniqueRegs = [...new Set(data.map((e: Elective) => e.regulation))].filter(Boolean).sort() as string[];
-      const uniqueSems = [...new Set(data.map((e: Elective) => e.semester))].filter(Boolean).sort((a, b) => (a as number) - (b as number)) as number[];
-      const uniqueDepts = Array.from(
-        new Map(data.map((e: Elective) => e.department).filter(Boolean).map((d: Department) => [d.id, d])).values()
-      ).sort((a, b) => ((a as Department).code || '').localeCompare((b as Department).code || '')) as Department[];
+      // Load other filters from electives data
+      if (!electivesData || !Array.isArray(electivesData)) return;
+
+      const uniqueRegs = [...new Set(electivesData.map((e: Elective) => e.regulation))].filter(Boolean).sort() as string[];
+      const uniqueSems = [...new Set(electivesData.map((e: Elective) => e.semester))].filter(Boolean).sort((a, b) => (a as number) - (b as number)) as number[];
       const uniqueParents = [...new Set(
-        data.map((e: Elective) => e.parent_name).filter((n: any) => !!n)
+        electivesData.map((e: Elective) => e.parent_name).filter((n: any) => !!n)
       )].sort() as string[];
 
       setRegulations(uniqueRegs);
       setSemesters(uniqueSems);
-      setDepartments(uniqueDepts);
       setParentElectives(uniqueParents);
     } catch (error) {
       console.error('Failed to load filter options:', error);

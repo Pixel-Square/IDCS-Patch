@@ -395,6 +395,60 @@ class ElectiveSubjectViewSet(viewsets.ModelViewSet):
         raise PermissionDenied('You do not have permission to change this elective subject')
 
 
+class CurriculumDepartmentsView(APIView):
+    """Return departments filtered by curriculum permissions.
+    
+    Uses same permission logic as CurriculumDepartmentViewSet:
+    - Superusers, IQAC/HAA groups: see all departments
+    - Users with curriculum_master_edit/publish: see all departments
+    - HODs/regular staff: see only their effective departments
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+        from academics.models import Department
+        
+        # Users with global access see all departments
+        if user.is_superuser or user.groups.filter(name__in=['IQAC', 'HAA']).exists():
+            qs = Department.objects.all()
+        else:
+            perms = get_user_permissions(user)
+            wide_perms = {'curriculum_master_edit', 'curriculum_master_publish', 
+                         'CURRICULUM_MASTER_EDIT', 'CURRICULUM_MASTER_PUBLISH'}
+            if perms & wide_perms:
+                # Users with wide curriculum permissions see all
+                qs = Department.objects.all()
+            else:
+                # Regular users see only their effective departments
+                dept_ids = get_user_effective_departments(user)
+                if not dept_ids:
+                    # Try student fallback
+                    student = getattr(user, 'student_profile', None)
+                    if student:
+                        try:
+                            section = getattr(student, 'current_section', None) or student.get_current_section()
+                            if section and getattr(section, 'batch', None) and getattr(section.batch, 'course', None):
+                                dept_ids = [section.batch.course.department_id]
+                        except Exception:
+                            pass
+                
+                if not dept_ids:
+                    return Response({'results': []})
+                
+                qs = Department.objects.filter(id__in=dept_ids)
+        
+        results = []
+        for d in qs:
+            results.append({
+                'id': d.id, 
+                'code': getattr(d, 'code', None), 
+                'name': getattr(d, 'name', None), 
+                'short_name': getattr(d, 'short_name', None)
+            })
+        return Response({'results': results})
+
+
 class ElectiveChoicesView(APIView):
     permission_classes = (IsAuthenticated,)
 

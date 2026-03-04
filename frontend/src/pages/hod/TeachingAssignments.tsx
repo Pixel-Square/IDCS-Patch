@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { User, BookOpen, Save, Edit, X, Trash2 } from 'lucide-react'
 import fetchWithAuth from '../../services/fetchAuth'
+import { getCachedMe } from '../../services/auth'
 
 type Section = { id: number; name: string; batch: string; batch_regulation?: { id: number; code: string; name?: string } | null; department_id?: number; department_short_name?: string; semester?: number; department?: { id: number; code?: string } }
 type Staff = { id: number; user: string | { username?: string; first_name?: string; last_name?: string }; staff_id: string; department?: { id?: number; code?: string; name?: string } }
@@ -18,8 +19,15 @@ type TeachingAssignment = {
 }
 
 // Cache key and expiry time (5 minutes)
-const CACHE_KEY = 'teaching_assignments_cache'
+const CACHE_KEY_PREFIX = 'teaching_assignments_cache'
 const CACHE_EXPIRY_MS = 5 * 60 * 1000
+
+// Generate user-specific cache key to prevent cross-user cache contamination
+const getUserCacheKey = () => {
+  const me = getCachedMe()
+  const userId = me?.id || me?.username || 'anonymous'
+  return `${CACHE_KEY_PREFIX}_${userId}`
+}
 
 // Helper function to get display name from user
 const getStaffDisplayName = (staff: Staff) => {
@@ -52,6 +60,7 @@ const getAssignmentStaffName = (staffDetails: any) => {
 export default function TeachingAssignmentsPage(){
   const [sections, setSections] = useState<Section[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
+  const [electiveStaff, setElectiveStaff] = useState<Staff[]>([])
   const [departments, setDepartments] = useState<{ id: number; name?: string; code?: string; short_name?: string }[]>([])
   const [userDepartments, setUserDepartments] = useState<{ id: number; name?: string; code?: string; short_name?: string }[]>([])
   const [selectedDept, setSelectedDept] = useState<number | null>(null)
@@ -68,12 +77,9 @@ export default function TeachingAssignmentsPage(){
   const [isBulkEditMode, setIsBulkEditMode] = useState<boolean>(false)
   const [isBulkElectiveEditMode, setIsBulkElectiveEditMode] = useState<boolean>(false)
 
-  // derive staff list for elective dropdowns: prefer elective-specific filter, else top filter
+  // derive staff list for elective dropdowns: use electiveStaff which is loaded based on filters
   const getFilteredStaffForElective = () => {
-    if (!staff || !Array.isArray(staff)) return []
-    if (selectedElectiveDept) return staff.filter(s => (s.department && s.department.id === selectedElectiveDept) || (s as any).department === selectedElectiveDept)
-    if (selectedDept) return staff.filter(s => (s.department && s.department.id === selectedDept) || (s as any).department === selectedDept)
-    return staff
+    return electiveStaff || []
   }
 
   // permissions (used to decide which staff endpoint to call)
@@ -114,12 +120,13 @@ export default function TeachingAssignmentsPage(){
   // Cache helper functions
   const getCachedData = () => {
     try {
-      const cached = sessionStorage.getItem(CACHE_KEY)
+      const cacheKey = getUserCacheKey()
+      const cached = sessionStorage.getItem(cacheKey)
       if (!cached) return null
       const { data, timestamp } = JSON.parse(cached)
       const age = Date.now() - timestamp
       if (age > CACHE_EXPIRY_MS) {
-        sessionStorage.removeItem(CACHE_KEY)
+        sessionStorage.removeItem(cacheKey)
         return null
       }
       return data
@@ -130,7 +137,8 @@ export default function TeachingAssignmentsPage(){
 
   const setCachedData = (data: any) => {
     try {
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify({
+      const cacheKey = getUserCacheKey()
+      sessionStorage.setItem(cacheKey, JSON.stringify({
         data,
         timestamp: Date.now()
       }))
@@ -141,7 +149,8 @@ export default function TeachingAssignmentsPage(){
 
   const clearCache = () => {
     try {
-      sessionStorage.removeItem(CACHE_KEY)
+      const cacheKey = getUserCacheKey()
+      sessionStorage.removeItem(cacheKey)
     } catch {}
   }
 
@@ -163,6 +172,7 @@ export default function TeachingAssignmentsPage(){
           console.log('Loading teaching assignments from cache')
           setSections(cached.sections || [])
           setStaff(cached.staff || [])
+          setElectiveStaff(cached.staff || [])
           setCurriculum(cached.curriculum || [])
           setElectiveParents(cached.electiveParents || [])
           setElectiveOptions(cached.electiveOptions || [])
@@ -233,6 +243,8 @@ export default function TeachingAssignmentsPage(){
           staffData = staffData.filter(s => (s.department && s.department.id === selectedDept) || (s as any).department === selectedDept) 
         }
         setStaff(staffData)
+        // Initialize elective staff with same data initially
+        setElectiveStaff(staffData)
       }
       if (curRes.ok){ 
         const d = await safeJson(curRes); 
@@ -366,21 +378,22 @@ export default function TeachingAssignmentsPage(){
     loadStaff()
   }, [selectedDept])
 
-  // Reload elective options when selected elective department changes
+  // Reload elective options when elective section department filter changes
   useEffect(() => {
     async function loadElectives() {
       try {
         let url = '/api/curriculum/elective/?page_size=0';
-        // If specific department selected, include it in query to get group-mapped electives
-        if (selectedElectiveDept) {
-          url += `&department_id=${selectedElectiveDept}`;
+        // Prefer elective-specific dept filter, otherwise use top-level dept filter
+        const deptFilter = selectedElectiveDept || selectedDept;
+        if (deptFilter) {
+          url += `&department_id=${deptFilter}`;
         }
         const res = await fetchWithAuth(url);
         if (res.ok) {
           const data = await res.json();
           const electiveOptionsData = data.results || data;
           setElectiveOptions(electiveOptionsData);
-          console.log(`Loaded ${electiveOptionsData.length} electives for dept ${selectedElectiveDept || 'all'}`);
+          console.log(`Loaded ${electiveOptionsData.length} electives for dept ${deptFilter || 'all'}`);
           // Debug: log cross-department electives
           const crossDept = electiveOptionsData.filter((e: any) => e.is_cross_department);
           if (crossDept.length > 0) {
@@ -391,8 +404,43 @@ export default function TeachingAssignmentsPage(){
         console.error('loadElectives failed', e);
       }
     }
+    
     loadElectives();
-  }, [selectedElectiveDept])
+  }, [selectedElectiveDept, selectedDept])
+
+  // Reload elective staff ONLY when top-level department filter changes (NOT elective section filter)
+  useEffect(() => {
+    async function loadElectiveStaff() {
+      try {
+        // ONLY use top-level dept filter for staff (ignore elective section's own filter)
+        const deptFilter = selectedDept;
+        const staffEndpoint = (canViewElectives || canAssignElectives) ? '/api/academics/hod-staff/?page_size=0' : '/api/academics/advisor-staff/?page_size=0'
+        const url = deptFilter && staffEndpoint.includes('hod-staff') ? `${staffEndpoint}&department=${deptFilter}` : staffEndpoint
+        const res = await fetchWithAuth(url)
+        let finalRes = res
+        if (res.status === 403 && staffEndpoint.includes('hod-staff')) {
+          console.warn('hod-staff returned 403 in loadElectiveStaff — trying advisor-staff')
+          const fallbackUrl = deptFilter ? `/api/academics/advisor-staff/?page_size=0&department=${deptFilter}` : '/api/academics/advisor-staff/?page_size=0'
+          try {
+            const fb = await fetchWithAuth(fallbackUrl)
+            if (fb.ok) finalRes = fb
+            else if (fb.status !== 200) return
+          } catch (e) { console.error('fallback failed', e); return }
+        }
+        if(!finalRes.ok) return
+        const data = await finalRes.json()
+        let staffList = data.results || data
+        // if backend didn't filter and we're on advisor endpoint, filter client-side
+        if(!staffEndpoint.includes('hod-staff') && deptFilter){
+          staffList = staffList.filter((s:any) => (s.department && s.department.id === deptFilter) || (s.department === deptFilter) )
+        }
+        setElectiveStaff(staffList)
+        console.log(`Loaded ${staffList.length} staff for elective section (top-level dept filter: ${deptFilter || 'all'})`)
+      } catch(e) { console.error('loadElectiveStaff failed', e) }
+    }
+    
+    loadElectiveStaff();
+  }, [selectedDept])
 
   // Helper functions for assignment management
   const findExistingAssignment = (sectionId: number, curricularRowId: number) => {
@@ -485,7 +533,7 @@ export default function TeachingAssignmentsPage(){
         })
         if (res.ok) { 
           alert('Updated successfully'); 
-          fetchData();
+          fetchData(true);
           return Promise.resolve()
         } else { 
           const txt = await res.text(); 
@@ -501,7 +549,7 @@ export default function TeachingAssignmentsPage(){
         })
         if (res.ok) { 
           alert('Assigned successfully'); 
-          fetchData();
+          fetchData(true);
           return Promise.resolve()
         } else { 
           const txt = await res.text(); 
@@ -1136,14 +1184,25 @@ export default function TeachingAssignmentsPage(){
                   </div>
                   <div className="space-y-3">
                     {(() => {
-                      // Get own electives matching this parent by ID
-                      const ownElectives = (electiveOptions || []).filter((e: any) => e.parent === parent.id);
-                      // Get cross-dept electives matching this parent by name
+                      // Get own electives matching this parent by ID and same department
+                      // Filter by parent ID to get electives that directly belong to this parent row
+                      // Also ensure the elective's department matches the parent's department
+                      const ownElectives = (electiveOptions || []).filter((e: any) => 
+                        e.parent === parent.id && 
+                        !e.is_cross_department &&
+                        e.department && 
+                        parent.department && 
+                        e.department.id === parent.department.id
+                      );
+                      // Get cross-dept electives matching this parent by name, regulation, and semester
+                      // This ensures we only show shared electives that belong to the same curriculum context
                       const parentName = (parent.course_name || parent.course_code || '').toLowerCase();
                       const crossDeptElectives = (electiveOptions || []).filter((e: any) => 
                         e.is_cross_department && 
                         e.parent_name && 
-                        e.parent_name.toLowerCase() === parentName
+                        e.parent_name.toLowerCase() === parentName &&
+                        e.regulation === parent.regulation &&
+                        e.semester === parent.semester
                       );
                       // Deduplicate: cross-dept electives shouldn't appear in own list
                       const allElectives = [

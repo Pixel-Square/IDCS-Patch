@@ -3,13 +3,17 @@ import CLASS_TYPES, { normalizeClassType } from '../../constants/classTypes';
 import CurriculumLayout from './CurriculumLayout';
 import { fetchDeptRows, updateDeptRow, approveDeptRow, createElective, fetchElectives } from '../../services/curriculum';
 import fetchWithAuth from '../../services/fetchAuth';
-import { Edit, Check, X, Save } from 'lucide-react';
+import { Edit, Check, X, Save, RefreshCw } from 'lucide-react';
+
+type Department = { id: number; code: string; name: string; short_name?: string };
 
 export default function DeptList() {
   const [rows, setRows] = useState<any[]>([]);
   const [editAll, setEditAll] = useState(false);
   const [savingAll, setSavingAll] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [allDepartments, setAllDepartments] = useState<Department[]>([]);
   const uniqueRegs = rows && rows.length ? Array.from(new Set(rows.map(r => r.regulation))) : [];
   const uniqueSems = rows && rows.length ? Array.from(new Set(rows.map(r => r.semester))).sort((a,b)=>a-b) : [];
   const [selectedReg, setSelectedReg] = useState<string | null>(uniqueRegs.length === 1 ? uniqueRegs[0] : (uniqueRegs[0] ?? null));
@@ -28,6 +32,42 @@ export default function DeptList() {
   useEffect(() => {
     fetchDeptRows().then(r => setRows(r)).catch(console.error).finally(() => setLoading(false));
   }, []);
+
+  // Fetch departments based on curriculum permissions
+  useEffect(() => {
+    fetchWithAuth('/api/curriculum/departments/')
+      .then(res => res.json())
+      .then(data => setAllDepartments(data.results || []))
+      .catch(err => console.error('Failed to fetch departments:', err));
+  }, []);
+
+  // Auto-refresh when page becomes visible (e.g., returning from admin tab)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && !loading && !refreshing) {
+        handleRefresh();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [loading, refreshing]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      const [freshRows, depsRes] = await Promise.all([
+        fetchDeptRows(),
+        fetchWithAuth('/api/curriculum/departments/')
+      ]);
+      setRows(freshRows);
+      const depsData = await depsRes.json();
+      setAllDepartments(depsData.results || []);
+    } catch (error) {
+      console.error('Failed to refresh:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function onSave(row: any) {
     try {
@@ -225,10 +265,18 @@ export default function DeptList() {
           <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center flex-shrink-0">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#e0e7ff"/><path d="M16 32V16h16v16H16zm2-2h12V18H18v12zm2-2v-8h8v8h-8z" fill="#6366f1"/></svg>
           </div>
-          <div>
+          <div className="flex-1">
             <h2 className="text-2xl font-bold text-gray-900">Department Curriculum</h2>
             <p className="text-sm text-gray-600 mt-1">View and manage department-specific curriculum entries.</p>
           </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+            title="Refresh data"
+          >
+            <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
         </div>
         {/* Filters */}
         {uniqueRegs.length > 0 && (
@@ -260,19 +308,22 @@ export default function DeptList() {
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Filter by Department</h3>
           <div className="flex flex-wrap gap-2">
-            {uniqueDepts.map(deptId => {
-              const isActive = currentDept === deptId;
-              const dept = rows.find(r => r.department.id === deptId)?.department;
-              const displayName = dept?.short_name || dept?.shortname || dept?.code || dept?.name || `Dept ${deptId}`;
+            {allDepartments.map(dept => {
+              const isActive = currentDept === dept.id;
+              const hasRows = uniqueDepts.includes(dept.id);
+              const displayName = dept.short_name || dept.code || dept.name || `Dept ${dept.id}`;
               return (
                 <button
-                  key={deptId}
-                  onClick={() => setCurrentDept(deptId)}
+                  key={dept.id}
+                  onClick={() => setCurrentDept(dept.id)}
                   className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
                     isActive
                       ? 'bg-blue-100 text-blue-700'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : hasRows
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
                   }`}
+                  title={hasRows ? '' : 'No curriculum rows for this department'}
                 >
                   {displayName}
                 </button>

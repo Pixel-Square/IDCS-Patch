@@ -81,6 +81,11 @@ class ElectiveChoiceTemplateDownloadView(APIView):
             ws.add_data_validation(dv_sem_type)
             dv_sem_type.add(f'D2:D1000')
             
+            # Format academic_year column (E) as text to prevent Excel auto-formatting
+            from openpyxl.styles import numbers
+            for row in range(2, 1001):  # Apply to rows 2-1000
+                ws[f'E{row}'].number_format = numbers.FORMAT_TEXT
+            
             # Adjust column widths
             ws.column_dimensions['A'].width = 20  # student_reg_no
             ws.column_dimensions['B'].width = 25  # elective_subject_code
@@ -213,9 +218,33 @@ class ElectiveChoiceBulkImportView(APIView):
                         academic_year = None
                         if ay_name:
                             try:
+                                # Try exact match first
                                 academic_year = AcademicYear.objects.filter(name=ay_name, parity=semester_type).first()
+                                
+                                # If not found, try normalizing the format
                                 if not academic_year:
-                                    errors.append(f'Row {idx}: Academic year "{ay_name}" with semester type "{semester_type}" not found')
+                                    # Convert "2025-26" to "2025-2026" or "2025-2026" to "2025-26"
+                                    import re
+                                    match = re.match(r'^(\d{4})-(\d{2,4})$', ay_name)
+                                    if match:
+                                        start_year = match.group(1)
+                                        end_year = match.group(2)
+                                        
+                                        # Try alternative formats
+                                        if len(end_year) == 2:
+                                            # Convert "2025-26" to "2025-2026"
+                                            full_end = start_year[:2] + end_year
+                                            academic_year = AcademicYear.objects.filter(name=f'{start_year}-{full_end}', parity=semester_type).first()
+                                        elif len(end_year) == 4:
+                                            # Convert "2025-2026" to "2025-26"
+                                            short_end = end_year[-2:]
+                                            academic_year = AcademicYear.objects.filter(name=f'{start_year}-{short_end}', parity=semester_type).first()
+                                
+                                if not academic_year:
+                                    # Get available academic years for better error message
+                                    available = AcademicYear.objects.filter(parity=semester_type).values_list('name', flat=True)[:5]
+                                    available_str = ', '.join(available) if available else 'none'
+                                    errors.append(f'Row {idx}: Academic year "{ay_name}" with semester type "{semester_type}" not found. Available: {available_str}')
                                     continue
                             except Exception as e:
                                 errors.append(f'Row {idx}: Error finding academic year: {str(e)}')
