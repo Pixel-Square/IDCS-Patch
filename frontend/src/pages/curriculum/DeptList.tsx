@@ -406,11 +406,9 @@ export default function DeptList() {
                         className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 edit-cell-input"
                         style={{ minWidth: 90 }}
                       >
-                        {CLASS_TYPES.map((ct) => {
-                          const key = normalizeClassType(String(ct));
-                          const label = String(ct).charAt(0).toUpperCase() + String(ct).slice(1).toLowerCase();
-                          return <option key={key} value={key}>{label}</option>;
-                        })}
+                        {CLASS_TYPES.map((ct) => (
+                          <option key={ct.value} value={ct.value}>{ct.label}</option>
+                        ))}
                       </select>
                     </td>
                     <td className="px-3 py-2 text-center whitespace-nowrap">

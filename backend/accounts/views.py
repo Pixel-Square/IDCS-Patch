@@ -81,95 +81,86 @@ def _set_verified_mobile_on_profile(user, mobile_number: str, verified_at):
 
 
 class MobileOtpRequestView(APIView):
-    permission_classes = (permissions.IsAuthenticated,)
+    # Allow both authenticated and unauthenticated users to request OTP
+    permission_classes = (permissions.AllowAny,)
 
     def post(self, request):
+        """Proxy OTP request to Node.js WhatsApp service."""
         raw_mobile = (request.data or {}).get('mobile_number')
         mobile = _normalize_mobile_number(raw_mobile)
         if not mobile:
             return Response({'detail': 'Invalid mobile number.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        now = timezone.now()
-        cooldown_seconds = 30
-        ttl_minutes = 5
+        # Use the Node.js WhatsApp service for OTP
+        endpoint = str(getattr(settings, 'OBE_WHATSAPP_API_URL', '') or '').strip()
+        api_key = str(getattr(settings, 'OBE_WHATSAPP_API_KEY', '') or '').strip()
+        
+        if not endpoint:
+            return Response({
+                'detail': 'WhatsApp OTP service not configured'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        
+        # Replace '/send-whatsapp' with '/mobile/request-otp' if needed
+        if endpoint.endswith('/send-whatsapp'):
+            endpoint = endpoint[:-len('/send-whatsapp')] + '/mobile/request-otp'
+        elif not endpoint.endswith('/mobile/request-otp'):
+            endpoint = endpoint.rstrip('/') + '/mobile/request-otp'
 
-        # Load configurable OTP template (IQAC-managed).
-        template_text = 'Your OTP is {otp}. It is valid for {expiry} minutes.'
+        payload = {
+            'api_key': api_key,
+            'mobile_number': mobile,
+        }
+
         try:
-            tpl = NotificationTemplate.objects.filter(code='mobile_verify', enabled=True).first()
-            if tpl and str(getattr(tpl, 'template', '') or '').strip():
-                template_text = str(tpl.template)
-            if tpl and getattr(tpl, 'expiry_minutes', None):
-                ttl_minutes = int(tpl.expiry_minutes)
-        except Exception:
-            # Fall back to defaults.
-            pass
-
-        backend = str(getattr(settings, 'SMS_BACKEND', 'console') or 'console').strip().lower()
-
-        last = (
-            MobileOtp.objects.filter(user=request.user, purpose='VERIFY_MOBILE', mobile_number=mobile)
-            .order_by('-created_at')
-            .first()
-        )
-        if last and last.created_at and (now - last.created_at).total_seconds() < cooldown_seconds:
-            retry_after = int(cooldown_seconds - (now - last.created_at).total_seconds())
-            return Response(
-                {'detail': 'Please wait before requesting another OTP.', 'retry_after_seconds': max(retry_after, 1)},
-                status=429,
-            )
-
-        # For non-Twilio backends we generate a local OTP.
-        # For Twilio Verify, Twilio generates/sends the OTP, but we still
-        # create a row to enforce cooldown/attempt limits.
-        code = MobileOtp.generate_code(6)
-        otp = MobileOtp(
-            user=request.user,
-            purpose='VERIFY_MOBILE',
-            mobile_number=mobile,
-            expires_at=now + timedelta(minutes=ttl_minutes),
-        )
-        otp.set_code(code)
-        otp.save()
-
-        if backend == 'twilio':
-            sms_message = ''
-        else:
-            full_name = ''
-            try:
-                full_name = str(getattr(request.user, 'get_full_name', lambda: '')() or '').strip()
-            except Exception:
-                full_name = ''
-            ctx = {
-                '{otp}': code,
-                '{expiry}': str(ttl_minutes),
-                '{mobile}': str(mobile),
-                '{username}': str(getattr(request.user, 'username', '') or ''),
-                '{name}': full_name or str(getattr(request.user, 'username', '') or ''),
-            }
-            sms_message = str(template_text)
-            for k, v in ctx.items():
-                sms_message = sms_message.replace(k, v)
-        sms = send_sms(mobile, sms_message)
-        if not sms.ok:
-            otp.delete()
-            # surface delivery error (useful when WhatsApp client is not ready)
-            detail = 'Failed to send OTP. Please try again.'
-            try:
-                if getattr(sms, 'message', None):
-                    detail = f'{detail} ({sms.message})'
-            except Exception:
-                pass
-            return Response({'detail': detail}, status=status.HTTP_502_BAD_GATEWAY)
-
-        return Response(
-            {
-                'ok': True,
-                'mobile_number': mobile,
-                'expires_in_seconds': ttl_minutes * 60,
-                'cooldown_seconds': cooldown_seconds,
-            }
-        )
+            import requests
+            timeout = float(getattr(settings, 'OBE_WHATSAPP_TIMEOUT_SECONDS', 15.0) or 15.0)
+            response = requests.post(endpoint, json=payload, timeout=timeout)
+            
+            status_code = response.status_code
+            data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+            
+            if 200 <= status_code < 300:
+                # Optionally store OTP request in database for tracking (if user is authenticated)
+                if request.user and request.user.is_authenticated:
+                    try:
+                        from datetime import timedelta
+                        now = timezone.now()
+                        expires_in_seconds = data.get('expires_in_seconds', 300)
+                        
+                        # Create a tracking record (without storing the actual OTP code)
+                        otp = MobileOtp(
+                            user=request.user,
+                            purpose='VERIFY_MOBILE',
+                            mobile_number=mobile,
+                            expires_at=now + timedelta(seconds=expires_in_seconds),
+                        )
+                        # Don't store the code since it's managed by Node.js
+                        otp.code_hash = ''  # Empty hash
+                        otp.save()
+                    except Exception as e:
+                        log.warning(f'Failed to store OTP tracking record: {e}')
+                
+                return Response(data, status=status_code)
+            else:
+                # Forward the error from Node.js
+                error_detail = data.get('error', 'Failed to send OTP')
+                if 'detail' in data:
+                    error_detail = f"{error_detail} - {data['detail']}"
+                return Response({'detail': error_detail}, status=status_code)
+                
+        except requests.exceptions.Timeout:
+            return Response({
+                'detail': 'WhatsApp service timeout. Please try again.'
+            }, status=status.HTTP_504_GATEWAY_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'detail': 'Cannot connect to WhatsApp service. Please try again later.'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as e:
+            log.exception('Failed to request OTP from Node.js service')
+            return Response({
+                'detail': f'Failed to send OTP: {str(e)}'
+            }, status=status.HTTP_502_BAD_GATEWAY)
 
 
 class NotificationTemplateApiView(APIView):
@@ -224,110 +215,150 @@ class NotificationTemplateApiView(APIView):
 
 
 class MobileOtpVerifyView(APIView):
+    # Require authentication for verification to link the verified mobile to user account
     permission_classes = (permissions.IsAuthenticated,)
 
     def post(self, request):
+        """Proxy OTP verification to Node.js WhatsApp service and update user profile."""
         raw_mobile = (request.data or {}).get('mobile_number')
         code = str((request.data or {}).get('otp') or '').strip()
 
         mobile = _normalize_mobile_number(raw_mobile)
         if not mobile:
             return Response({'detail': 'Invalid mobile number.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not code or not re.fullmatch(r'\d{4,8}', code):
-            return Response({'detail': 'Invalid OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not code:
+            return Response({'detail': 'OTP is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        now = timezone.now()
-        otp = (
-            MobileOtp.objects.filter(
-                user=request.user,
-                purpose='VERIFY_MOBILE',
-                mobile_number=mobile,
-                verified_at__isnull=True,
-            )
-            .order_by('-created_at')
-            .first()
-        )
-        if not otp:
-            return Response({'detail': 'OTP not found. Please request a new OTP.'}, status=status.HTTP_400_BAD_REQUEST)
-        if otp.attempts >= 5:
-            return Response({'detail': 'Too many attempts. Please request a new OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Use the Node.js WhatsApp service for OTP verification
+        endpoint = str(getattr(settings, 'OBE_WHATSAPP_API_URL', '') or '').strip()
+        api_key = str(getattr(settings, 'OBE_WHATSAPP_API_KEY', '') or '').strip()
+        
+        if not endpoint:
+            return Response({
+                'detail': 'WhatsApp OTP service not configured'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        
+        # Replace '/send-whatsapp' with '/mobile/verify-otp' if needed
+        if endpoint.endswith('/send-whatsapp'):
+            endpoint = endpoint[:-len('/send-whatsapp')] + '/mobile/verify-otp'
+        elif not endpoint.endswith('/mobile/verify-otp'):
+            endpoint = endpoint.rstrip('/') + '/mobile/verify-otp'
 
-        backend = str(getattr(settings, 'SMS_BACKEND', 'console') or 'console').strip().lower()
-        if backend != 'twilio' and otp.is_expired():
-            return Response({'detail': 'OTP expired. Please request a new OTP.'}, status=status.HTTP_400_BAD_REQUEST)
-        if backend == 'twilio':
-            res = verify_otp(mobile, code)
-            if not res.approved:
-                otp.attempts = int(otp.attempts or 0) + 1
-                otp.save(update_fields=['attempts'])
-                return Response({'detail': 'Invalid or expired OTP.'}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            if not otp.check_code(code):
-                otp.attempts = int(otp.attempts or 0) + 1
-                otp.save(update_fields=['attempts'])
-                return Response({'detail': 'Incorrect OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+        payload = {
+            'api_key': api_key,
+            'mobile_number': mobile,
+            'otp': code,
+        }
 
-        otp.verified_at = now
-        otp.save(update_fields=['verified_at'])
-
-        # Persist to profile (student/staff) and also mirror to User.mobile_no
-        _set_verified_mobile_on_profile(request.user, mobile, now)
         try:
-            request.user.mobile_no = mobile
-            request.user.save(update_fields=['mobile_no'])
-        except Exception:
-            pass
+            import requests
+            timeout = float(getattr(settings, 'OBE_WHATSAPP_TIMEOUT_SECONDS', 15.0) or 15.0)
+            response = requests.post(endpoint, json=payload, timeout=timeout)
+            
+            status_code = response.status_code
+            data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+            
+            if 200 <= status_code < 300:
+                # OTP verified successfully by Node.js service
+                # Now update the user's profile with the verified mobile number
+                now = timezone.now()
+                
+                # Persist to profile (student/staff) and also mirror to User.mobile_no
+                _set_verified_mobile_on_profile(request.user, mobile, now)
+                try:
+                    request.user.mobile_no = mobile
+                    request.user.save(update_fields=['mobile_no'])
+                except Exception as e:
+                    log.warning(f'Failed to save mobile_no to User: {e}')
 
-        # Cleanup older OTP rows for this mobile
-        try:
-            MobileOtp.objects.filter(user=request.user, purpose='VERIFY_MOBILE', mobile_number=mobile).exclude(pk=otp.pk).delete()
-        except Exception:
-            pass
+                # Mark OTP as verified in database if it exists
+                try:
+                    otp = (
+                        MobileOtp.objects.filter(
+                            user=request.user,
+                            purpose='VERIFY_MOBILE',
+                            mobile_number=mobile,
+                            verified_at__isnull=True,
+                        )
+                        .order_by('-created_at')
+                        .first()
+                    )
+                    if otp:
+                        otp.verified_at = now
+                        otp.save(update_fields=['verified_at'])
+                        
+                        # Cleanup older OTP rows for this mobile
+                        MobileOtp.objects.filter(
+                            user=request.user,
+                            purpose='VERIFY_MOBILE',
+                            mobile_number=mobile
+                        ).exclude(pk=otp.pk).delete()
+                except Exception as e:
+                    log.warning(f'Failed to update OTP tracking record: {e}')
 
-        # Best-effort WhatsApp confirmation message after verification.
-        # This is independent of SMS_BACKEND so users who verify via SMS can still
-        # receive a WhatsApp confirmation when the WhatsApp gateway is configured.
-        whatsapp_confirmation = None
-        try:
-            template_text = (
-                'IDCS: Your mobile number {mobile} has been verified successfully. '
-                'You now have access to your Academic Panel and can manage your requests. Thank you.'
-            )
-            try:
-                tpl = NotificationTemplate.objects.filter(code='mobile_verified', enabled=True).first()
-                if tpl and str(getattr(tpl, 'template', '') or '').strip():
-                    template_text = str(tpl.template)
-            except Exception:
-                pass
+                # Send WhatsApp confirmation (optional, best-effort)
+                try:
+                    template_text = (
+                        'IDCS: Your mobile number {mobile} has been verified successfully. '
+                        'You now have access to your Academic Panel. Thank you.'
+                    )
+                    try:
+                        tpl = NotificationTemplate.objects.filter(code='mobile_verified', enabled=True).first()
+                        if tpl and str(getattr(tpl, 'template', '') or '').strip():
+                            template_text = str(tpl.template)
+                    except Exception:
+                        pass
 
-            full_name = ''
-            try:
-                full_name = str(getattr(request.user, 'get_full_name', lambda: '')() or '').strip()
-            except Exception:
-                full_name = ''
+                    full_name = ''
+                    try:
+                        full_name = str(getattr(request.user, 'get_full_name', lambda: '')() or '').strip()
+                    except Exception:
+                        pass
 
-            ctx = {
-                '{mobile}': str(mobile),
-                '{username}': str(getattr(request.user, 'username', '') or ''),
-                '{name}': full_name or str(getattr(request.user, 'username', '') or ''),
-            }
-            msg = str(template_text)
-            for k, v in ctx.items():
-                msg = msg.replace(k, v)
+                    ctx = {
+                        '{mobile}': str(mobile),
+                        '{username}': str(getattr(request.user, 'username', '') or ''),
+                        '{name}': full_name or str(getattr(request.user, 'username', '') or ''),
+                    }
+                    confirmation_message = str(template_text)
+                    for k, v in ctx.items():
+                        confirmation_message = confirmation_message.replace(k, v)
+                    
+                    # Send confirmation via WhatsApp
+                    send_whatsapp(mobile, confirmation_message)
+                except Exception as e:
+                    log.warning(f'Failed to send WhatsApp confirmation: {e}')
 
-            outcome = send_whatsapp(mobile, msg)
-            whatsapp_confirmation = {'ok': bool(outcome.ok), 'message': str(getattr(outcome, 'message', '') or '')}
-            if not outcome.ok:
-                log.warning('WhatsApp verify-confirmation not delivered: %s', whatsapp_confirmation.get('message'))
-        except Exception:
-            log.exception('Failed to send WhatsApp mobile-verified confirmation')
-
-        # Return updated me payload for convenience
-        serializer = MeSerializer(request.user)
-        resp = {'ok': True, 'me': serializer.data}
-        if whatsapp_confirmation is not None:
-            resp['whatsapp_confirmation'] = whatsapp_confirmation
-        return Response(resp)
+                # Return success with updated user info
+                from .serializers import MeSerializer
+                me_data = MeSerializer(request.user).data
+                
+                return Response({
+                    'ok': True,
+                    'mobile_verified': True,
+                    'mobile_number': mobile,
+                    'me': me_data,
+                }, status=status.HTTP_200_OK)
+            else:
+                # Forward the error from Node.js
+                error_detail = data.get('error', 'Failed to verify OTP')
+                if 'detail' in data:
+                    error_detail = f"{error_detail}: {data['detail']}"
+                return Response({'detail': error_detail}, status=status_code)
+                
+        except requests.exceptions.Timeout:
+            return Response({
+                'detail': 'WhatsApp service timeout. Please try again.'
+            }, status=status.HTTP_504_GATEWAY_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'detail': 'Cannot connect to WhatsApp service. Please try again later.'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as e:
+            log.exception('Failed to verify OTP with Node.js service')
+            return Response({
+                'detail': f'Failed to verify OTP: {str(e)}'
+            }, status=status.HTTP_502_BAD_GATEWAY)
 
 
 class MobileRemoveView(APIView):
