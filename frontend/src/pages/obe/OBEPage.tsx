@@ -8,7 +8,9 @@ import '../../styles/obe-theme.css';
 
 // OBE/marks/COAttainment fetch and types removed
 
-import { getCachedMe } from '../../services/auth';
+import { getCachedMe, getMe } from '../../services/auth';
+import ClassResultAnalysisPage from './class_result_analysis/ClassResultAnalysisPage';
+import { fetchAssignedSubjects } from '../../services/staff';
 import {
   fetchMyTeachingAssignments,
   TeachingAssignmentItem,
@@ -106,7 +108,7 @@ type OBEItem = {
   achieved: string;
 };
 
-type TabKey = 'courses' | 'exam' | 'progress';
+type TabKey = 'courses' | 'exam' | 'progress' | 'class_result';
 
 type ObeProgressExam = {
   assessment: string;
@@ -142,10 +144,13 @@ type ObeProgressSection = {
 };
 
 type ObeProgressResponse = {
-  role: 'HOD' | 'ADVISOR' | 'FACULTY' | string;
+  role: 'HOD' | 'ADVISOR' | 'FACULTY' | 'IQAC' | string;
   academic_year: { id: number | null; name: string | null } | null;
   department: { id: number | null; code: string | null; name: string | null; short_name: string | null } | null;
   sections: ObeProgressSection[];
+  // IQAC-main only fields
+  selected_department_id?: number | null;
+  departments?: Array<{ id: number | null; code: string | null; name: string | null; short_name: string | null }>;
 };
 
 export default function OBEPage(): JSX.Element {
@@ -156,29 +161,74 @@ export default function OBEPage(): JSX.Element {
 
   const [me, setMe] = useState<Me | null>(null);
 
+  const normalizeRoleName = (r: any): string => {
+    if (typeof r === 'string') return r;
+    if (r && typeof r === 'object') {
+      const name = (r as any).name;
+      if (typeof name === 'string') return name;
+    }
+    return String(r ?? '');
+  };
+
   const cachedRoles = useMemo((): string[] => {
     try {
       const raw = window.localStorage.getItem('roles');
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.map((r) => String(r)) : [];
+      return Array.isArray(parsed) ? parsed.map((r) => normalizeRoleName(r)) : [];
     } catch {
       return [];
     }
   }, []);
 
+  // Read username synchronously from localStorage so isIqacMain works even before me loads
+  const cachedUsername = useMemo((): string => {
+    try {
+      const raw = window.localStorage.getItem('me');
+      const parsed = raw ? JSON.parse(raw) : null;
+      return String(parsed?.username || '').trim();
+    } catch {
+      return '';
+    }
+  }, []);
+
   const effectiveRoles = useMemo((): string[] => {
     const fromMe = (me as any)?.roles;
-    if (Array.isArray(fromMe)) return fromMe.map((r) => String(r));
+    if (Array.isArray(fromMe)) return fromMe.map((r) => normalizeRoleName(r));
     return cachedRoles;
   }, [me, cachedRoles]);
 
+  const isIqacMain = useMemo(() => {
+    // Primary: use the is_iqac_main flag returned directly by the me/ API
+    if ((me as any)?.is_iqac_main === true) return true;
+    // Fallback: check cached me in localStorage (set after login / getMe call)
+    try {
+      const raw = window.localStorage.getItem('me');
+      const cached = raw ? JSON.parse(raw) : null;
+      if (cached?.is_iqac_main === true) return true;
+    } catch { /* ignore */ }
+    // Last resort: check roles + username
+    const rolesUpper = new Set(effectiveRoles.map((r) => String(r || '').trim().toUpperCase()));
+    if (!rolesUpper.has('IQAC')) return false;
+    const username = String((me as any)?.username || '').trim() || cachedUsername;
+    return username === '000000';
+  }, [effectiveRoles, me, cachedUsername]);
+
   const canViewProgress = useMemo(() => {
     const rolesUpper = new Set(effectiveRoles.map((r) => String(r || '').trim().toUpperCase()));
-    return rolesUpper.has('HOD') || rolesUpper.has('AHOD') || rolesUpper.has('ADVISOR');
+    return rolesUpper.has('HOD') || rolesUpper.has('AHOD') || rolesUpper.has('ADVISOR') || isIqacMain;
+  }, [effectiveRoles, isIqacMain]);
+
+  const isAcademicViewer = useMemo(() => {
+    const rolesUpper = new Set(effectiveRoles.map((r) => String(r || '').trim().toUpperCase()));
+    return rolesUpper.has('IQAC') || rolesUpper.has('HAA');
   }, [effectiveRoles]);
 
   const [assignments, setAssignments] = useState<TeachingAssignmentItem[]>([]);
   const [loadingAssignments, setLoadingAssignments] = useState(false);
+  const [assignmentsError, setAssignmentsError] = useState<string | null>(null);
+
+  const [academicCourses, setAcademicCourses] = useState<Array<{ subject_code: string; subject_name: string; class_type?: string | null }>>([]);
+  const [loadingAcademicCourses, setLoadingAcademicCourses] = useState(false);
 
   // Import wizard state (Exam Management)
   const [importWizardOpen, setImportWizardOpen] = useState(false);
@@ -212,6 +262,13 @@ export default function OBEPage(): JSX.Element {
   const [progressError, setProgressError] = useState<string | null>(null);
   const [progressData, setProgressData] = useState<ObeProgressResponse | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<number | null>(null);
+  const [progressDepartmentId, setProgressDepartmentId] = useState<number | null>(null);
+
+  // IQAC main: lightweight department list for the drill-down cards grid
+  type IqacDeptStat = { id: number; code: string | null; name: string; short_name: string | null; section_count: number; course_count: number };
+  const [progressDepts, setProgressDepts] = useState<IqacDeptStat[]>([]);
+  const [progressDeptsLoading, setProgressDeptsLoading] = useState(false);
+  const [progressDeptsError, setProgressDeptsError] = useState<string | null>(null);
 
   // Progress chip modal state
   type ProgressModalMeta = {
@@ -280,23 +337,114 @@ export default function OBEPage(): JSX.Element {
 
   // OBE/marks/COAttainment effect removed
 
+  // Load `me` once on mount — independent of any other state so it always runs.
   useEffect(() => {
-    // Use cached user data for Faculty ID display
     const cachedUser = getCachedMe();
-    setMe(cachedUser as Me);
+    // Use cache immediately for fast render, but always refresh if is_iqac_main
+    // field is absent (old cache before backend added the field).
+    if (cachedUser) {
+      setMe(cachedUser as Me);
+      // If the old cache doesn't have is_iqac_main, refresh silently so the
+      // Progress tab appears on this load without needing a logout/login.
+      if (!('is_iqac_main' in cachedUser)) {
+        (async () => {
+          try {
+            const fresh = await getMe();
+            setMe(fresh as Me);
+          } catch { /* ignore */ }
+        })();
+      }
+    } else {
+      (async () => {
+        try {
+          const fresh = await getMe();
+          setMe(fresh as Me);
+        } catch { /* ignore */ }
+      })();
+    }
+  }, []);
 
+  useEffect(() => {
     // load teaching assignments (non-blocking; 401 treated as empty)
     (async () => {
       try {
         setLoadingAssignments(true);
-        const r = await fetchMyTeachingAssignments();
-        if (Array.isArray(r)) setAssignments(r);
+        setAssignmentsError(null);
+
+        let list: TeachingAssignmentItem[] = [];
+        try {
+          const r = await fetchMyTeachingAssignments();
+          if (Array.isArray(r)) list = r;
+        } catch (e: any) {
+          // keep error for UI; we'll try fallback below
+          setAssignmentsError(e?.message ? String(e.message) : 'Failed to load courses');
+        }
+
+        // Fallback: the staff Assigned Subjects endpoint is often more reliable
+        // in deployments where teaching assignments are filtered differently.
+        if (!Array.isArray(list) || list.length === 0) {
+          try {
+            const alt = await fetchAssignedSubjects();
+            if (Array.isArray(alt)) list = alt as any;
+          } catch (e: any) {
+            if (!assignmentsError) {
+              setAssignmentsError(e?.message ? String(e.message) : 'Failed to load courses');
+            }
+          }
+        }
+
+        setAssignments(Array.isArray(list) ? list : []);
       } catch (e) {
         // ignore errors here to avoid blocking UI
         console.warn('Failed to load teaching assignments', e);
         setAssignments([]);
       } finally {
         setLoadingAssignments(false);
+      }
+    })();
+
+    // Academic (IQAC/HAA) users may not have teaching assignments; fall back to curriculum courses.
+    (async () => {
+      if (!isAcademicViewer) return;
+      try {
+        setLoadingAcademicCourses(true);
+        const [deptRes, elecRes] = await Promise.all([
+          fetchWithFallback('/api/curriculum/department/', { headers: { ...authHeaders() } }).then((r) => (r.ok ? r.json() : [] as any[])).catch(() => []),
+          fetchWithFallback('/api/curriculum/elective/?page_size=0', { headers: { ...authHeaders() } }).then((r) => (r.ok ? r.json() : [] as any[])).catch(() => []),
+        ]);
+
+        const deptRows = Array.isArray(deptRes) ? deptRes : [];
+        const electiveRows = Array.isArray(elecRes) ? elecRes : [];
+
+        const map = new Map<string, { subject_code: string; subject_name: string; class_type?: string | null }>();
+
+        for (const row of deptRows) {
+          const code = String((row as any)?.course_code || '').trim();
+          if (!code) continue;
+          const name = String((row as any)?.course_name || '').trim();
+          const classType = ((row as any)?.class_type == null ? null : String((row as any)?.class_type).trim()) || null;
+          const existing = map.get(code);
+          if (!existing || (!existing.subject_name && name)) {
+            map.set(code, { subject_code: code, subject_name: name, class_type: classType });
+          }
+        }
+
+        for (const row of electiveRows) {
+          const code = String((row as any)?.course_code || '').trim();
+          if (!code) continue;
+          const name = String((row as any)?.course_name || '').trim();
+          const classType = ((row as any)?.class_type == null ? null : String((row as any)?.class_type).trim()) || null;
+          const existing = map.get(code);
+          if (!existing || (!existing.subject_name && name)) {
+            map.set(code, { subject_code: code, subject_name: name, class_type: classType });
+          }
+        }
+
+        setAcademicCourses(Array.from(map.values()).sort((a, b) => a.subject_code.localeCompare(b.subject_code)));
+      } catch (e) {
+        setAcademicCourses([]);
+      } finally {
+        setLoadingAcademicCourses(false);
       }
     })();
 
@@ -311,11 +459,11 @@ export default function OBEPage(): JSX.Element {
         // ignore
       }
     })();
-  }, []);
+  }, [isAcademicViewer]);
 
-  // Guard: Progress is only for HOD / Advisor.
+  // Guard: Progress / Class Result are only for HOD / Advisor.
   useEffect(() => {
-    if (activeTab === 'progress' && !canViewProgress) {
+    if ((activeTab === 'progress' || activeTab === 'class_result') && !canViewProgress) {
       setActiveTab('courses');
     }
   }, [activeTab, canViewProgress]);
@@ -609,17 +757,44 @@ export default function OBEPage(): JSX.Element {
   const [examUploadStatus, setExamUploadStatus] = useState<'idle'|'uploading'|'success'|'error'>('idle');
   const [examUploadMessage, setExamUploadMessage] = useState<string | null>(null);
 
-  // Fetch progress when switching to Progress tab (lazy-load)
+  // IQAC main: fetch lightweight department list for the cards grid
   useEffect(() => {
-    if (activeTab !== 'progress') return;
+    if (activeTab !== 'progress' && activeTab !== 'class_result') return;
+    if (!isIqacMain) return;
+    if (progressDeptsLoading || progressDepts.length > 0) return;
+    (async () => {
+      try {
+        setProgressDeptsLoading(true);
+        setProgressDeptsError(null);
+        const res = await fetchWithFallback('/api/obe/progress/departments', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        });
+        if (!res.ok) throw new Error(`Failed to load departments (${res.status})`);
+        const js = await res.json();
+        setProgressDepts(Array.isArray(js.departments) ? js.departments : []);
+      } catch (e: any) {
+        setProgressDeptsError(e?.message || 'Failed to load departments');
+      } finally {
+        setProgressDeptsLoading(false);
+      }
+    })();
+  }, [activeTab, isIqacMain, progressDeptsLoading, progressDepts.length]);
+
+  // Fetch progress when switching to Progress or Class Result tab (lazy-load)
+  useEffect(() => {
+    if (activeTab !== 'progress' && activeTab !== 'class_result') return;
     if (!canViewProgress) return;
     if (progressLoading || progressData) return;
+    // IQAC main: don't fetch sections until a specific department is chosen
+    if (isIqacMain && progressDepartmentId === null) return;
 
     (async () => {
       try {
         setProgressLoading(true);
         setProgressError(null);
-        const res = await fetchWithFallback('/api/obe/progress', {
+        const deptParam = isIqacMain ? `?department_id=${String(progressDepartmentId)}` : '';
+        const res = await fetchWithFallback(`/api/obe/progress${deptParam}`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -632,6 +807,15 @@ export default function OBEPage(): JSX.Element {
         }
         const js = (await res.json()) as ObeProgressResponse;
         setProgressData(js);
+
+        // Keep department selector in sync for IQAC main.
+        if (isIqacMain) {
+          const returnedSelected = (js as any)?.selected_department_id;
+          if (progressDepartmentId === null && typeof returnedSelected === 'number') {
+            setProgressDepartmentId(returnedSelected);
+          }
+        }
+
         // Default selected section: first section (if any)
         if (js.sections && js.sections.length > 0) {
           const first = js.sections[0];
@@ -643,7 +827,7 @@ export default function OBEPage(): JSX.Element {
         setProgressLoading(false);
       }
     })();
-  }, [activeTab, progressLoading, progressData]);
+  }, [activeTab, canViewProgress, isIqacMain, progressDepartmentId, progressLoading, progressData]);
 
   async function handleExamUploadFile(f: File) {
     setExamUploadStatus('uploading');
@@ -890,6 +1074,25 @@ export default function OBEPage(): JSX.Element {
                     📈 Progress
                   </button>
                 )}
+                {canViewProgress && (
+                  <button
+                    onClick={() => setActiveTab('class_result')}
+                    style={{
+                      padding: '10px 24px',
+                      borderRadius: 8,
+                      border: 'none',
+                      background: activeTab === 'class_result' ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' : 'transparent',
+                      color: activeTab === 'class_result' ? '#fff' : '#64748b',
+                      cursor: 'pointer',
+                      fontWeight: activeTab === 'class_result' ? 600 : 500,
+                      fontSize: 15,
+                      transition: 'all 0.2s ease',
+                      boxShadow: activeTab === 'class_result' ? '0 2px 8px rgba(99,102,241,0.25)' : 'none'
+                    }}
+                  >
+                    📊 Class Result Analysis
+                  </button>
+                )}
               </div>
 
               {/* Courses tab content */}
@@ -908,20 +1111,26 @@ export default function OBEPage(): JSX.Element {
                     }}
                   >
                     {/* Course list: show assignments when available (safe fetch) */}
-                    {loadingAssignments ? (
+                    {loadingAssignments || (isAcademicViewer && loadingAcademicCourses) ? (
                       <div style={{ gridColumn: '1/-1', color: '#64748b', fontSize: 16, textAlign: 'center', padding: 60, background: '#fff', borderRadius: 12 }}>⏳ Loading courses…</div>
-                    ) : assignments.length === 0 ? (
+                    ) : assignmentsError && assignments.length === 0 && !(isAcademicViewer && academicCourses.length > 0) ? (
+                      <div style={{ gridColumn: '1/-1', color: '#b91c1c', fontSize: 16, textAlign: 'center', padding: 60, background: '#fff', borderRadius: 12, border: '2px dashed #fecaca' }}>
+                        ⚠️ Failed to load courses.<br />
+                        <span style={{ fontSize: 14, marginTop: 12, display: 'block', color: '#7f1d1d' }}>{assignmentsError}</span>
+                      </div>
+                    ) : assignments.length === 0 && !(isAcademicViewer && academicCourses.length > 0) ? (
                       <div style={{ gridColumn: '1/-1', color: '#94a3b8', fontSize: 18, textAlign: 'center', padding: 60, background: '#fff', borderRadius: 12, border: '2px dashed #e2e8f0' }}>
                         📭 No courses found. You have no teaching assignments.<br />
                         <span style={{ fontSize: 14, marginTop: 12, display: 'block' }}>(If you expect to see courses here, please check with your backend/API or contact admin.)</span>
                       </div>
                     ) : (
-                      assignments
-                        .reduce((acc: TeachingAssignmentItem[], it) => {
-                          if (!acc.some(a => a.subject_code === it.subject_code)) acc.push(it);
-                          return acc;
-                        }, [] as TeachingAssignmentItem[])
-                        .map((it) => (
+                      (assignments.length > 0
+                        ? assignments.reduce((acc: TeachingAssignmentItem[], it) => {
+                            if (!acc.some(a => a.subject_code === it.subject_code)) acc.push(it);
+                            return acc;
+                          }, [] as TeachingAssignmentItem[])
+                        : academicCourses
+                      ).map((it: any) => (
                           <div
                             key={it.subject_code}
                             onClick={() => navigateToCourse(it.subject_code)}
@@ -1224,6 +1433,13 @@ export default function OBEPage(): JSX.Element {
                 </section>
               )}
 
+              {/* Class Result Analysis tab */}
+              {activeTab === 'class_result' && canViewProgress && (
+                <section aria-label="Class Result Analysis" style={{ background: '#f8fafc', padding: 0, borderRadius: 16, overflow: 'hidden' }}>
+                  <ClassResultAnalysisPage canViewProgress={canViewProgress} />
+                </section>
+              )}
+
               {/* Progress overview tab */}
               {activeTab === 'progress' && canViewProgress && (
                 <section aria-label="OBE progress overview" style={{ background: '#f8fafc', padding: 0, borderRadius: 16 }}>
@@ -1234,7 +1450,11 @@ export default function OBEPage(): JSX.Element {
                         📊 Section-wise Exam Progress
                       </div>
                       <div style={{ fontSize: 14, color: '#94a3b8', marginTop: 4 }}>
-                        {progressData?.role === 'HOD' && progressData.department
+                        {isIqacMain && progressDepartmentId === null
+                          ? 'IQAC view • Select a department'
+                          : isIqacMain && progressDepartmentId !== null
+                          ? (() => { const d = progressDepts.find((x) => x.id === progressDepartmentId); return `IQAC view • ${d?.short_name || d?.code || d?.name || 'Department'}`; })()
+                          : progressData?.role === 'HOD' && progressData?.department
                           ? `HOD view • ${progressData.department.short_name || progressData.department.code || progressData.department.name || ''}`
                           : progressData?.role === 'ADVISOR'
                             ? 'Advisor view • Your advised sections'
@@ -1249,24 +1469,132 @@ export default function OBEPage(): JSX.Element {
                   </div>
 
                   <div style={{ padding: '20px 28px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {progressLoading && (
-                      <div style={{ padding: 48, textAlign: 'center', color: '#64748b', fontSize: 15 }}>
-                        <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
-                        Loading progress data…
-                      </div>
+
+                    {/* ── IQAC main: Department cards grid (no dept selected) ── */}
+                    {isIqacMain && progressDepartmentId === null && (
+                      <>
+                        {progressDeptsLoading && (
+                          <div style={{ padding: 60, textAlign: 'center', color: '#64748b', fontSize: 15 }}><div style={{ fontSize: 32, marginBottom: 10 }}>⏳</div>Loading departments…</div>
+                        )}
+                        {progressDeptsError && !progressDeptsLoading && (
+                          <div style={{ padding: 16, borderRadius: 12, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', fontSize: 14 }}>❌ {progressDeptsError}</div>
+                        )}
+                        {!progressDeptsLoading && !progressDeptsError && progressDepts.length === 0 && (
+                          <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>No departments found.</div>
+                        )}
+                        {!progressDeptsLoading && progressDepts.length > 0 && (
+                          <div>
+                            <div style={{ marginBottom: 20 }}>
+                              <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 4 }}>All Departments</div>
+                              <div style={{ fontSize: 13, color: '#64748b' }}>Click a department to view its sections and OBE progress</div>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+                              {progressDepts.map((dept) => {
+                                const DEPT_COLORS = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4'];
+                                const colorIdx = Math.abs((dept.id || 0) % DEPT_COLORS.length);
+                                const color = DEPT_COLORS[colorIdx];
+                                const initials = (dept.short_name || dept.code || dept.name || '?').slice(0, 3).toUpperCase();
+                                return (
+                                  <button
+                                    key={dept.id}
+                                    onClick={() => { setProgressDepartmentId(dept.id); setProgressData(null); setSelectedSectionId(null); }}
+                                    style={{
+                                      background: '#fff',
+                                      border: `2px solid ${color}30`,
+                                      borderRadius: 18,
+                                      padding: '22px 20px 18px',
+                                      cursor: 'pointer',
+                                      textAlign: 'left',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: 12,
+                                      boxShadow: `0 2px 12px ${color}12`,
+                                      transition: 'all 0.18s ease',
+                                      position: 'relative',
+                                      overflow: 'hidden',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      (e.currentTarget as HTMLButtonElement).style.borderColor = color;
+                                      (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 8px 32px ${color}30`;
+                                      (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-3px)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      (e.currentTarget as HTMLButtonElement).style.borderColor = `${color}30`;
+                                      (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 2px 12px ${color}12`;
+                                      (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+                                    }}
+                                  >
+                                    {/* Background accent */}
+                                    <div style={{ position: 'absolute', top: -18, right: -18, width: 80, height: 80, borderRadius: '50%', background: `${color}15`, pointerEvents: 'none' }} />
+                                    {/* Icon */}
+                                    <div style={{ width: 48, height: 48, borderRadius: 14, background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${color}30` }}>
+                                      <span style={{ fontSize: 15, fontWeight: 900, color, letterSpacing: '0.02em' }}>{initials}</span>
+                                    </div>
+                                    {/* Name */}
+                                    <div>
+                                      <div style={{ fontSize: 14, fontWeight: 900, color: '#0f172a', lineHeight: 1.3, marginBottom: 2 }}>
+                                        {dept.short_name || dept.code || dept.name}
+                                      </div>
+                                      {dept.short_name && dept.name && dept.short_name !== dept.name && (
+                                        <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.4 }}>{dept.name}</div>
+                                      )}
+                                    </div>
+                                    {/* Stats */}
+                                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                      <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 999, background: `${color}12`, color, fontWeight: 700, border: `1px solid ${color}25` }}>
+                                        {dept.section_count} section{dept.section_count !== 1 ? 's' : ''}
+                                      </span>
+                                      <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 999, background: '#f1f5f9', color: '#475569', fontWeight: 700 }}>
+                                        {dept.course_count} course{dept.course_count !== 1 ? 's' : ''}
+                                      </span>
+                                    </div>
+                                    {/* Arrow */}
+                                    <div style={{ position: 'absolute', bottom: 16, right: 16, fontSize: 16, color: `${color}80` }}>→</div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
-                    {progressError && !progressLoading && (
-                      <div style={{ padding: 16, borderRadius: 12, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 18 }}>❌</span> {progressError}
-                      </div>
-                    )}
+                    {/* ── Sections view (non-IQAC, or IQAC with department selected) ── */}
+                    {(!isIqacMain || progressDepartmentId !== null) && (
+                      <>
+                        {/* IQAC: back button */}
+                        {isIqacMain && progressDepartmentId !== null && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <button
+                              onClick={() => { setProgressDepartmentId(null); setProgressData(null); setSelectedSectionId(null); }}
+                              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px', borderRadius: 10, border: '1.5px solid #e2e8f0', background: '#fff', color: '#334155', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+                              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#f8fafc'; }}
+                              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#fff'; }}
+                            >
+                              ← All Departments
+                            </button>
+                            {(() => { const d = progressDepts.find((x) => x.id === progressDepartmentId); return d ? <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{d.short_name || d.code || d.name}</span> : null; })()}
+                          </div>
+                        )}
 
-                    {!progressLoading && !progressError && progressData && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        {progressLoading && (
+                          <div style={{ padding: 48, textAlign: 'center', color: '#64748b', fontSize: 15 }}>
+                            <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
+                            Loading progress data…
+                          </div>
+                        )}
 
-                        {/* ── Top: section picker ── */}
-                        <div style={{ borderRadius: 14, border: '1px solid #e5e7eb', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                        {progressError && !progressLoading && (
+                          <div style={{ padding: 16, borderRadius: 12, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 18 }}>❌</span> {progressError}
+                          </div>
+                        )}
+
+                        {!progressLoading && !progressError && progressData && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                            {/* ── Top: section picker ── */}
+                            <div style={{ borderRadius: 14, border: '1px solid #e5e7eb', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
                           <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                             <div style={{ fontSize: 12, fontWeight: 900, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                               Sections ({progressData.sections?.length ?? 0})
@@ -1564,6 +1892,8 @@ export default function OBEPage(): JSX.Element {
                         </div>
                       </div>
                     )}
+                  </>
+                  )}
                   </div>
                 </section>
               )}

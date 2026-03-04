@@ -4,6 +4,7 @@ import { User, Mail, Shield, Building, Briefcase, School, Phone, CheckCircle2, T
 import DashboardLayout from '../../components/layout/DashboardLayout';
 import { ModalPortal } from '../../components/ModalPortal';
 import logo from '../../assets/idcs-logo.png';
+import indiaFlag from '../../assets/india-flag.svg';
 import fetchWithAuth from '../../services/fetchAuth';
 
 type RoleObj = { name: string };
@@ -27,9 +28,34 @@ type Me = {
   };
 };
 
+const DEFAULT_COUNTRY_CODE = '91';
+
+function normalizeMobileForApi(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  let digits = s.replace(/\D+/g, '');
+  if (!digits) return '';
+
+  // Local formats -> add country code
+  if (digits.length === 10) {
+    digits = `${DEFAULT_COUNTRY_CODE}${digits}`;
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = `${DEFAULT_COUNTRY_CODE}${digits.slice(1)}`;
+  }
+
+  // Guard against accidental double country-code prefix (e.g. 9191XXXXXXXXXX)
+  if (digits.startsWith(DEFAULT_COUNTRY_CODE + DEFAULT_COUNTRY_CODE) && digits.length === (DEFAULT_COUNTRY_CODE.length * 2 + 10)) {
+    digits = digits.slice(DEFAULT_COUNTRY_CODE.length);
+  }
+
+  if (digits.length < 11 || digits.length > 15) return '';
+  return `+${digits}`;
+}
+
 function normalizeMobileForUi(raw: unknown): string {
   const s = String(raw ?? '').trim();
-  return s;
+  if (!s) return '';
+  return normalizeMobileForApi(s) || s;
 }
 
 export default function ProfilePage({ user: initialUser }: { user?: Me | null }) {
@@ -83,8 +109,17 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
 
   useEffect(() => {
     const current = profileMobile || '';
-    const normalized = current.trim() ? (current.startsWith('+91') ? current : `+91${current.replace(/^\+91\s*/, '')}`) : '';
-    setMobileDraft(normalized);
+    let initialDraft = '';
+    if (current) {
+      const normalized = normalizeMobileForApi(current);
+      if (normalized) {
+        const digits = normalized.replace(/\D+/g, '');
+        if (digits.length >= 10) {
+          initialDraft = digits.slice(-10);
+        }
+      }
+    }
+    setMobileDraft(initialDraft);
     setMobileEditing(!profileMobileVerified || !current);
     setOtpSent(false);
     setOtpDraft('');
@@ -179,16 +214,18 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
 
   const showVerifiedCheck = Boolean(profileMobileVerified && !mobileEditing && profileMobile);
 
+  const handleMobileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const onlyDigits = e.target.value.replace(/\D+/g, '').slice(0, 10);
+    setMobileDraft(onlyDigits);
+  };
+
   async function handleRequestOtp() {
     setOtpError(null);
     setOtpInfo(null);
 
-    let nextMobile = String(mobileDraft || '').trim();
-    if (nextMobile && !nextMobile.startsWith('+91')) {
-      nextMobile = `+91${nextMobile}`;
-    }
-    if (!nextMobile || nextMobile === '+91') {
-      setOtpError('Enter mobile number.');
+    const nextMobile = normalizeMobileForApi(mobileDraft);
+    if (!nextMobile) {
+      setOtpError('Enter a valid mobile number.');
       return;
     }
     try {
@@ -196,19 +233,36 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
       const res = await requestMobileOtp(nextMobile);
       setOtpSent(true);
 
+      // In dev, backend may include debug OTP when SMS_BACKEND=console.
+      const debugOtp = String((res as any)?.debug_otp || '').trim();
+      if (debugOtp) {
+        setOtpDraft(debugOtp);
+      }
+
+      const deliveryError = String((res as any)?.delivery_error || '').trim();
+
       const expiresIn = Number(res?.expires_in_seconds ?? 0);
       if (Number.isFinite(expiresIn) && expiresIn > 0) {
         setOtpExpiresAtMs(Date.now() + expiresIn * 1000);
         setOtpSecondsLeft(Math.ceil(expiresIn));
         const mins = Math.ceil(expiresIn / 60);
-        setOtpInfo(`OTP sent. Valid for ${mins} minute${mins === 1 ? '' : 's'}.`);
+        setOtpInfo(deliveryError
+          ? `OTP generated, but delivery failed (${deliveryError}). Valid for ${mins} minute${mins === 1 ? '' : 's'}.`
+          : `OTP sent. Valid for ${mins} minute${mins === 1 ? '' : 's'}.`
+        );
       } else {
         setOtpExpiresAtMs(null);
         setOtpSecondsLeft(0);
-        setOtpInfo('OTP sent.');
+        setOtpInfo(deliveryError ? `OTP generated, but delivery failed (${deliveryError}).` : 'OTP sent.');
       }
     } catch (e: any) {
       const statusCode = Number(e?.response?.status || 0);
+      if (statusCode === 429) {
+        const retryAfter = Number(e?.response?.data?.retry_after_seconds || 0);
+        const hint = retryAfter > 0 ? ` Try again in ${retryAfter}s.` : '';
+        setOtpError(`Please wait before requesting another OTP.${hint}`);
+        return;
+      }
       const msg = statusCode === 401
         ? 'Session expired. Please login again and retry OTP request.'
         : String(e?.response?.data?.detail || e?.message || e || 'Failed to send OTP');
@@ -221,13 +275,10 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
   async function handleVerifyOtp() {
     setOtpError(null);
     setOtpInfo(null);
-    let nextMobile = String(mobileDraft || '').trim();
-    if (nextMobile && !nextMobile.startsWith('+91')) {
-      nextMobile = `+91${nextMobile}`;
-    }
+    const nextMobile = normalizeMobileForApi(mobileDraft);
     const otp = String(otpDraft || '').trim();
-    if (!nextMobile || nextMobile === '+91') {
-      setOtpError('Enter mobile number.');
+    if (!nextMobile) {
+      setOtpError('Enter a valid mobile number.');
       return;
     }
     if (!otp) {
@@ -750,38 +801,53 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                     </div>
                   </div>
 
-                  {/* Only show Request OTP when mobile is not verified */}
-                  {!profileMobileVerified && (
-                    <>
-                      <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                        <input
-                          value={mobileDraft}
-                          onChange={(e) => setMobileDraft(e.target.value)}
-                          className="px-3 py-2 border rounded-md w-full sm:w-64"
-                          placeholder="+91XXXXXXXXXX"
-                          disabled={otpBusy}
+                  <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <div className="flex w-full sm:w-auto">
+                      <div className="flex items-center gap-2 px-3 py-2 border border-r-0 rounded-l-md bg-gray-50">
+                        <img
+                          src={indiaFlag}
+                          alt="India flag"
+                          className="w-6 h-4 object-cover rounded-sm shadow-sm"
                         />
-                        <button
-                          onClick={handleRequestOtp}
-                          className="bg-blue-600 text-white px-4 py-2 rounded-md"
-                          disabled={otpBusy}
-                        >
-                          {otpBusy ? 'Sending…' : 'Request OTP'}
-                        </button>
+                        <span className="text-sm font-medium text-gray-700">+91</span>
                       </div>
+                      <input
+                        value={mobileDraft}
+                        onChange={handleMobileInputChange}
+                        className="px-3 py-2 border rounded-r-md w-full sm:w-64 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        placeholder="Enter 10-digit mobile"
+                        disabled={otpBusy}
+                        inputMode="numeric"
+                        maxLength={10}
+                      />
+                    </div>
+                    <button
+                      onClick={handleRequestOtp}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-md"
+                      disabled={otpBusy}
+                    >
+                      {otpBusy ? 'Sending…' : 'Request OTP'}
+                    </button>
+                  </div>
 
-                      {otpSent && (
-                        <div className="mt-3">
-                          <div className="text-sm text-gray-500 mb-2">Enter OTP ({otpSecondsLeft}s)</div>
-                          <div className="flex items-center gap-2">
-                            <input value={otpDraft} onChange={(e) => setOtpDraft(e.target.value)} className="px-3 py-2 border rounded-md" />
-                            <button onClick={handleVerifyOtp} className="bg-emerald-600 text-white px-3 py-2 rounded-md">Verify</button>
-                            {canResendOtp && <button onClick={handleRequestOtp} className="text-sm text-blue-600">Resend</button>}
-                          </div>
-                          {otpError && <div className="mt-2 text-sm text-red-600">{otpError}</div>}
-                        </div>
-                      )}
-                    </>
+                  {otpInfo && (
+                    <div className="mt-2 text-sm text-emerald-700">{otpInfo}</div>
+                  )}
+
+                  {otpError && !otpSent && (
+                    <div className="mt-2 text-sm text-red-600">{otpError}</div>
+                  )}
+
+                  {otpSent && (
+                    <div className="mt-3">
+                      <div className="text-sm text-gray-500 mb-2">Enter OTP ({otpSecondsLeft}s)</div>
+                      <div className="flex items-center gap-2">
+                        <input value={otpDraft} onChange={(e) => setOtpDraft(e.target.value)} className="px-3 py-2 border rounded-md" />
+                        <button onClick={handleVerifyOtp} className="bg-emerald-600 text-white px-3 py-2 rounded-md">Verify</button>
+                        {canResendOtp && <button onClick={handleRequestOtp} className="text-sm text-blue-600">Resend</button>}
+                      </div>
+                      {otpError && <div className="mt-2 text-sm text-red-600">{otpError}</div>}
+                    </div>
                   )}
 
                   {/* Only show "Remove mobile number" when a verified number exists */}

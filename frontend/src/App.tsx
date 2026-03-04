@@ -18,6 +18,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from "./components/containers/HomePage";
 import DashboardPage from "./pages/dashboard/Dashboard";
 import ProfilePage from "./pages/profile/Profile";
+import SettingsPage from './pages/settings/SettingsPage';
+import WhatsAppSenderPage from './pages/settings/WhatsAppSenderPage';
 import MasterList from './pages/curriculum/MasterList';
 import MasterEditor from './pages/curriculum/MasterEditor';
 import DeptList from './pages/curriculum/DeptList';
@@ -32,6 +34,7 @@ import OBERequestPage from './pages/obe/OBERequestPage';
 import AdvisorAssignments from './pages/hod/AdvisorAssignments';
 import TeachingAssignmentsPage from './pages/hod/TeachingAssignments';
 import ObeEditRequestsPage from './pages/hod/ObeEditRequestsPage';
+import HodResultAnalysisPage from './pages/hod/HodResultAnalysisPage';
 import StudentsPage from './pages/staff/Students';
 import StudentTimetable from './pages/student/TimetableView';
 import StaffTimetable from './pages/staff/TimetableView';
@@ -135,8 +138,21 @@ export default function App() {
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/profile" element={<ProfilePage user={user} />} />
+                <Route
+                  path="/settings"
+                  element={<ProtectedRoute user={user} requiredRoles={['IQAC']} element={<SettingsPage />} />}
+                />
+                <Route
+                  path="/settings/whatsapp-sender"
+                  element={<ProtectedRoute user={user} requiredRoles={['IQAC']} element={<WhatsAppSenderPage />} />}
+                />
+                <Route
+                  path="/settings/notification-templates"
+                  element={<ProtectedRoute user={user} requiredRoles={['IQAC']} element={<NotificationsPage />} />}
+                />
                 <Route path="/queries" element={<QueriesPage />} />
-                <Route path="/notifications" element={<NotificationsPage />} />
+                {/* /notifications kept as redirect for any bookmarks */}
+                <Route path="/notifications" element={<Navigate to="/settings/notification-templates" replace />} />
                 <Route path="/academic-calendar" element={<AcademicCalendarRedirect user={user} />} />
                 <Route
                   path="/iqac/calendar"
@@ -177,6 +193,10 @@ export default function App() {
                 <Route
                   path="/hod/obe-requests"
                   element={<ProtectedRoute user={user} requiredRoles={["HOD"]} requiredPermissions={["academics.assign_advisor"]} element={<ObeEditRequestsPage />} />}
+                />
+                <Route
+                  path="/hod/result-analysis"
+                  element={<ProtectedRoute user={user} requiredRoles={["HOD", "ADVISOR"]} element={<HodResultAnalysisPage />} />}
                 />
                 <Route
                   path="/staffs"

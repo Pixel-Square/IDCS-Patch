@@ -1,6 +1,4 @@
-import { getApiBase } from './apiBase'
-
-const API_BASE = getApiBase()
+import { getApiBaseCandidates, getApiBase } from './apiBase'
 
 let isRefreshing = false
 let refreshPromise: Promise<string> | null = null
@@ -17,11 +15,27 @@ async function refreshToken(): Promise<string> {
       const refresh = window.localStorage.getItem('refresh')
       if (!refresh) throw new Error('no refresh token')
 
-      const res = await fetch(`${API_BASE}/api/accounts/token/refresh/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh }),
-      })
+      // Try refresh against primary base, then fallback.
+      let res: Response | null = null
+      let lastErr: any = null
+      for (const base of getApiBaseCandidates()) {
+        try {
+          res = await fetch(`${base}/api/accounts/token/refresh/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh }),
+          })
+          break
+        } catch (e) {
+          lastErr = e
+        }
+      }
+
+      if (!res) {
+        window.localStorage.removeItem('access')
+        window.localStorage.removeItem('refresh')
+        throw new Error(String(lastErr?.message || lastErr || 'refresh failed'))
+      }
       
       if (!res.ok) {
         // If refresh fails, clear auth tokens
@@ -60,16 +74,29 @@ export async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit 
 
   // Normalize API requests: if caller used a leading '/api/...' path,
   // route it to the configured backend API base instead of the Vite dev server.
+  // Also: if the primary base is unreachable (network error), retry on fallback.
   let finalInput: RequestInfo | URL = input
-  try {
-    if (typeof input === 'string' && input.startsWith('/api')) {
-      finalInput = `${getApiBase()}${input}`
+  let res: Response | null = null
+  let lastNetworkErr: any = null
+
+  const isApiPath = typeof input === 'string' && input.startsWith('/api')
+  const candidates = isApiPath ? getApiBaseCandidates().map((b) => `${b}${input}`) : [String(input)]
+
+  for (const url of candidates) {
+    finalInput = url
+    try {
+      res = await fetch(finalInput, { ...init, headers })
+      break
+    } catch (e) {
+      // Only retry on network failures (DNS/connection refused/etc). HTTP errors still return a Response.
+      lastNetworkErr = e
+      continue
     }
-  } catch (e) {
-    // ignore if import.meta not available in some runtimes
   }
 
-  const res = await fetch(finalInput, { ...init, headers })
+  if (!res) {
+    throw lastNetworkErr || new Error('Network error')
+  }
 
   // Handle 401: Only log detailed errors if not a retry scenario
   if (res.status === 401) {

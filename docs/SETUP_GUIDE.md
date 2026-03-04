@@ -111,6 +111,16 @@ SMS_GATEWAY_URL=https://your-sms-provider.example/send?to={to}&message={message}
 # Option B: WhatsApp (uses local whatsapp-web.js microservice)
 # SMS_BACKEND=whatsapp
 # OBE_WHATSAPP_API_URL=http://127.0.0.1:3000/send-whatsapp
+# Optional: secondary send endpoint if the local gateway is down
+# OBE_WHATSAPP_API_URL_FALLBACK=https://db.krgi.co.in/whatsapp/send-whatsapp
+# Production safety: allow non-local gateway URLs (e.g. https://db.krgi.co.in)
+# OBE_WHATSAPP_ALLOW_NON_LOCAL_URL=1
+# Optional: explicitly set the gateway base URL used for IQAC Settings -> QR/Status.
+# Useful when the gateway is hosted on a domain (e.g. https://db.krgi.co.in) or behind a sub-path.
+# If not set, the backend derives a base URL from OBE_WHATSAPP_API_URL.
+# OBE_WHATSAPP_GATEWAY_BASE_URL=http://127.0.0.1:3000
+# Optional: secondary base URL for the IQAC Settings QR/Status page
+# OBE_WHATSAPP_GATEWAY_BASE_URL_FALLBACK=https://db.krgi.co.in/whatsapp
 # OBE_WHATSAPP_API_KEY=change-me
 ```
 
@@ -121,6 +131,7 @@ Notes:
 WhatsApp backend notes:
 - The backend will POST JSON to `OBE_WHATSAPP_API_URL` with keys: `api_key`, `to`, `message`.
 - The `to` number is normalized to digits-only with country code (e.g. `91XXXXXXXXXX`).
+- The IQAC Settings QR/Status page uses `OBE_WHATSAPP_GATEWAY_BASE_URL` if set; otherwise it derives a base URL from `OBE_WHATSAPP_API_URL`.
 - Quick test (replace values):
 
 ```bash

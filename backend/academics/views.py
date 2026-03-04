@@ -62,6 +62,99 @@ from .models import StudentMentorMap
 from django.db import transaction
 
 
+def _ensure_teaching_assignments_from_subject_batches(staff_profile) -> int:
+    """Best-effort backfill: create TeachingAssignment rows from StudentSubjectBatch.
+
+    This is used as a fallback when staff have subject batches (i.e., they clearly
+    teach something) but their TeachingAssignment table is empty due to missing
+    data provisioning.
+
+    Returns the number of TeachingAssignment rows created or re-activated.
+    """
+    if not staff_profile or not getattr(staff_profile, 'pk', None):
+        return 0
+
+    try:
+        from .models import StudentSubjectBatch, TeachingAssignment
+    except Exception:
+        return 0
+
+    batches_qs = StudentSubjectBatch.objects.filter(
+        staff=staff_profile,
+        is_active=True,
+        academic_year__is_active=True,
+        curriculum_row__isnull=False,
+    ).select_related('academic_year')
+
+    if not batches_qs.exists():
+        return 0
+
+    created_or_updated = 0
+
+    # Group by (academic_year, curriculum_row) and create one TeachingAssignment per pair.
+    pairs = list(
+        batches_qs.values_list('academic_year_id', 'curriculum_row_id').distinct()
+    )
+
+    from academics.models import StudentProfile
+
+    for academic_year_id, curriculum_row_id in pairs:
+        if not academic_year_id or not curriculum_row_id:
+            continue
+
+        # If any active TA already exists for this staff+course+year (any section), don't create another.
+        existing = TeachingAssignment.objects.filter(
+            staff=staff_profile,
+            academic_year_id=academic_year_id,
+            curriculum_row_id=curriculum_row_id,
+        )
+        if existing.filter(is_active=True).exists():
+            continue
+
+        # Infer a representative section if all students in the batches belong to exactly one section.
+        section_ids = list(
+            StudentProfile.objects.filter(
+                subject_batches__staff=staff_profile,
+                subject_batches__is_active=True,
+                subject_batches__academic_year_id=academic_year_id,
+                subject_batches__curriculum_row_id=curriculum_row_id,
+            ).exclude(section_id__isnull=True).values_list('section_id', flat=True).distinct()
+        )
+        section_id = section_ids[0] if len(section_ids) == 1 else None
+
+        # If an inactive TA exists, reactivate it (prefer one matching inferred section if possible).
+        try:
+            ta_to_reactivate = None
+            if section_id is not None:
+                ta_to_reactivate = existing.filter(section_id=section_id).first()
+            if ta_to_reactivate is None:
+                ta_to_reactivate = existing.first()
+
+            if ta_to_reactivate is not None:
+                if not ta_to_reactivate.is_active:
+                    ta_to_reactivate.is_active = True
+                    ta_to_reactivate.save(update_fields=['is_active'])
+                    created_or_updated += 1
+                continue
+        except Exception:
+            pass
+
+        try:
+            TeachingAssignment.objects.create(
+                staff=staff_profile,
+                academic_year_id=academic_year_id,
+                curriculum_row_id=curriculum_row_id,
+                section_id=section_id,
+                is_active=True,
+            )
+            created_or_updated += 1
+        except Exception:
+            # Ignore races / integrity errors; this is best-effort.
+            continue
+
+    return created_or_updated
+
+
 # Attendance endpoints removed.
 
 
@@ -109,7 +202,7 @@ class MyTeachingAssignmentsView(APIView):
 
     def get(self, request):
         user = request.user
-        qs = TeachingAssignment.objects.select_related(
+        base_qs = TeachingAssignment.objects.select_related(
             'subject',
             'curriculum_row',
             'curriculum_row__master',
@@ -122,14 +215,41 @@ class MyTeachingAssignmentsView(APIView):
             'elective_subject',
             'elective_subject__department',
             'elective_subject__semester',
-        ).filter(is_active=True)
+        )
+
+        qs = base_qs.filter(is_active=True)
 
         staff_profile = getattr(user, 'staff_profile', None)
         role_names = {r.name.upper() for r in user.roles.all()} if getattr(user, 'roles', None) is not None else set()
 
         # staff: only their teaching assignments (do not expand to department-level for HOD/ADVISOR here)
         if staff_profile:
-            qs = qs.filter(staff=staff_profile)
+            # Prefer matching by user link; it's stable even if staff profile details change.
+            qs_staff = qs.filter(staff__user=user)
+            # Fallback: legacy / direct FK match.
+            if not qs_staff.exists():
+                qs_staff = qs.filter(staff=staff_profile)
+            # Final fallback: if assignments exist but are not marked active, include active academic year.
+            if not qs_staff.exists():
+                qs_staff = base_qs.filter(staff__user=user, academic_year__is_active=True)
+
+            # Backfill from StudentSubjectBatch when the staff has no teaching assignments at all.
+            if not qs_staff.exists():
+                try:
+                    _ensure_teaching_assignments_from_subject_batches(staff_profile)
+                except Exception:
+                    pass
+                qs_staff = qs.filter(staff__user=user)
+                if not qs_staff.exists():
+                    qs_staff = qs.filter(staff=staff_profile)
+
+            # Final fallback: do not hide assignments solely due to flags.
+            # If the staff has any TeachingAssignment rows at all, return them.
+            if not qs_staff.exists():
+                qs_staff = base_qs.filter(staff__user=user)
+                if not qs_staff.exists():
+                    qs_staff = base_qs.filter(staff=staff_profile)
+            qs = qs_staff
         # else: admins can see all
 
         ser = TeachingAssignmentInfoSerializer(qs.order_by('section__name', 'id'), many=True)
@@ -2234,14 +2354,40 @@ class StaffAssignedSubjectsView(APIView):
             raise PermissionDenied('You do not have permission to view this staff assignments.')
 
         # fetch teaching assignments
-        # Only return active assignments in the active academic year that
-        # have an explicit curriculum_row or subject. This avoids showing
-        # placeholder/unnamed records for staff without assigned subjects.
+        # Only return assignments that have an explicit curriculum_row/subject.
+        # Prefer the active academic year when available, but avoid returning
+        # an empty list just because the active-year flag isn't set.
         qs = TeachingAssignment.objects.filter(
             staff=target,
             is_active=True,
-            academic_year__is_active=True
-        ).filter(Q(curriculum_row__isnull=False) | Q(subject__isnull=False) | Q(elective_subject__isnull=False)).select_related('curriculum_row', 'section', 'academic_year', 'subject', 'elective_subject')
+        ).filter(
+            Q(curriculum_row__isnull=False) | Q(subject__isnull=False) | Q(elective_subject__isnull=False)
+        ).select_related('curriculum_row', 'section', 'academic_year', 'subject', 'elective_subject')
+
+        try:
+            if qs.filter(academic_year__is_active=True).exists():
+                qs = qs.filter(academic_year__is_active=True)
+        except Exception:
+            pass
+
+        # Backfill from StudentSubjectBatch (best-effort) if nothing exists.
+        if not qs.exists():
+            try:
+                _ensure_teaching_assignments_from_subject_batches(target)
+            except Exception:
+                pass
+            qs = TeachingAssignment.objects.filter(
+                staff=target,
+                is_active=True,
+            ).filter(
+                Q(curriculum_row__isnull=False) | Q(subject__isnull=False) | Q(elective_subject__isnull=False)
+            ).select_related('curriculum_row', 'section', 'academic_year', 'subject', 'elective_subject')
+
+            try:
+                if qs.filter(academic_year__is_active=True).exists():
+                    qs = qs.filter(academic_year__is_active=True)
+            except Exception:
+                pass
         ser = TeachingAssignmentInfoSerializer(qs, many=True)
         return Response({'results': ser.data})
 
@@ -2280,13 +2426,15 @@ class IQACCourseTeachingMapView(APIView):
             'curriculum_row',
             'curriculum_row__master',
             'section__batch__course__department',
+            'elective_subject',
         ).filter(is_active=True)
 
-        # Filter to the requested course first.
+        # Filter to the requested course first (curriculum_row, master row, legacy subject, or elective).
         qs = qs.filter(
             Q(curriculum_row__course_code__iexact=code)
             | Q(curriculum_row__master__course_code__iexact=code)
             | Q(subject__code__iexact=code)
+            | Q(elective_subject__course_code__iexact=code)
         )
 
         # Prefer active academic year only within this course (avoid hiding results when
@@ -2309,11 +2457,18 @@ class IQACCourseTeachingMapView(APIView):
             # Best-effort subject metadata
             subject_code = None
             subject_name = None
+            class_type = None
             try:
+                if getattr(ta, 'elective_subject', None):
+                    es = ta.elective_subject
+                    subject_code = getattr(es, 'course_code', None)
+                    subject_name = getattr(es, 'course_name', None)
+                    class_type = getattr(es, 'class_type', None)
                 if getattr(ta, 'curriculum_row', None):
                     cr = ta.curriculum_row
-                    subject_code = getattr(cr, 'course_code', None) or getattr(getattr(cr, 'master', None), 'course_code', None)
-                    subject_name = getattr(cr, 'course_name', None) or getattr(getattr(cr, 'master', None), 'course_name', None)
+                    subject_code = subject_code or getattr(cr, 'course_code', None) or getattr(getattr(cr, 'master', None), 'course_code', None)
+                    subject_name = subject_name or getattr(cr, 'course_name', None) or getattr(getattr(cr, 'master', None), 'course_name', None)
+                    class_type = class_type or getattr(cr, 'class_type', None) or getattr(getattr(cr, 'master', None), 'class_type', None)
                 if (not subject_code or not subject_name) and getattr(ta, 'subject', None):
                     subject_code = subject_code or getattr(ta.subject, 'code', None)
                     subject_name = subject_name or getattr(ta.subject, 'name', None)
@@ -2325,6 +2480,7 @@ class IQACCourseTeachingMapView(APIView):
                     'teaching_assignment_id': getattr(ta, 'id', None),
                     'course_code': subject_code or code,
                     'course_name': subject_name,
+                    'class_type': class_type,
                     'section_id': getattr(sec, 'id', None),
                     'section_name': getattr(sec, 'name', None),
                     'academic_year': getattr(ay, 'name', None) if ay else None,
@@ -4246,6 +4402,8 @@ class StudentMarksView(APIView):
         if sp is None:
             return Response({'detail': 'Student profile not found for user.'}, status=status.HTTP_403_FORBIDDEN)
 
+        from django.db.models import Q
+
         section = sp.get_current_section() or getattr(sp, 'section', None)
         semester = getattr(section, 'semester', None) if section is not None else None
         course = getattr(getattr(section, 'batch', None), 'course', None) if section is not None else None
@@ -4255,10 +4413,10 @@ class StudentMarksView(APIView):
         if semester is None:
             return Response({'student': {'id': sp.id, 'reg_no': sp.reg_no}, 'semester': None, 'courses': []})
 
-        # Subjects shown to the student MUST be limited to what they are enrolled for.
-        # Strategy:
-        # - Prefer curriculum rows (core + the student's active elective choices) to build an allowed code list
-        # - Fallback to Subject(course=student_course) only (never expand to all semester subjects)
+        # Subjects shown to the student should cover all courses they are enrolled on.
+        # In practice, curriculum/elective mapping can be incomplete; the most reliable
+        # baseline is Subject(course=student_course, semester=semester).
+        # We then UNION any curriculum/elective codes as a best-effort supplement.
         subjects = Subject.objects.none()
 
         # Best-effort curriculum metadata for class_type/internal max
@@ -4332,28 +4490,35 @@ class StudentMarksView(APIView):
         except Exception:
             allowed_codes = set()
 
+        base_subjects = Subject.objects.none()
+        if course is not None:
+            base_subjects = Subject.objects.filter(semester=semester, course=course)
+
+        code_subjects = Subject.objects.none()
         if allowed_codes:
-            subjects = Subject.objects.filter(semester=semester, code__in=sorted(list(allowed_codes))).order_by('code')
-        elif course is not None:
-            # Strict fallback: only course-specific subjects.
-            subjects = Subject.objects.filter(semester=semester, course=course).order_by('code')
-        else:
-            # Can't safely determine enrollment without a course/curriculum context.
-            subjects = Subject.objects.none()
+            code_subjects = Subject.objects.filter(semester=semester, code__in=sorted(list(allowed_codes)))
+
+        # Prefer course+semester baseline; supplement with curriculum/elective code matches.
+        subjects = (base_subjects | code_subjects).distinct().order_by('code')
+
+        # If we still have nothing (e.g., course not set on Subject rows), fall back to code-only.
+        if not subjects.exists() and allowed_codes:
+            subjects = Subject.objects.filter(semester=semester, code__in=sorted(list(allowed_codes))).distinct().order_by('code')
 
         curriculum_by_code = {}
         try:
             if CurriculumDepartment is not None and dept is not None and regulation_code and semester is not None:
-                codes = [getattr(s, 'code', None) for s in subjects]
-                codes = [c for c in codes if c]
-                if codes:
-                    rows = CurriculumDepartment.objects.filter(
+                rows = (
+                    CurriculumDepartment.objects.filter(
                         department=dept,
                         regulation=regulation_code,
                         semester=semester,
-                        course_code__in=codes,
-                    ).only('course_code', 'class_type', 'internal_mark')
-                    curriculum_by_code = {getattr(r, 'course_code', None): r for r in rows}
+                    )
+                    .exclude(course_code__isnull=True)
+                    .exclude(course_code='')
+                    .only('course_code', 'course_name', 'class_type', 'internal_mark')
+                )
+                curriculum_by_code = {str(getattr(r, 'course_code', '') or '').strip(): r for r in rows if str(getattr(r, 'course_code', '') or '').strip()}
         except Exception:
             curriculum_by_code = {}
 
@@ -4421,13 +4586,52 @@ class StudentMarksView(APIView):
             except Exception:
                 return None
 
+        # Build final enrolled code list:
+        # - curriculum rows (core)
+        # - elective choices
+        # - any Subject rows resolved for the student
+        codes_set = set()
+        for c in (allowed_codes or []):
+            cc = str(c or '').strip()
+            if cc:
+                codes_set.add(cc)
+        for cc in (curriculum_by_code or {}).keys():
+            if cc:
+                codes_set.add(cc)
+        for s in subjects:
+            sc = str(getattr(s, 'code', '') or '').strip()
+            if sc:
+                codes_set.add(sc)
+
+        # Map code -> Subject (prefer course-specific Subject when available)
+        subject_by_code = {}
+        try:
+            if codes_set:
+                cand = Subject.objects.filter(semester=semester, code__in=sorted(list(codes_set)))
+                if course is not None:
+                    cand = cand.filter(Q(course=course) | Q(course__isnull=True))
+
+                if course is not None:
+                    for s in cand.filter(course=course):
+                        k = str(getattr(s, 'code', '') or '').strip()
+                        if k and k not in subject_by_code:
+                            subject_by_code[k] = s
+
+                for s in cand:
+                    k = str(getattr(s, 'code', '') or '').strip()
+                    if k and k not in subject_by_code:
+                        subject_by_code[k] = s
+        except Exception:
+            subject_by_code = {}
+
         out_courses = []
-        for subj in subjects:
+        for code in sorted(list(codes_set)):
+            subj = subject_by_code.get(code)
             # curriculum row metadata (class_type, internal max)
             class_type = None
             internal_max_total = None
             try:
-                row = curriculum_by_code.get(getattr(subj, 'code', None))
+                row = curriculum_by_code.get(code)
                 if row is not None:
                     class_type = getattr(row, 'class_type', None)
                     im = getattr(row, 'internal_mark', None)
@@ -4439,43 +4643,62 @@ class StudentMarksView(APIView):
             except Exception:
                 row = None
 
+            display_name = None
             try:
-                cia1 = Cia1Mark.objects.filter(subject=subj, student=sp).first()
+                display_name = getattr(subj, 'name', None) if subj is not None else None
             except Exception:
+                display_name = None
+            if not display_name:
+                try:
+                    display_name = getattr(row, 'course_name', None) if row is not None else None
+                except Exception:
+                    display_name = None
+            if not display_name:
+                display_name = code
+
+            if subj is not None:
+                try:
+                    cia1 = Cia1Mark.objects.filter(subject=subj, student=sp).first()
+                except Exception:
+                    cia1 = None
+            else:
                 cia1 = None
             try:
-                cia2 = Cia2Mark.objects.filter(subject=subj, student=sp).first()
+                cia2 = Cia2Mark.objects.filter(subject=subj, student=sp).first() if subj is not None else None
             except Exception:
                 cia2 = None
             try:
-                ssa1 = Ssa1Mark.objects.filter(subject=subj, student=sp).first()
+                ssa1 = Ssa1Mark.objects.filter(subject=subj, student=sp).first() if subj is not None else None
             except Exception:
                 ssa1 = None
             try:
-                ssa2 = Ssa2Mark.objects.filter(subject=subj, student=sp).first()
+                ssa2 = Ssa2Mark.objects.filter(subject=subj, student=sp).first() if subj is not None else None
             except Exception:
                 ssa2 = None
             try:
-                rev1 = Review1Mark.objects.filter(subject=subj, student=sp).first()
+                rev1 = Review1Mark.objects.filter(subject=subj, student=sp).first() if subj is not None else None
             except Exception:
                 rev1 = None
             try:
-                rev2 = Review2Mark.objects.filter(subject=subj, student=sp).first()
+                rev2 = Review2Mark.objects.filter(subject=subj, student=sp).first() if subj is not None else None
             except Exception:
                 rev2 = None
             try:
-                f1 = Formative1Mark.objects.filter(subject=subj, student=sp).first()
+                f1 = Formative1Mark.objects.filter(subject=subj, student=sp).first() if subj is not None else None
             except Exception:
                 f1 = None
             try:
-                f2 = Formative2Mark.objects.filter(subject=subj, student=sp).first()
+                f2 = Formative2Mark.objects.filter(subject=subj, student=sp).first() if subj is not None else None
             except Exception:
                 f2 = None
 
             # internal mapping (may be None)
             try:
-                imm = InternalMarkMapping.objects.filter(subject=subj).first()
-                mapping = imm.mapping if imm else None
+                if subj is not None:
+                    imm = InternalMarkMapping.objects.filter(subject=subj).first()
+                    mapping = imm.mapping if imm else None
+                else:
+                    mapping = None
             except Exception:
                 mapping = None
 
@@ -4544,8 +4767,8 @@ class StudentMarksView(APIView):
             out_courses.append(
                 {
                     'id': getattr(subj, 'id', None),
-                    'code': getattr(subj, 'code', None),
-                    'name': getattr(subj, 'name', None),
+                    'code': code,
+                    'name': display_name,
                     'class_type': ct_norm or None,
                     'marks': {
                         'cia1': _num(getattr(cia1, 'mark', None)),
@@ -4582,6 +4805,183 @@ class StudentMarksView(APIView):
         }
 
         return Response(resp)
+
+
+class StudentSectionSubjectsView(APIView):
+    """Return students in the logged-in student's section + their enrolled subjects.
+
+    URL: /api/academics/student/section-subjects/
+    Scope: only the student's current section; minimal identity fields.
+    """
+
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+        sp = getattr(user, 'student_profile', None)
+        if sp is None:
+            return Response({'detail': 'Student profile not found for user.'}, status=status.HTTP_403_FORBIDDEN)
+
+        section = sp.get_current_section() or getattr(sp, 'section', None)
+        if section is None:
+            return Response({'section': None, 'semester': None, 'students': []})
+
+        semester = getattr(section, 'semester', None)
+        course = getattr(getattr(section, 'batch', None), 'course', None)
+        dept = getattr(course, 'department', None) if course is not None else None
+
+        from django.db.models import Q
+        from collections import defaultdict
+        from .models import StudentProfile, Subject, AcademicYear
+
+        # Prefer active assignment mapping but tolerate legacy `section` field.
+        students_qs = (
+            StudentProfile.objects.filter(
+                Q(section=section) |
+                Q(section_assignments__section=section, section_assignments__end_date__isnull=True)
+            )
+            .select_related('user')
+            .distinct()
+            .order_by('reg_no')
+        )
+
+        # If semester is unknown, return students with empty subject lists.
+        if semester is None:
+            out = []
+            for s in students_qs:
+                u = getattr(s, 'user', None)
+                display_name = ' '.join([x for x in [getattr(u, 'first_name', ''), getattr(u, 'last_name', '')] if x]).strip()
+                if not display_name:
+                    display_name = getattr(u, 'username', '') or s.reg_no
+                out.append({'id': s.id, 'reg_no': s.reg_no, 'name': display_name, 'subjects': []})
+            return Response({
+                'section': {'id': getattr(section, 'id', None), 'name': getattr(section, 'name', None)},
+                'semester': None,
+                'students': out,
+            })
+
+        # Curriculum-based enrollment resolution (core + per-student electives)
+        try:
+            from curriculum.models import CurriculumDepartment
+        except Exception:
+            CurriculumDepartment = None
+
+        try:
+            from curriculum.models import ElectiveChoice
+        except Exception:
+            ElectiveChoice = None
+
+        regulation_code = None
+        try:
+            regulation_code = getattr(getattr(getattr(section, 'batch', None), 'regulation', None), 'code', None)
+        except Exception:
+            regulation_code = None
+        if not regulation_code:
+            try:
+                regulation_code = str(getattr(getattr(section, 'batch', None), 'regulation', '') or '').strip() or None
+            except Exception:
+                regulation_code = None
+
+        core_codes = []
+        try:
+            if CurriculumDepartment is not None and dept is not None and regulation_code and semester is not None:
+                core_codes = list(
+                    CurriculumDepartment.objects.filter(
+                        department=dept,
+                        regulation=regulation_code,
+                        semester=semester,
+                        is_elective=False,
+                    )
+                    .exclude(course_code__isnull=True)
+                    .exclude(course_code='')
+                    .values_list('course_code', flat=True)
+                )
+        except Exception:
+            core_codes = []
+
+        core_set = set([str(c).strip() for c in core_codes if c])
+
+        electives_by_student_id = defaultdict(set)
+        all_elective_codes = set()
+        try:
+            if ElectiveChoice is not None:
+                try:
+                    ay = AcademicYear.objects.filter(is_active=True).first()
+                except Exception:
+                    ay = None
+
+                eqs = ElectiveChoice.objects.filter(student__in=students_qs, is_active=True).select_related('elective_subject', 'student')
+                if ay is not None:
+                    eqs = eqs.filter(models.Q(academic_year=ay) | models.Q(academic_year__isnull=True))
+
+                for ch in eqs:
+                    st = getattr(ch, 'student', None)
+                    es = getattr(ch, 'elective_subject', None)
+                    if not st or not es:
+                        continue
+                    if dept is not None and getattr(es, 'department_id', None) != getattr(dept, 'id', None):
+                        continue
+                    if regulation_code and str(getattr(es, 'regulation', '') or '').strip() != str(regulation_code):
+                        continue
+                    if getattr(es, 'semester_id', None) != getattr(semester, 'id', None):
+                        continue
+                    code = str(getattr(es, 'course_code', '') or '').strip()
+                    if not code:
+                        continue
+                    electives_by_student_id[getattr(st, 'id', None)].add(code)
+                    all_elective_codes.add(code)
+        except Exception:
+            electives_by_student_id = defaultdict(set)
+            all_elective_codes = set()
+
+        # Decide subject resolution strategy
+        subject_source = 'curriculum' if (core_set or all_elective_codes) else 'course_fallback'
+
+        base_subjects_list = None
+        subject_by_code = {}
+        if subject_source == 'curriculum':
+            union_codes = set(core_set) | set(all_elective_codes)
+            subjects_qs = Subject.objects.filter(semester=semester, code__in=sorted(list(union_codes))).only('code', 'name').order_by('code')
+            subject_by_code = {getattr(s, 'code', None): {'code': s.code, 'name': s.name} for s in subjects_qs}
+        else:
+            if course is not None:
+                base_subjects_qs = Subject.objects.filter(semester=semester, course=course).only('code', 'name').order_by('code')
+                base_subjects_list = [{'code': s.code, 'name': s.name} for s in base_subjects_qs]
+            else:
+                base_subjects_list = []
+
+        out = []
+        for s in students_qs:
+            u = getattr(s, 'user', None)
+            display_name = ' '.join([x for x in [getattr(u, 'first_name', ''), getattr(u, 'last_name', '')] if x]).strip()
+            if not display_name:
+                display_name = getattr(u, 'username', '') or s.reg_no
+
+            if subject_source == 'curriculum':
+                codes = set(core_set) | set(electives_by_student_id.get(s.id, set()))
+                subjects_list = [subject_by_code[c] for c in sorted(list(codes)) if c in subject_by_code]
+            else:
+                subjects_list = base_subjects_list
+
+            out.append({
+                'id': s.id,
+                'reg_no': s.reg_no,
+                'name': display_name,
+                'subjects': subjects_list,
+            })
+
+        return Response({
+            'section': {
+                'id': getattr(section, 'id', None),
+                'name': getattr(section, 'name', None),
+            },
+            'semester': {
+                'id': getattr(semester, 'id', None),
+                'number': getattr(semester, 'number', None),
+            },
+            'subject_source': subject_source,
+            'students': out,
+        })
 
 
 class DepartmentStudentsView(APIView):

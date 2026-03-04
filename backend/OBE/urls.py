@@ -119,4 +119,6 @@ urlpatterns = [
     path('iqac/cqi-config/save', views.iqac_cqi_upsert),
     # Aggregated progress view for HOD/Advisor (per section/staff/course/assessment)
     path('progress', views.obe_progress_overview),
+    # IQAC main: lightweight department list with stats for progress drill-down
+    path('progress/departments', views.obe_progress_departments),
 ]

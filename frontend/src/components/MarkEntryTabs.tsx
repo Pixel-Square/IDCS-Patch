@@ -18,11 +18,20 @@ import Ssa1Entry from './Ssa1Entry';
 import Ssa2Entry from './Ssa2Entry';
 import CQIEntry from '../pages/staff/CQIEntry';
 import DashboardWidgets from './layout/DashboardWidgets';
-import { DraftAssessmentKey, DueAssessmentKey, fetchMyTeachingAssignments, fetchPublishWindow, iqacResetAssessment, TeachingAssignmentItem } from '../services/obe';
+import {
+  DraftAssessmentKey,
+  DueAssessmentKey,
+  MarkTableLockStatusResponse,
+  fetchMarkTableLockStatus,
+  fetchMyTeachingAssignments,
+  fetchPublishWindow,
+  iqacResetAssessment,
+  TeachingAssignmentItem,
+} from '../services/obe';
 import * as OBE from '../services/obe';
 import FacultyAssessmentPanel from './FacultyAssessmentPanel';
 import fetchWithAuth from '../services/fetchAuth';
-import { fetchTeachingAssignmentRoster } from '../services/roster';
+import { fetchTeachingAssignmentRoster, TeachingAssignmentRosterStudent } from '../services/roster';
 import IqacResetNotificationAlert from './IqacResetNotificationAlert';
 import { clearLocalDraftCache } from '../utils/obeDraftCache';
 
@@ -43,6 +52,37 @@ type TabDef = {
 };
 
 type MarkRow = { studentId: string; mark: number };
+
+function hasAnyNumericValue(obj: any): boolean {
+  if (!obj || typeof obj !== 'object') return false;
+  return Object.values(obj).some((v) => typeof v === 'number' && Number.isFinite(v));
+}
+
+function getCiaEnteredCount(rowsByStudentId: any): number {
+  if (!rowsByStudentId || typeof rowsByStudentId !== 'object') return 0;
+  let n = 0;
+  for (const row of Object.values(rowsByStudentId)) {
+    if (!row || typeof row !== 'object') continue;
+    const absent = Boolean((row as any).absent);
+    const q = (row as any).q;
+    if (absent || hasAnyNumericValue(q)) n += 1;
+  }
+  return n;
+}
+
+function getModelEnteredCount(sheet: any): number {
+  if (!sheet || typeof sheet !== 'object') return 0;
+  let n = 0;
+  for (const row of Object.values(sheet)) {
+    if (!row || typeof row !== 'object') continue;
+    const absent = Boolean((row as any).absent);
+    const lab = (row as any).lab;
+    const q = (row as any).q;
+    const hasLab = typeof lab === 'number' && Number.isFinite(lab);
+    if (absent || hasLab || hasAnyNumericValue(q)) n += 1;
+  }
+  return n;
+}
 
 type Props = {
   subjectId: string;
@@ -413,6 +453,29 @@ export default function MarkEntryTabs({
     return (tas || []).find((t) => t.id === selectedTaId) || null;
   }, [tas, selectedTaId]);
 
+  const [rosterStudents, setRosterStudents] = useState<TeachingAssignmentRosterStudent[] | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (selectedTaId == null) {
+        setRosterStudents(null);
+        return;
+      }
+      try {
+        const roster = await fetchTeachingAssignmentRoster(Number(selectedTaId));
+        if (!mounted) return;
+        setRosterStudents(Array.isArray((roster as any)?.students) ? (roster as any).students : []);
+      } catch {
+        if (!mounted) return;
+        setRosterStudents(null);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedTaId]);
+
   const [taDerivedClassType, setTaDerivedClassType] = useState<string | null>(null);
   const [taDerivedMeta, setTaDerivedMeta] = useState<any | null>(null);
 
@@ -565,6 +628,131 @@ export default function MarkEntryTabs({
     // ensure the active tab is still valid.
     if (!visibleTabs.some((t) => t.key === active)) setActive('dashboard');
   }, [visibleTabs, active]);
+
+  const [publishStatusByAssessment, setPublishStatusByAssessment] = useState<Record<string, MarkTableLockStatusResponse | null>>({});
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!subjectId) {
+        setPublishStatusByAssessment({});
+        return;
+      }
+      if (selectedTaId == null) {
+        setPublishStatusByAssessment({});
+        return;
+      }
+
+      const keys = Array.from(
+        new Set(
+          (visibleTabs || [])
+            .map((t) => tabToAssessmentKey(t.key))
+            .filter((k): k is DueAssessmentKey => Boolean(k)),
+        ),
+      );
+
+      const results = await Promise.all(
+        keys.map(async (k) => {
+          try {
+            const s = await fetchMarkTableLockStatus(k, String(subjectId), Number(selectedTaId));
+            return [k, s] as const;
+          } catch {
+            return [k, null] as const;
+          }
+        }),
+      );
+
+      if (!mounted) return;
+      const map: Record<string, MarkTableLockStatusResponse | null> = {};
+      results.forEach(([k, v]) => {
+        map[String(k)] = v;
+      });
+      setPublishStatusByAssessment(map);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [subjectId, selectedTaId, visibleTabs]);
+
+  const rosterTotal = Array.isArray(rosterStudents) ? rosterStudents.length : 0;
+
+  const progressItems = useMemo(() => {
+    if (!subjectId) return [] as Array<{ key: TabKey; label: string; status: 'PUBLISHED' | 'DRAFT' | 'NOT_STARTED'; progress: string }>;
+
+    const taId = selectedTaId != null ? String(selectedTaId) : 'none';
+    const modelCandidates = [
+      `model_theory_sheet_${subjectId}_${taId}`,
+      `model_tcpl_sheet_${subjectId}_${taId}`,
+      `model_tcpr_sheet_${subjectId}_${taId}`,
+      `model_sheet_${subjectId}`,
+    ];
+
+    return (visibleTabs || [])
+      .filter((t) => t.key !== 'dashboard' && !String(t.key).startsWith('cqi_'))
+      .map((t) => {
+        const dueKey = tabToAssessmentKey(t.key);
+        const lock = dueKey ? publishStatusByAssessment[String(dueKey)] : null;
+        const published = Boolean(lock?.is_published);
+
+        let entered = 0;
+        let denom = rosterTotal || 0;
+
+        if (t.key === 'cia1' || t.key === 'cia2') {
+          const local = lsGet<any>(`${t.key}_sheet_${subjectId}`);
+          const rowsByStudentId = local?.rowsByStudentId;
+          entered = getCiaEnteredCount(rowsByStudentId);
+          if (!denom) denom = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
+        } else if (t.key === 'model') {
+          const sheet = modelCandidates
+            .map((k) => lsGet<any>(k))
+            .find((v) => v && typeof v === 'object');
+          entered = getModelEnteredCount(sheet);
+          if (!denom) denom = sheet && typeof sheet === 'object' ? Object.keys(sheet).length : 0;
+        } else if (t.key === 'formative1' || t.key === 'formative2') {
+          const local = lsGet<any>(`${t.key}_sheet_${subjectId}`);
+          const rowsByStudentId = local?.rowsByStudentId;
+          entered = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
+          if (!denom) denom = entered;
+        } else {
+          const local = lsGet<any>(`${t.key}_sheet_${subjectId}`);
+          const rows = local?.rows;
+          entered = Array.isArray(rows) ? rows.length : 0;
+          if (!denom) denom = entered;
+        }
+
+        const started = entered > 0;
+        const status: 'PUBLISHED' | 'DRAFT' | 'NOT_STARTED' = published ? 'PUBLISHED' : started ? 'DRAFT' : 'NOT_STARTED';
+        const progress = denom > 0 ? `${entered}/${denom}` : started ? String(entered) : '—';
+
+        return { key: t.key, label: t.label, status, progress };
+      });
+  }, [subjectId, selectedTaId, visibleTabs, publishStatusByAssessment, rosterTotal]);
+
+  const ProgressStrip = ({ items }: { items: typeof progressItems }) => {
+    if (!items.length) return null;
+    const badgeStyle = (status: string) => {
+      if (status === 'PUBLISHED') return { background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0' };
+      if (status === 'DRAFT') return { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' };
+      return { background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' };
+    };
+
+    return (
+      <div className="obe-card" style={{ padding: '10px 12px', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#0f172a', marginBottom: 8 }}>Progress</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {items.map((it) => (
+            <div key={String(it.key)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff' }}>
+              <div style={{ fontWeight: 800, fontSize: 12, color: '#0f172a' }}>{it.label}</div>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>{it.progress}</div>
+              <div style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 999, ...badgeStyle(it.status) }}>
+                {it.status === 'PUBLISHED' ? 'Published' : it.status === 'DRAFT' ? 'Draft saved' : 'Not started'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   useEffect(() => {
     if (!subjectId) return;
@@ -873,28 +1061,10 @@ export default function MarkEntryTabs({
           <div style={{ color: '#6b7280', marginBottom: 12, fontSize: 14 }}>
             Quick overview for <b>{subjectId}</b>. Use the tabs to enter marks.
           </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-              gap: 12,
-            }}
-          >
-            {visibleTabs.filter((t) => t.key !== 'dashboard').map((t) => (
-              <div
-                key={t.key}
-                className="obe-card"
-              >
-                <div style={{ fontWeight: 700, color: '#0f172a' }}>{t.label}</div>
-                <div style={{ marginTop: 6, fontSize: 13, color: '#6b7280' }}>
-                  Rows saved: {String(t.key).startsWith('cqi_') ? '—' : (counts[t.key] ?? 0)}
-                </div>
-                {/* Open button removed per dashboard design update */}
-              </div>
-            ))}
-          </div>
+          <ProgressStrip items={progressItems} />
+          {/* Assessment tiles removed from dashboard per request. */}
           <div style={{ marginTop: 14 }}>
-            <DashboardWidgets subjectId={subjectId} />
+            <DashboardWidgets subjectId={subjectId} teachingAssignmentId={selectedTaId ?? null} />
           </div>
         </div>
       )}
@@ -953,6 +1123,8 @@ export default function MarkEntryTabs({
           </div>
             );
           })()}
+
+          <ProgressStrip items={progressItems} />
           {activeGate.loading && activeAssessmentKey ? (
             <div style={{ padding: '10px 0', color: '#6b7280', fontSize: 13 }}>Checking availability…</div>
           ) : !activeEnabled && activeAssessmentKey ? (
@@ -1010,7 +1182,11 @@ export default function MarkEntryTabs({
                   return normalizedEffectiveClassType === 'TCPR' ? (
                     <Review1SheetEntry subjectId={subjectId} teachingAssignmentId={selectedTaId ?? undefined} label="Review 1" />
                   ) : (
-                    <Review1Entry subjectId={subjectId} teachingAssignmentId={selectedTaId ?? undefined} />
+                    <Review1Entry
+                      subjectId={subjectId}
+                      teachingAssignmentId={selectedTaId ?? undefined}
+                      classType={effectiveClassType ?? null}
+                    />
                   );
                 }
                 if (active === 'ssa2') return <Ssa2Entry subjectId={subjectId} teachingAssignmentId={selectedTaId ?? undefined} />;
@@ -1018,7 +1194,11 @@ export default function MarkEntryTabs({
                   return normalizedEffectiveClassType === 'TCPR' ? (
                     <Review2SheetEntry subjectId={subjectId} teachingAssignmentId={selectedTaId ?? undefined} label="Review 2" />
                   ) : (
-                    <Review2Entry subjectId={subjectId} teachingAssignmentId={selectedTaId ?? undefined} />
+                    <Review2Entry
+                      subjectId={subjectId}
+                      teachingAssignmentId={selectedTaId ?? undefined}
+                      classType={effectiveClassType ?? null}
+                    />
                   );
                 }
 

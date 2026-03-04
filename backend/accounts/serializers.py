@@ -65,6 +65,7 @@ class MeSerializer(serializers.Serializer):
     profile_type = serializers.SerializerMethodField()
     profile = serializers.SerializerMethodField()
     college = serializers.SerializerMethodField()
+    is_iqac_main = serializers.SerializerMethodField()
 
     def get_roles(self, obj):
         roles = [r.name for r in obj.roles.all()]
@@ -85,7 +86,39 @@ class MeSerializer(serializers.Serializer):
         except Exception:
             pass
 
+        # Add RoleAssignment-based roles (e.g. IQAC, HAA) that are stored
+        # separately from the User.roles ManyToMany.
+        try:
+            from academics.models import RoleAssignment
+            existing = {str(r).upper() for r in roles}
+            ra_roles = RoleAssignment.objects.filter(
+                staff__user=obj, is_active=True
+            ).values_list('role__name', flat=True)
+            for r in ra_roles:
+                ru = str(r or '').strip().upper()
+                if ru and ru not in existing:
+                    roles.append(ru)
+                    existing.add(ru)
+        except Exception:
+            pass
+
         return roles
+
+    def get_is_iqac_main(self, obj):
+        """True only for the single IQAC main account (username 000000)."""
+        try:
+            if str(getattr(obj, 'username', '') or '').strip() != '000000':
+                return False
+            # Check User.roles ManyToMany
+            if obj.roles.filter(name__iexact='IQAC').exists():
+                return True
+            # Check RoleAssignment
+            from academics.models import RoleAssignment
+            return RoleAssignment.objects.filter(
+                staff__user=obj, role__name__iexact='IQAC', is_active=True
+            ).exists()
+        except Exception:
+            return False
 
     def get_permissions(self, obj):
         from .utils import get_user_permissions

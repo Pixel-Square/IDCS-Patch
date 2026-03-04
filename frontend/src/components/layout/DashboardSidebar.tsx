@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 
 
 import useDashboard from '../../hooks/useDashboard';
-import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare } from 'lucide-react';
+import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2 } from 'lucide-react';
 
 import { useSidebar } from './SidebarContext';
 import { fetchPendingPublishRequestCount } from '../../services/obe';
@@ -35,11 +35,13 @@ import { fetchPendingPublishRequestCount } from '../../services/obe';
   obe_due_dates: CalendarClock,
   obe_requests: Bell,
   hod_obe_requests: Bell,
+  hod_result_analysis: BarChart2,
   academic_controller: Layout,
   notifications: Bell,
   academic_calendar: Calendar,
   pbas: ClipboardList,
   pbas_manager: Layout,
+  settings: Settings,
 
 };
 
@@ -140,6 +142,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if (entry.hod_teaching && (rolesUpper.includes('ADVISOR') || permsLower.includes('academics.assign_teaching'))) items.push({ key: 'hod_teaching', label: 'Teaching Assign', to: '/advisor/teaching' });
   const canHodObeRequests = Boolean((entry as any)?.hod_obe_requests) || rolesUpper.includes('HOD');
   if (canHodObeRequests) items.push({ key: 'hod_obe_requests', label: 'HOD: OBE Requests', to: '/hod/obe-requests' });
+  if (rolesUpper.includes('HOD') || rolesUpper.includes('ADVISOR')) items.push({ key: 'hod_result_analysis', label: 'Result Analysis', to: '/hod/result-analysis' });
 
   // Staffs page: require explicit view permission
   if (permsLower.includes('academics.view_staffs_page')) {
@@ -168,7 +171,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
 
   // Student: show My Attendance link for students
   if (flags.is_student) {
-    items.push({ key: 'student_academics', label: 'Academics', to: '/student/academics' });
+    items.push({ key: 'student_academics', label: 'My Marks', to: '/student/academics' });
     items.push({ key: 'student_attendance', label: 'My Attendance', to: '/student/attendance' });
     items.push({ key: 'pbas', label: 'My Progress', to: '/student/pbas' });
   }
@@ -206,10 +209,10 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
 
   // Academic calendar is available for all authenticated users
   items.push({ key: 'academic_calendar', label: 'Academic Calendar', to: '/academic-calendar' });
-  
-  // Show notifications for IQAC role only
-  if (isIqac) {
-    items.push({ key: 'notifications', label: 'Notifications', to: '/notifications' });
+
+  // Settings (IQAC only) – includes Notification Templates and WhatsApp config
+  if (isIqac && !items.some((item) => item.key === 'settings')) {
+    items.push({ key: 'settings', label: 'Settings', to: '/settings' });
   }
 
   // Only add OBE once
@@ -290,8 +293,10 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
                     </span>
                   </Link>
 
-                  {/* Submenu for Academic: show OBE Master and Due Dates */}
-                  {i.key === 'academic' && canObeMaster && expanded.academic ? (
+                    {/* Submenu for Academic: show OBE Master and Due Dates.
+                      Hidden when sidebar is collapsed and for IQAC role
+                      (IQAC main account uses other IQAC tools instead). */}
+                    {i.key === 'academic' && canObeMaster && expanded.academic && !collapsed && !isIqac ? (
                     <ul className="pl-8 mt-1 space-y-1">
                       <li>
                         <Link to={'/academic?tab=obe_master'} className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${loc.pathname.startsWith('/academic') && new URLSearchParams(loc.search).get('tab') === 'obe_master' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`} onClick={() => { if (window.innerWidth < 1024) toggle(); }}>
@@ -308,8 +313,9 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
                     </ul>
                   ) : null}
 
-                  {/* Submenu for Academic Controller (IQAC) */}
-                  {i.key === 'academic_controller' && expanded.academic_controller ? (
+                  {/* Submenu for Academic Controller (IQAC).
+                      Also hidden when sidebar is collapsed. */}
+                  {i.key === 'academic_controller' && expanded.academic_controller && !collapsed ? (
                     <ul className="pl-8 mt-1 space-y-1">
                       <li>
                         <Link to={'/iqac/academic-controller?tab=dashboard'} className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${loc.pathname.startsWith('/iqac/academic-controller') && new URLSearchParams(loc.search).get('tab') === 'dashboard' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`} onClick={() => { if (window.innerWidth < 1024) toggle(); }}>

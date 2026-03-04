@@ -3050,7 +3050,7 @@ def obe_progress_overview(request):
     Access is restricted to HOD/AHOD/Advisor users (superusers allowed).
     """
 
-    from academics.models import AcademicYear, DepartmentRole, SectionAdvisor, TeachingAssignment, Subject
+    from academics.models import AcademicYear, Department, DepartmentRole, SectionAdvisor, TeachingAssignment, Subject
     from .models import (
         ObeMarkTableLock,
         Ssa1Mark,
@@ -3086,6 +3086,12 @@ def obe_progress_overview(request):
             role_names = set()
 
     has_hod = 'HOD' in role_names or 'AHOD' in role_names
+    is_iqac = 'IQAC' in role_names
+    is_iqac_main = False
+    try:
+        is_iqac_main = bool(is_iqac and str(getattr(user, 'username', '') or '').strip() == '000000')
+    except Exception:
+        is_iqac_main = False
 
     # Advisors are primarily represented by academics.SectionAdvisor mappings.
     # Some deployments may not assign an explicit 'ADVISOR' role, so detect via DB too.
@@ -3130,14 +3136,61 @@ def obe_progress_overview(request):
         except Exception:
             has_advisor = False
 
-    # Enforce access control: only HOD/AHOD/Advisor can view this aggregated progress.
-    if not getattr(user, 'is_superuser', False) and not has_hod and not has_advisor:
+    # Enforce access control: HOD/AHOD/Advisor can view this aggregated progress.
+    # Additionally, allow the *main IQAC account* (username 000000) to view all departments/sections.
+    if not getattr(user, 'is_superuser', False) and not has_hod and not has_advisor and not is_iqac_main:
         return Response({'detail': 'Progress view is only available for HOD/Advisor.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # Determine primary context: HOD > ADVISOR > FACULTY
+    # Determine primary context: IQAC_MAIN > HOD > ADVISOR > FACULTY
     primary_role = 'FACULTY'
     department = None
     sections_qs = None
+
+    # IQAC main account: can view progress across departments/sections.
+    departments_for_iqac = None
+    selected_department_id = None
+    if is_iqac_main and ay is not None:
+        primary_role = 'IQAC'
+        try:
+            from academics.models import Section
+
+            departments_for_iqac = list(Department.objects.all().order_by('short_name', 'code', 'name', 'id'))
+
+            raw_dept = None
+            try:
+                raw_dept = request.query_params.get('department_id')
+            except Exception:
+                raw_dept = request.GET.get('department_id')
+
+            raw_dept = str(raw_dept or '').strip()
+            if raw_dept.lower() in ('all', '*', '0', 'none') or raw_dept == '':
+                selected_department_id = None
+                sections_qs = (
+                    Section.objects.select_related('batch', 'batch__course', 'batch__course__department')
+                    .all()
+                )
+                department = None
+            else:
+                try:
+                    selected_department_id = int(raw_dept)
+                except Exception:
+                    selected_department_id = None
+
+                if selected_department_id is not None:
+                    department = Department.objects.filter(id=selected_department_id).first()
+                else:
+                    department = None
+
+                # If an invalid department id is provided, return no sections rather than a potentially huge dataset.
+                if department is None:
+                    sections_qs = Section.objects.none()
+                else:
+                    sections_qs = (
+                        Section.objects.select_related('batch', 'batch__course', 'batch__course__department')
+                        .filter(batch__course__department=department)
+                    )
+        except Exception:
+            sections_qs = None
 
     if has_hod and ay is not None:
         # Find department from DepartmentRole for this academic year
@@ -3657,6 +3710,18 @@ def obe_progress_overview(request):
         'sections': section_results,
     }
 
+    if is_iqac_main:
+        resp['selected_department_id'] = selected_department_id
+        resp['departments'] = [
+            {
+                'id': getattr(d, 'id', None),
+                'code': getattr(d, 'code', None),
+                'name': getattr(d, 'name', None),
+                'short_name': getattr(d, 'short_name', None),
+            }
+            for d in (departments_for_iqac or [])
+        ]
+
     if department is not None:
         resp['department'] = {
             'id': getattr(department, 'id', None),
@@ -3666,6 +3731,71 @@ def obe_progress_overview(request):
         }
 
     return Response(resp)
+
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def obe_progress_departments(request):
+    """
+    Lightweight endpoint for IQAC main progress view.
+    Returns all departments with section_count and course_count for the current AY.
+    """
+    user = request.user
+    try:
+        from academics.models import AcademicYear, Department, RoleAssignment, TeachingAssignment, Section
+
+        # Verify IQAC main
+        role_names: set = set()
+        try:
+            rqs = RoleAssignment.objects.filter(staff__user=user, is_active=True).values_list('role__name', flat=True)
+            role_names = {str(n or '').strip().upper() for n in rqs}
+        except Exception:
+            pass
+
+        is_iqac = 'IQAC' in role_names
+        is_iqac_main = is_iqac and str(getattr(user, 'username', '') or '').strip() == '000000'
+
+        if not is_iqac_main and not getattr(user, 'is_superuser', False):
+            return Response({'detail': 'IQAC main account required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        ay = AcademicYear.objects.filter(is_active=True).first()
+
+        departments = list(Department.objects.all().order_by('short_name', 'code', 'name', 'id'))
+
+        result = []
+        for dept in departments:
+            # Count sections in this department
+            sec_qs = Section.objects.filter(batch__course__department=dept)
+            section_count = sec_qs.count()
+
+            # Count distinct subjects (TAs) for the dept in the current AY
+            try:
+                ta_qs = TeachingAssignment.objects.filter(section__batch__course__department=dept)
+                if ay is not None:
+                    ta_qs = ta_qs.filter(academic_year=ay)
+                course_count = ta_qs.values('subject_id').distinct().count()
+            except Exception:
+                course_count = 0
+
+            result.append({
+                'id': dept.id,
+                'code': getattr(dept, 'code', None),
+                'name': dept.name,
+                'short_name': getattr(dept, 'short_name', None),
+                'section_count': section_count,
+                'course_count': course_count,
+            })
+
+        return Response({
+            'departments': result,
+            'academic_year': {
+                'id': getattr(ay, 'id', None),
+                'name': getattr(ay, 'name', None),
+            } if ay else None,
+        })
+    except Exception as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
@@ -5856,7 +5986,6 @@ def publish_requests_history(request):
     return Response({'results': out})
 
 
-@api_view(['GET'])
 @api_view(['GET'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])

@@ -13,6 +13,12 @@ from .views import (
     UserQueryDetailView,
     AllQueriesListView,
     QueryUpdateView,
+    WhatsAppGatewayStatusView,
+    WhatsAppGatewayQrView,
+    WhatsAppGatewayDisconnectView,
+    WhatsAppGatewayRestartView,
+    WhatsAppGatewaySendTestView,
+    WhatsAppGatewayClearSessionView,
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 from .api.dashboard import DashboardView
@@ -33,4 +39,12 @@ urlpatterns = [
     path('queries/<int:pk>/', UserQueryDetailView.as_view(), name='user_query_detail'),
     path('queries/all/', AllQueriesListView.as_view(), name='all_queries'),
     path('queries/<int:pk>/update/', QueryUpdateView.as_view(), name='query_update'),
+
+    # IQAC Settings: WhatsApp gateway pairing/status
+    path('settings/whatsapp/status/',     WhatsAppGatewayStatusView.as_view(),   name='settings_whatsapp_status'),
+    path('settings/whatsapp/qr/',         WhatsAppGatewayQrView.as_view(),       name='settings_whatsapp_qr'),
+    path('settings/whatsapp/disconnect/', WhatsAppGatewayDisconnectView.as_view(), name='settings_whatsapp_disconnect'),
+    path('settings/whatsapp/restart/',    WhatsAppGatewayRestartView.as_view(),  name='settings_whatsapp_restart'),
+    path('settings/whatsapp/send-test/',  WhatsAppGatewaySendTestView.as_view(), name='settings_whatsapp_send_test'),
+    path('settings/whatsapp/clear-session/', WhatsAppGatewayClearSessionView.as_view(), name='settings_whatsapp_clear_session'),
 ]

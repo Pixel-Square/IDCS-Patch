@@ -5,16 +5,21 @@ import sys
 from pathlib import Path
 from datetime import timedelta
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 # Make python-dotenv optional so local tooling (manage.py, migrations) can run
 # even if the dependency isn't installed in the current environment.
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    # Prefer the backend-local .env regardless of the process working directory.
+    # This prevents production deployments (e.g. Gunicorn/systemd) from silently
+    # missing WhatsApp/SMS configuration due to a different CWD.
+    load_dotenv(dotenv_path=BASE_DIR / '.env', override=False)
+    # Also allow a top-level .env (if present) without overriding already-loaded vars.
+    load_dotenv(override=False)
 except Exception:
     pass
-
-BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'dev-secret')
 
@@ -326,10 +331,23 @@ OBE_NOTIFICATION_EMAIL_TIMEOUT = int(os.getenv('OBE_NOTIFICATION_EMAIL_TIMEOUT',
 # WhatsApp notification uses local Node.js whatsapp-web.js microservice.
 OBE_EDIT_NOTIFICATION_WHATSAPP_ENABLED = os.getenv('OBE_EDIT_NOTIFICATION_WHATSAPP_ENABLED', '1') == '1'
 OBE_WHATSAPP_API_URL = os.getenv('OBE_WHATSAPP_API_URL', 'http://127.0.0.1:3000/send-whatsapp')
+# Optional: if the local gateway is down, you can provide a secondary WhatsApp send endpoint.
+# Example: https://db.krgi.co.in/whatsapp/send-whatsapp
+OBE_WHATSAPP_API_URL_FALLBACK = os.getenv('OBE_WHATSAPP_API_URL_FALLBACK', '')
+# Optional explicit base URL for gateway status/QR endpoints (used by IQAC Settings page).
+# If empty, the backend derives the base URL from OBE_WHATSAPP_API_URL.
+OBE_WHATSAPP_GATEWAY_BASE_URL = os.getenv('OBE_WHATSAPP_GATEWAY_BASE_URL', '')
+# Optional secondary base URL for the IQAC Settings QR/Status page.
+OBE_WHATSAPP_GATEWAY_BASE_URL_FALLBACK = os.getenv('OBE_WHATSAPP_GATEWAY_BASE_URL_FALLBACK', '')
 OBE_WHATSAPP_API_KEY = os.getenv('OBE_WHATSAPP_API_KEY', 'IQAC_SECRET_123')
 OBE_WHATSAPP_TIMEOUT_SECONDS = float(os.getenv('OBE_WHATSAPP_TIMEOUT_SECONDS', '8'))
 OBE_WHATSAPP_DEFAULT_COUNTRY_CODE = os.getenv('OBE_WHATSAPP_DEFAULT_COUNTRY_CODE', '91')
 OBE_WHATSAPP_ALLOW_NON_LOCAL_URL = os.getenv('OBE_WHATSAPP_ALLOW_NON_LOCAL_URL', '0') == '1'
+
+# WhatsApp gateway conventions vary; these paths control what the IQAC Settings page proxies.
+OBE_WHATSAPP_GATEWAY_STATUS_PATH = os.getenv('OBE_WHATSAPP_GATEWAY_STATUS_PATH', '/status')
+OBE_WHATSAPP_GATEWAY_QR_IMAGE_PATH = os.getenv('OBE_WHATSAPP_GATEWAY_QR_IMAGE_PATH', '/qr.png')
+OBE_WHATSAPP_GATEWAY_QR_PATH = os.getenv('OBE_WHATSAPP_GATEWAY_QR_PATH', '/qr')
 
 # --- Email (Linux local relay) configuration ---
 # Use Django SMTP backend with the local MTA (Postfix/Sendmail) listening on localhost:25.
