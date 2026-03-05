@@ -14,6 +14,7 @@ from .models import (
     Semester,
     Section,
     Batch,
+    BatchYear,
     Subject,
     STAFF_STATUS_CHOICES,
     STUDENT_STATUS_CHOICES,
@@ -1033,15 +1034,22 @@ class SubjectAdmin(admin.ModelAdmin):
 
 @admin.register(Batch)
 class BatchAdmin(admin.ModelAdmin):
-    list_display = ('name', 'course', 'regulation_display', 'start_year', 'end_year')
+    list_display = ('name', 'batch_year', 'course', 'regulation_display', 'start_year', 'end_year')
     search_fields = ('name', 'course__name', 'regulation__code', 'regulation__name')
-    list_filter = ('course', 'regulation')
+    list_filter = ('batch_year', 'course', 'regulation')
     raw_id_fields = ('regulation',)
     
     def regulation_display(self, obj):
         reg = getattr(obj, 'regulation', None)
         return getattr(reg, 'code', '—') if reg else '—'
     regulation_display.short_description = 'Regulation'
+
+
+@admin.register(BatchYear)
+class BatchYearAdmin(admin.ModelAdmin):
+    list_display = ('name', 'start_year', 'end_year')
+    search_fields = ('name',)
+    ordering = ('-name',)
 
 
 @admin.register(TeachingAssignment)

@@ -186,7 +186,16 @@ class Batch(models.Model):
     """A student cohort/batch for a given course.
 
     Example: Batch name '2023' for B.Tech CSE course. Sections belong to a Batch.
+    The `name` column is kept for ORM lookup compatibility; its value is
+    auto-populated from `batch_year.name` whenever `batch_year` is set.
     """
+    batch_year = models.ForeignKey(
+        'BatchYear',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='batches',
+        help_text='Shared batch year label (source of truth for the name)',
+    )
     name = models.CharField(max_length=32)
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='batches')
     start_year = models.PositiveSmallIntegerField(null=True, blank=True)
@@ -196,8 +205,66 @@ class Batch(models.Model):
     class Meta:
         unique_together = ('name', 'course')
 
+    def save(self, *args, **kwargs):
+        # If batch_year is linked, keep name in sync from it
+        if self.batch_year_id:
+            try:
+                by_name = BatchYear.objects.filter(pk=self.batch_year_id).values_list('name', flat=True).first()
+                if by_name:
+                    self.name = by_name
+            except Exception:
+                pass
+        elif self.name:
+            # Auto-link to existing BatchYear by name so the FK is always set
+            try:
+                by = BatchYear.objects.filter(name=self.name).first()
+                if by:
+                    self.batch_year = by
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.course.name} - {self.name}"
+
+
+class BatchYear(models.Model):
+    """A common batch year label shared across all departments/courses.
+
+    Use this when you want a single "2023" label that is not tied to any
+    specific course, e.g. for curriculum master / department curriculum /
+    elective subject batch references.
+    """
+    name = models.CharField(max_length=32, unique=True)
+    start_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    end_year = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ('-name',)
+        verbose_name = 'Batch Year'
+        verbose_name_plural = 'Batch Years'
+
+    def __str__(self):
+        return self.name
+
+
+@receiver(post_save, sender=Batch)
+def sync_batch_to_batchyear(sender, instance, **kwargs):
+    """When a Batch is saved, ensure a corresponding BatchYear row exists
+    and that the Batch.batch_year FK is set back to it.
+    """
+    if not instance.name:
+        return
+    by, _ = BatchYear.objects.get_or_create(
+        name=instance.name,
+        defaults={
+            'start_year': instance.start_year,
+            'end_year': instance.end_year,
+        },
+    )
+    # Link back without triggering recursive save (update only the FK column)
+    if instance.batch_year_id != by.pk:
+        Batch.objects.filter(pk=instance.pk).update(batch_year=by)
 
 
 class Subject(models.Model):

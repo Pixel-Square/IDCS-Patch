@@ -5217,3 +5217,22 @@ class AllStudentsView(APIView):
             logging.getLogger(__name__).exception('AllStudentsView error: %s', e)
             return Response({'error': 'Server error', 'detail': str(e)}, status=500)
 
+
+class BatchYearViewSet(viewsets.ModelViewSet):
+    """CRUD for common BatchYear labels (e.g. '2023') that are department-agnostic."""
+    permission_classes = (IsAuthenticated,)
+
+    def get_serializer_class(self):
+        from rest_framework import serializers
+        from .models import BatchYear
+
+        class BatchYearSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = BatchYear
+                fields = ('id', 'name', 'start_year', 'end_year')
+
+        return BatchYearSerializer
+
+    def get_queryset(self):
+        from .models import BatchYear
+        return BatchYear.objects.all().order_by('-name')
