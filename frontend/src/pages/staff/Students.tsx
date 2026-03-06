@@ -63,12 +63,10 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
   const [deptDeptFilter, setDeptDeptFilter] = useState<string>('')
   const [deptBatchFilter, setDeptBatchFilter] = useState<string>('')
   const [deptSectionFilter, setDeptSectionFilter] = useState<string>('')
-<<<<<<< HEAD
   // Edit modal state
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
   const [editFormData, setEditFormData] = useState<Student | null>(null)
-=======
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [debouncedSearch, setDebouncedSearch] = useState<string>('')
 
@@ -78,7 +76,6 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
     }, 300)
     return () => window.clearTimeout(timer)
   }, [searchQuery])
->>>>>>> origin/parasanna
 
   // Get user permissions from localStorage and user object
   const getPermissions = (): string[] => {
