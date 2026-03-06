@@ -27,7 +27,7 @@ import { useLockBodyScroll } from '../hooks/useLockBodyScroll';
 import PublishLockOverlay from './PublishLockOverlay';
 import AssessmentContainer from './containers/AssessmentContainer';
 import { ModalPortal } from './ModalPortal';
-import { normalizeClassType } from '../constants/classTypes';
+import { normalizeObeClassType } from '../constants/classTypes';
 import * as XLSX from 'xlsx';
 import { downloadTotalsWithPrompt } from '../utils/assessmentTotalsDownload';
 
@@ -235,7 +235,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
   const [subjectPayload, setSubjectPayload] = useState<any>(null);
 
   const classTypeKey = useMemo(() => {
-    const v = String(normalizeClassType(classType) || '').trim().toUpperCase();
+    const v = String(normalizeObeClassType(classType) || '').trim().toUpperCase();
     if (!v) return '';
     // IQAC QP patterns are keyed by coarse class_type: THEORY/TCPR/TCPL/LAB.
     if (v === 'THEORY') return 'THEORY';

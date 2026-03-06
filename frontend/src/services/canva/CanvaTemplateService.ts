@@ -28,6 +28,20 @@ export interface CanvaDesignItem {
   updated_at: number;
 }
 
+export interface CanvaBrandTemplateItem {
+  id: string;
+  title: string;
+  thumbnail?: { url: string };
+  view_url: string;
+  create_url: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CanvaBrandTemplateDataset {
+  dataset?: Record<string, { type: 'text' | 'image' | 'chart' | string }>;
+}
+
 // ── Designs ───────────────────────────────────────────────────────────────────
 
 /**
@@ -49,6 +63,40 @@ export async function listUserDesigns(query = ''): Promise<CanvaDesignItem[]> {
 
   const data = await res.json() as { items?: CanvaDesignItem[] };
   return data.items ?? [];
+}
+
+/** Fetch live Canva Brand Templates that support autofill datasets. */
+export async function listUserBrandTemplates(query = ''): Promise<CanvaBrandTemplateItem[]> {
+  const conn = getConnection();
+  const params = new URLSearchParams({ dataset: 'non_empty', ownership: 'any', limit: '100' });
+
+  if (conn?.accessToken) params.set('access_token', conn.accessToken);
+  if (query) params.set('query', query);
+
+  const res = await fetch(`/api/canva/brand-templates?${params.toString()}`);
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({})) as Record<string, string>;
+    throw new Error(e.detail ?? `Failed to list brand templates (${res.status})`);
+  }
+
+  const data = await res.json() as { items?: CanvaBrandTemplateItem[] };
+  return data.items ?? [];
+}
+
+/** Fetch the autofill dataset definition for one Brand Template. */
+export async function getBrandTemplateDataset(brandTemplateId: string): Promise<Record<string, { type: 'text' | 'image' | 'chart' | string }>> {
+  const conn = getConnection();
+  const params = new URLSearchParams();
+  if (conn?.accessToken) params.set('access_token', conn.accessToken);
+
+  const res = await fetch(`/api/canva/brand-templates/${encodeURIComponent(brandTemplateId)}/dataset?${params.toString()}`);
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({})) as Record<string, string>;
+    throw new Error(e.detail ?? `Failed to load brand template dataset (${res.status})`);
+  }
+
+  const data = await res.json() as CanvaBrandTemplateDataset;
+  return data.dataset ?? {};
 }
 
 // ── Template library (DB-backed) ──────────────────────────────────────────────
@@ -97,7 +145,7 @@ export async function fetchTemplatesFromBackend(): Promise<CanvaTemplate[]> {
  * Persists to backend DB AND updates localStorage cache.
  */
 export async function saveAsTemplate(
-  design: CanvaDesignItem,
+  design: CanvaDesignItem | CanvaBrandTemplateItem,
   savedBy: string,
 ): Promise<CanvaTemplate> {
   // 1. Save to backend DB
@@ -109,7 +157,7 @@ export async function saveAsTemplate(
       canva_design_id:   design.id,
       thumbnail_url:     design.thumbnail?.url ?? '',
       is_brand_template: true,
-      edit_url:          design.urls?.edit_url ?? '',
+      edit_url:          ('urls' in design ? design.urls?.edit_url : design.create_url) ?? '',
       saved_by:          savedBy,
     }),
   });
@@ -124,7 +172,7 @@ export async function saveAsTemplate(
     canvaTemplateId: design.id,
     previewUrl:      design.thumbnail?.url ?? '',
     thumbnailUrl:    design.thumbnail?.url ?? '',
-    editUrl:         design.urls?.edit_url,
+    editUrl:         'urls' in design ? design.urls?.edit_url : design.create_url,
     savedBy,
   });
 }

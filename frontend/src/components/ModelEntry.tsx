@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { lsGet, lsSet } from '../utils/localStorage';
-import { normalizeClassType } from '../constants/classTypes';
+import { normalizeObeClassType } from '../constants/classTypes';
 import { fetchTeachingAssignmentRoster, TeachingAssignmentRosterStudent } from '../services/roster';
 import fetchWithAuth from '../services/fetchAuth';
 import * as OBE from '../services/obe';
@@ -172,7 +172,7 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
   const excelFileInputRef = useRef<HTMLInputElement | null>(null);
   const [excelBusy, setExcelBusy] = useState(false);
 
-  const normalizedClassType = useMemo(() => normalizeClassType(classType), [classType]);
+  const normalizedClassType = useMemo(() => normalizeObeClassType(classType), [classType]);
   const isTheory = normalizedClassType === 'THEORY';
   const isTcplLike = normalizedClassType === 'TCPL' || normalizedClassType === 'TCPR';
   const tcplLikeKind = normalizedClassType === 'TCPR' ? 'TCPR' : 'TCPL';

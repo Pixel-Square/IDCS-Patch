@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { lsGet, lsRemove, lsSet } from '../utils/localStorage';
-import { normalizeClassType } from '../constants/classTypes';
+import { normalizeObeClassType } from '../constants/classTypes';
 import Cia1Entry from './Cia1Entry';
 import Cia2Entry from './Cia2Entry';
 import Formative1List from './Formative1List';
@@ -136,7 +136,7 @@ function normalizeEnabledAssessments(enabledAssessments: string[] | null | undef
 }
 
 function getVisibleTabs(classType: string | null | undefined, enabledAssessments?: string[] | null): TabDef[] {
-  const ct = normalizeClassType(classType);
+  const ct = normalizeObeClassType(classType);
   const enabled = normalizeEnabledAssessments(enabledAssessments);
 
   // SPECIAL: show only explicitly enabled assessments (+ dashboard)
@@ -538,17 +538,13 @@ export default function MarkEntryTabs({
   // Tab visibility: only treat QP2 as TCPR subtype when class type is missing.
   // If class type is explicitly THEORY, keep formative tabs (SSA/Formative/CIA).
   const effectiveClassTypeForTabs = useMemo(() => {
-    const ct = normalizeClassType(effectiveClassType);
-    // Some data sources may contain variants like "TC PR", "TC-PR" or "TCPR - ...".
-    const ctKey = ct.replace(/[^A-Z0-9]/g, '');
-    if (ctKey.includes('TCPR')) return 'TCPR';
-    if (ctKey.includes('TCPL')) return 'TCPL';
+    const ct = normalizeObeClassType(effectiveClassType);
     const qp = String(questionPaperType || '').trim().toUpperCase();
     if (qp === 'QP2' && !ct) return 'TCPR';
     return effectiveClassType;
   }, [effectiveClassType, questionPaperType]);
 
-  const normalizedEffectiveClassType = useMemo(() => normalizeClassType(effectiveClassTypeForTabs), [effectiveClassTypeForTabs]);
+  const normalizedEffectiveClassType = useMemo(() => normalizeObeClassType(effectiveClassTypeForTabs), [effectiveClassTypeForTabs]);
 
   useEffect(() => {
     let mounted = true;

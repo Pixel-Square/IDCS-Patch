@@ -27,6 +27,8 @@ urlpatterns = [
     path('templates/<int:template_id>', canva_views.template_detail_api, name='canva-template-detail'),
 
     # ── Canva API proxy ───────────────────────────────────────────────────────
+    path('brand-templates', canva_views.brand_templates, name='canva-brand-templates'),
+    path('brand-templates/<str:brand_template_id>/dataset', canva_views.brand_template_dataset, name='canva-brand-template-dataset'),
     path('designs',      canva_views.designs,        name='canva-designs'),
 
     path('autofills',             canva_views.autofills_submit, name='canva-autofills-submit'),
@@ -37,11 +39,12 @@ urlpatterns = [
 
     # ── Image proxy (server-side CORS bypass for Canva CDN thumbnails) ────────
     path('thumbnail-proxy',            canva_views.thumbnail_proxy, name='canva-thumbnail-proxy'),
+
     path('designs/<str:design_id>/info', canva_views.design_info,   name='canva-design-info'),
 
-    # ── One-shot poster generator: autofill → export → proxy image ───────────
-    path('generate-poster',      canva_views.generate_poster,      name='canva-generate-poster'),
-    # ── n8n-proxied poster generator (falls back to generate-poster) ─────────
-    path('trigger-n8n-poster',   canva_views.trigger_n8n_poster,   name='canva-trigger-n8n-poster'),
-    path('noop-callback',        canva_views.noop_callback,        name='canva-noop-callback'),
+    # ── Poster Maker (new end-to-end flow) ───────────────────────────────────
+    path('generate-poster', canva_views.generate_poster, name='canva-generate-poster'),
+    path('upload-media',    canva_views.upload_media,    name='canva-upload-media'),
+    path('poster-maker',    canva_views.poster_maker,    name='canva-poster-maker'),
 ]
+

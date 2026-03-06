@@ -1,44 +1,52 @@
 import React, { useState } from 'react';
 import { CheckCircle, XCircle, Clock, Calendar, MapPin, Users, MessageCircle, RefreshCw, UserCircle } from 'lucide-react';
 import {
+  approveEventByBranding,
   getBrandingEvents,
-  setEventStatus,
+  rejectEventByBranding,
   type CollegeEvent,
   type EventStatus,
 } from '../../store/eventStore';
 
 // ── Status display config ────────────────────────────────────────────────────
 const STATUS_INFO: Record<EventStatus, { label: string; color: string; dot: string }> = {
-  Draft:              { label: 'Draft',            color: 'bg-gray-100 text-gray-700',   dot: 'bg-gray-400'   },
-  'Pending Approval': { label: 'Pending Approval', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-400'  },
-  Approved:           { label: 'Approved',          color: 'bg-green-100 text-green-700', dot: 'bg-green-500'  },
-  Rejected:           { label: 'Rejected',          color: 'bg-red-100 text-red-600',     dot: 'bg-red-500'    },
+  Draft:                     { label: 'Draft',                 color: 'bg-gray-100 text-gray-700',   dot: 'bg-gray-400'   },
+  'Pending IQAC Approval':   { label: 'Waiting for IQAC',      color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-400'  },
+  'Pending Branding Approval': { label: 'Pending Branding',   color: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
+  Approved:                  { label: 'Approved',              color: 'bg-green-100 text-green-700', dot: 'bg-green-500'  },
+  'Rejected by IQAC':        { label: 'Rejected by IQAC',      color: 'bg-rose-100 text-rose-700',   dot: 'bg-rose-500'   },
+  'Rejected by Branding':    { label: 'Rejected by Branding',  color: 'bg-red-100 text-red-600',     dot: 'bg-red-500'    },
 };
 
-type FilterValue = 'all' | EventStatus;
+type FilterValue = 'all' | 'Pending Branding Approval' | 'Approved' | 'Rejected by Branding';
 
 export default function BrandingEventApprovalPage() {
   const [events, setEvents] = useState<CollegeEvent[]>(getBrandingEvents);
-  const [filter, setFilter] = useState<FilterValue>('Pending Approval');
+  const [filter, setFilter] = useState<FilterValue>('Pending Branding Approval');
   const [noteInput, setNoteInput] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   function refresh() { setEvents(getBrandingEvents()); }
 
-  function respond(id: string, action: 'Approved' | 'Rejected') {
-    setEventStatus(id, action, noteInput[id]);
+  function respond(id: string, action: 'Approved' | 'Rejected by Branding') {
+    if (action === 'Approved') approveEventByBranding(id, noteInput[id]);
+    else rejectEventByBranding(id, noteInput[id]);
     refresh();
     setNoteInput((p) => { const n = { ...p }; delete n[id]; return n; });
   }
 
   const counts: Partial<Record<FilterValue, number>> = { all: events.length };
-  events.forEach((e) => { counts[e.status] = (counts[e.status] ?? 0) + 1; });
+  events.forEach((e) => {
+    if (e.status === 'Pending Branding Approval' || e.status === 'Approved' || e.status === 'Rejected by Branding') {
+      counts[e.status] = (counts[e.status] ?? 0) + 1;
+    }
+  });
 
   const filterOptions: Array<{ label: string; value: FilterValue }> = [
     { label: `All (${events.length})`,                                               value: 'all'               },
-    { label: `Pending (${counts['Pending Approval'] ?? 0})`,                         value: 'Pending Approval'  },
+    { label: `Pending (${counts['Pending Branding Approval'] ?? 0})`,                value: 'Pending Branding Approval'  },
     { label: `Approved (${counts['Approved'] ?? 0})`,                                value: 'Approved'          },
-    { label: `Rejected (${counts['Rejected'] ?? 0})`,                                value: 'Rejected'          },
+    { label: `Rejected (${counts['Rejected by Branding'] ?? 0})`,                    value: 'Rejected by Branding'          },
   ];
 
   const filtered = filter === 'all' ? events : events.filter((e) => e.status === filter);
@@ -48,7 +56,7 @@ export default function BrandingEventApprovalPage() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Event Approval</h1>
-          <p className="text-gray-500 text-sm mt-1">Review events forwarded by HODs for branding support.</p>
+          <p className="text-gray-500 text-sm mt-1">Review only the events that IQAC has approved and forwarded to Branding.</p>
         </div>
         <button onClick={refresh} className="p-2 rounded-xl border border-purple-200 text-purple-600 hover:bg-purple-50 transition-colors" title="Refresh">
           <RefreshCw className="w-4 h-4" />
@@ -71,7 +79,7 @@ export default function BrandingEventApprovalPage() {
 
       <div className="space-y-4">
         {filtered.map((event) => {
-          const si = STATUS_INFO[event.status] ?? STATUS_INFO['Pending Approval'];
+          const si = STATUS_INFO[event.status] ?? STATUS_INFO['Pending Branding Approval'];
           const isOpen = expanded[event.id];
 
           return (
@@ -142,23 +150,30 @@ export default function BrandingEventApprovalPage() {
                   )}
 
                   <p className="text-xs text-gray-400">
-                    Forwarded: {new Date(event.updatedAt).toLocaleString()}
+                    Forwarded: {new Date(event.forwardedToBrandingAt || event.updatedAt).toLocaleString()}
                   </p>
 
                   {/* Existing review note */}
-                  {event.reviewNote && (
-                    <div className="flex items-start gap-2 bg-gray-50 rounded-xl px-3 py-2.5 text-sm text-gray-600">
-                      <MessageCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-400" />
-                      {event.reviewNote}
+                  {event.iqacReviewNote && (
+                    <div className="flex items-start gap-2 bg-amber-50 rounded-xl px-3 py-2.5 text-sm text-amber-800">
+                      <MessageCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-500" />
+                      IQAC note: {event.iqacReviewNote}
                     </div>
                   )}
 
-                  {/* Actions for Pending Approval */}
-                  {event.status === 'Pending Approval' && (
+                  {event.brandingReviewNote && (
+                    <div className="flex items-start gap-2 bg-gray-50 rounded-xl px-3 py-2.5 text-sm text-gray-600">
+                      <MessageCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-400" />
+                      Branding note: {event.brandingReviewNote}
+                    </div>
+                  )}
+
+                  {/* Actions for Pending Branding Approval */}
+                  {event.status === 'Pending Branding Approval' && (
                     <div className="space-y-2 pt-1">
                       <textarea
                         rows={2}
-                        placeholder="Optional review note for HOD..."
+                        placeholder="Optional branding review note for HOD..."
                         className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
                         value={noteInput[event.id] || ''}
                         onChange={(e) => setNoteInput((p) => ({ ...p, [event.id]: e.target.value }))}
@@ -171,7 +186,7 @@ export default function BrandingEventApprovalPage() {
                           <CheckCircle className="w-4 h-4" /> Approve
                         </button>
                         <button
-                          onClick={() => respond(event.id, 'Rejected')}
+                          onClick={() => respond(event.id, 'Rejected by Branding')}
                           className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors"
                         >
                           <XCircle className="w-4 h-4" /> Reject
@@ -189,8 +204,8 @@ export default function BrandingEventApprovalPage() {
           <div className="text-center py-16 text-gray-400">
             <Clock className="w-10 h-10 mx-auto mb-3 opacity-50" />
             <p className="text-sm">
-              {filter === 'Pending Approval'
-                ? 'No pending events. Events forwarded by HODs will appear here.'
+              {filter === 'Pending Branding Approval'
+                ? 'No IQAC-approved events are waiting for branding review.'
                 : 'No events in this category.'}
             </p>
           </div>

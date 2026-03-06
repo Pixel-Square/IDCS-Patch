@@ -7,6 +7,7 @@ import { useSidebar } from './components/layout/SidebarContext';
 import TimetableEditor from './pages/advisor/TimetableEditor';
 import HodTimetableEditor from './pages/iqac/TimetableEditor';
 import ObeRequestsPage from './pages/iqac/ObeRequestsPage';
+import IQACEventApprovalPage from './pages/iqac/IQACEventApprovalPage';
 import AcademicControllerPage from './pages/iqac/AcademicControllerPage';
 import AcademicControllerCoursePage from './pages/iqac/AcademicControllerCoursePage';
 import AcademicControllerCourseMarksPage from './pages/iqac/AcademicControllerCourseMarksPage';
@@ -56,6 +57,7 @@ import BrandingProtectedRoute from './components/routing/BrandingProtectedRoute'
 import HodEventsListPage from './pages/hod/events/HodEventsListPage';
 import HodEventCreatePage from './pages/hod/events/HodEventCreatePage';
 import CanvaDesignEditorPage from './pages/hod/events/CanvaDesignEditorPage';
+import PosterMakerPage from './pages/events/PosterMakerPage';
 
 type RoleObj = { name: string };
 type Me = {
@@ -239,6 +241,11 @@ export default function App() {
                   path="/hod/events/canva-editor"
                   element={<ProtectedRoute user={user} requiredRoles={["HOD"]} element={<CanvaDesignEditorPage />} />}
                 />
+                {/* Canva Poster Maker — accessible to HOD, IQAC, and STAFF */}
+                <Route
+                  path="/poster-maker"
+                  element={<ProtectedRoute user={user} requiredRoles={["HOD", "IQAC", "STAFF"]} element={<PosterMakerPage />} />}
+                />
                 <Route
                   path="/staffs"
                   element={<ProtectedRoute user={user} requiredPermissions={["academics.view_staffs_page"]} element={<StaffsPage />} />}
@@ -250,6 +257,10 @@ export default function App() {
                 <Route
                   path="/iqac/timetable"
                   element={<ProtectedRoute user={user} requiredPermissions={["timetable.manage_templates"]} element={<HodTimetableEditor />} />}
+                />
+                <Route
+                  path="/iqac/event-approvals"
+                  element={<ProtectedRoute user={user} requiredPermissions={["obe.master.manage"]} element={<IQACEventApprovalPage />} />}
                 />
                 <Route
                   path="/iqac/academic-controller"

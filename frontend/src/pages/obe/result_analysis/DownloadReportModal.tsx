@@ -235,30 +235,32 @@ export default function DownloadReportModal({
       await drawPageBanner();
 
       /* ─────────────────────────────────────────────────────────
-         INFO SECTION: professional 2-column bordered grid
+         INFO SECTION: professional 3-column bordered grid
          ───────────────────────────────────────────────────────── */
-      const colW = UW / 2;
-      const labelOffset = 30; // space reserved for label text
-      const rowH = 7;
+      const colW3 = UW / 3;
+      const labelW3 = 26; // space reserved for label text in each 3rd-column
+      const rowH = 6.5;
 
-      // Build info rows depending on role
+      // Build info cells as a flat list: [label, value] pairs.
+      // We'll flow them into 3 columns, left-to-right across each row.
       const semLabel = semester != null ? `Semester ${semester}` : '';
-      // Each entry: [leftLabel, leftValue, rightLabel, rightValue]
-      const infoRows: [string, string, string, string][] = [
-        ...(!isClassReport
-          ? [['Course Code', courseId, 'Course Name', courseName || '—'] as [string, string, string, string]]
-          : []),
-        ['Section', sectionName || '—', staffLabel, staffName || '—'],
-        ['Students', String(studentCount), 'Cycle', cycleName],
-        ...(semLabel || year
-          ? [[semLabel ? 'Semester' : '', semLabel || '', year ? 'Academic Year' : '', year || ''] as [string, string, string, string]]
-          : []),
-        ...(department
-          ? [['Department', department, '', ''] as [string, string, string, string]]
-          : []),
-      ].filter((r): r is [string, string, string, string] => !!(r[0] || r[2])); // remove fully empty rows
+      const infoCells: [string, string][] = [
+        ...(!isClassReport ? [['Course Code', courseId] as [string, string]] : []),
+        ...(!isClassReport ? [['Course Name', courseName || '—'] as [string, string]] : []),
+        ['Section', sectionName || '—'],
+        [staffLabel, staffName || '—'],
+        ['Students', String(studentCount)],
+        ['Cycle', cycleName],
+        ...(semLabel ? [['Semester', semLabel] as [string, string]] : []),
+        ...(year ? [['Acad. Year', year] as [string, string]] : []),
+        ...(department ? [['Department', department] as [string, string]] : []),
+      ];
 
-      const gridH = infoRows.length * rowH;
+      // Pad to a multiple of 3 so we get complete rows
+      while (infoCells.length % 3 !== 0) infoCells.push(['', '']);
+
+      const numInfoRows = infoCells.length / 3;
+      const gridH = numInfoRows * rowH;
 
       // Draw light background
       doc.setFillColor(248, 250, 253);
@@ -269,42 +271,39 @@ export default function DownloadReportModal({
       doc.roundedRect(ML, curY, UW, gridH, 1.5, 1.5, 'S');
 
       // Draw horizontal row separators
-      for (let i = 1; i < infoRows.length; i++) {
+      for (let i = 1; i < numInfoRows; i++) {
         const ly = curY + i * rowH;
         doc.setDrawColor(220, 228, 238);
         doc.setLineWidth(0.2);
         doc.line(ML + 1, ly, PW - MR - 1, ly);
       }
-      // Draw vertical centre divider
+      // Draw 2 vertical dividers (at 1/3 and 2/3)
       doc.setDrawColor(200, 210, 225);
       doc.setLineWidth(0.3);
-      doc.line(ML + colW, curY + 1, ML + colW, curY + gridH - 1);
+      doc.line(ML + colW3,     curY + 1, ML + colW3,     curY + gridH - 1);
+      doc.line(ML + colW3 * 2, curY + 1, ML + colW3 * 2, curY + gridH - 1);
 
-      // Render text per row
-      doc.setFontSize(8.5);
-      for (let i = 0; i < infoRows.length; i++) {
-        const [lLabel, lVal, rLabel, rVal] = infoRows[i];
-        const baselineY = curY + i * rowH + 5;
-
-        if (lLabel) {
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(30, 58, 95);
-          doc.text(`${lLabel}:`, ML + 4, baselineY);
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(55, 65, 81);
-          doc.text(lVal, ML + 4 + labelOffset, baselineY);
-        }
-        if (rLabel) {
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(30, 58, 95);
-          doc.text(`${rLabel}:`, ML + colW + 4, baselineY);
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(55, 65, 81);
-          doc.text(rVal, ML + colW + 4 + labelOffset, baselineY);
+      // Render text per cell
+      doc.setFontSize(8);
+      for (let ri = 0; ri < numInfoRows; ri++) {
+        const baselineY = curY + ri * rowH + 4.5;
+        for (let ci = 0; ci < 3; ci++) {
+          const [lbl, val] = infoCells[ri * 3 + ci];
+          const cellX = ML + ci * colW3;
+          if (lbl) {
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(30, 58, 95);
+            doc.text(`${lbl}:`, cellX + 3, baselineY);
+          }
+          if (val) {
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(55, 65, 81);
+            doc.text(val, cellX + 3 + labelW3, baselineY);
+          }
         }
       }
 
-      curY += gridH + 5;
+      curY += gridH + 4;
 
       /* divider */
       doc.setDrawColor(210, 215, 220);
@@ -320,11 +319,12 @@ export default function DownloadReportModal({
       setStatus('Building mark sheet…');
 
       const sheetHead = [
-        ['Roll No.', 'Name', ...cols.map((c) => `${c.label}\n/ ${c.max}`), 'Total\n/ 100'],
+        ['S.No', 'Roll No.', 'Name', ...cols.map((c) => `${c.label}\n/ ${c.max}`), 'Total\n/ 100'],
       ];
 
-      const mkBody = (subset: typeof rows) =>
-        subset.map((r) => [
+      const mkBody = (subset: typeof rows, startIdx = 0) =>
+        subset.map((r, i) => [
+          String(startIdx + i + 1),
           r.regNo,
           r.name,
           ...cols.map((c) => (r.marks[c.key] != null ? String(r.marks[c.key]) : '—')),
@@ -336,12 +336,13 @@ export default function DownloadReportModal({
 
       if (isClassReport) {
         /* ── FULL-WIDTH single table (Advisor / HOD) ── */
-        const fRollW  = 30;
+        const fSnoW   = 8;
+        const fRollW  = 28;
         const fTotalW = 16;
-        const fMarkW  = cols.length > 0 ? Math.max(10, Math.floor((UW - fRollW - 40 - fTotalW) / cols.length)) : 14;
-        const fNameW  = Math.max(24, UW - fRollW - fTotalW - cols.length * fMarkW);
+        const fMarkW  = cols.length > 0 ? Math.max(10, Math.floor((UW - fSnoW - fRollW - 40 - fTotalW) / cols.length)) : 14;
+        const fNameW  = Math.max(24, UW - fSnoW - fRollW - fTotalW - cols.length * fMarkW);
 
-        const totalColIdx = cols.length + 2;
+        const totalColIdx = cols.length + 3;
         autoTable(doc, {
           startY: sheetStartY,
           head: sheetHead,
@@ -359,9 +360,10 @@ export default function DownloadReportModal({
           },
           bodyStyles: { fontSize: 8, cellPadding: 2 },
           columnStyles: {
-            0: { halign: 'center' as const, cellWidth: fRollW },
-            1: { halign: 'left'   as const, cellWidth: fNameW },
-            ...Object.fromEntries(cols.map((_, i) => [i + 2, { halign: 'center' as const, cellWidth: fMarkW }])),
+            0: { halign: 'center' as const, cellWidth: fSnoW },
+            1: { halign: 'center' as const, cellWidth: fRollW },
+            2: { halign: 'left'   as const, cellWidth: fNameW },
+            ...Object.fromEntries(cols.map((_, i) => [i + 3, { halign: 'center' as const, cellWidth: fMarkW }])),
             [totalColIdx]: {
               halign: 'center' as const,
               cellWidth: fTotalW,
@@ -385,37 +387,41 @@ export default function DownloadReportModal({
         });
         afterSheet = (doc as any).lastAutoTable?.finalY ?? sheetStartY + 50;
       } else {
-        /* ── SPLIT two side-by-side half-tables (Staff) ── */
-        const halfGap = 4;
-        const halfW   = (UW - halfGap) / 2;
+        /* ── SPLIT three side-by-side third-tables (Staff, compact 1-page) ── */
+        const thirdGap = 3;
+        const thirdW   = (UW - thirdGap * 2) / 3;
 
-        const midIdx    = Math.ceil(rows.length / 2);
-        const leftRows  = rows.slice(0, midIdx);
-        const rightRows = rows.slice(midIdx);
+        const third1 = Math.ceil(rows.length / 3);
+        const third2 = Math.ceil((rows.length - third1) / 2) + third1;
+        const col1Rows = rows.slice(0, third1);
+        const col2Rows = rows.slice(third1, third2);
+        const col3Rows = rows.slice(third2);
 
-        const hRollW  = 22;
-        const hTotalW = 10;
-        const hMarkW  = cols.length > 0 ? Math.max(8, Math.floor((halfW - hRollW - 20 - hTotalW) / cols.length)) : 10;
-        const hNameW  = Math.max(16, halfW - hRollW - hTotalW - cols.length * hMarkW);
+        const tSnoW   = 5;
+        const tRollW  = 15;
+        const tTotalW = 9;
+        const tMarkW  = cols.length > 0 ? Math.max(6, Math.floor((thirdW - tSnoW - tRollW - 14 - tTotalW) / cols.length)) : 7;
+        const tNameW  = Math.max(10, thirdW - tSnoW - tRollW - tTotalW - cols.length * tMarkW);
 
-        const halfTableStyles = {
+        const thirdTableStyles = {
           theme: 'grid' as const,
           headStyles: {
             fillColor: [30, 58, 95] as [number, number, number],
             textColor: [255, 255, 255] as [number, number, number],
             fontStyle: 'bold' as const,
-            fontSize: 6.5,
+            fontSize: 5.8,
             halign: 'center' as const,
-            cellPadding: 1.2,
+            cellPadding: 1,
           },
-          bodyStyles: { fontSize: 6, cellPadding: 1 },
+          bodyStyles: { fontSize: 5.5, cellPadding: 0.8 },
           columnStyles: {
-            0: { halign: 'center' as const, cellWidth: hRollW },
-            1: { halign: 'left'   as const, cellWidth: hNameW },
-            ...Object.fromEntries(cols.map((_, i) => [i + 2, { halign: 'center' as const, cellWidth: hMarkW }])),
-            [cols.length + 2]: {
+            0: { halign: 'center' as const, cellWidth: tSnoW },
+            1: { halign: 'center' as const, cellWidth: tRollW },
+            2: { halign: 'left'   as const, cellWidth: tNameW },
+            ...Object.fromEntries(cols.map((_, i) => [i + 3, { halign: 'center' as const, cellWidth: tMarkW }])),
+            [cols.length + 3]: {
               halign: 'center' as const,
-              cellWidth: hTotalW,
+              cellWidth: tTotalW,
               fontStyle: 'bold' as const,
               fillColor: [254, 240, 138] as [number, number, number],
               textColor: [31, 41, 55]   as [number, number, number],
@@ -424,7 +430,7 @@ export default function DownloadReportModal({
           alternateRowStyles: { fillColor: [248, 250, 252] as [number, number, number] },
           didParseCell: (data: any) => {
             if (data.section === 'body') {
-              const totalIdx = cols.length + 2;
+              const totalIdx = cols.length + 3;
               if (data.column.index === totalIdx) {
                 const val = Number(data.cell.raw);
                 if (!isNaN(val)) {
@@ -438,42 +444,53 @@ export default function DownloadReportModal({
           },
         };
 
-        // Left table
+        const col1X = ML;
+        const col2X = ML + thirdW + thirdGap;
+        const col3X = ML + (thirdW + thirdGap) * 2;
+
+        // Column 1
         autoTable(doc, {
           startY: sheetStartY,
           head: sheetHead,
-          body: mkBody(leftRows),
-          margin: { left: ML, right: PW - ML - halfW },
-          tableWidth: halfW,
-          ...halfTableStyles,
+          body: mkBody(col1Rows, 0),
+          margin: { left: col1X, right: PW - col1X - thirdW },
+          tableWidth: thirdW,
+          ...thirdTableStyles,
         });
-        const afterLeft = (doc as any).lastAutoTable?.finalY ?? sheetStartY + 50;
+        const afterCol1 = (doc as any).lastAutoTable?.finalY ?? sheetStartY + 50;
 
-        // Right table
-        if (rightRows.length > 0) {
+        // Column 2
+        if (col2Rows.length > 0) {
           autoTable(doc, {
             startY: sheetStartY,
             head: sheetHead,
-            body: mkBody(rightRows),
-            margin: { left: ML + halfW + halfGap, right: MR },
-            tableWidth: halfW,
-            ...halfTableStyles,
+            body: mkBody(col2Rows, third1),
+            margin: { left: col2X, right: PW - col2X - thirdW },
+            tableWidth: thirdW,
+            ...thirdTableStyles,
           });
         }
-        const afterRight = (doc as any).lastAutoTable?.finalY ?? sheetStartY;
-        afterSheet = Math.max(afterLeft, afterRight);
+        const afterCol2 = (doc as any).lastAutoTable?.finalY ?? sheetStartY;
+
+        // Column 3
+        if (col3Rows.length > 0) {
+          autoTable(doc, {
+            startY: sheetStartY,
+            head: sheetHead,
+            body: mkBody(col3Rows, third2),
+            margin: { left: col3X, right: MR },
+            tableWidth: thirdW,
+            ...thirdTableStyles,
+          });
+        }
+        const afterCol3 = (doc as any).lastAutoTable?.finalY ?? sheetStartY;
+        afterSheet = Math.max(afterCol1, afterCol2, afterCol3);
       }
 
       /* ═══════════════════════════════════════════════════════════
-         PAGE 2: Class Statistics (left) + Bell Curve (right)
-                 then Ranking Table below — all on ONE page
+         SHARED STATS DATA — computed once, used on page 1 (staff)
+         or page 2 (class report)
          ═══════════════════════════════════════════════════════════ */
-      doc.addPage();
-      curY = 10;
-      setStatus('Building statistics & ranking page…');
-      await drawPageBanner();
-
-      /* ── Shared data ── */
       const _statsValidTotals  = totals.filter((v) => v != null);
       const _statsAttended     = _statsValidTotals.length;
       const _statsAbsent       = studentCount - _statsAttended;
@@ -487,9 +504,21 @@ export default function DownloadReportModal({
       const rangeCounts        = computeRangeCounts(totals);
       const absent             = studentCount - totals.length;
 
-      /* ── Layout: left = stats panel, right = bell curve ── */
+      /* ── For STAFF view: place stats + bell on PAGE 1 below the mark table ── */
+      /* ── For CLASS report: add a new PAGE 2 with full-width stats + bell    ── */
+      if (!isClassReport) {
+        curY = afterSheet + 6;
+      } else {
+        doc.addPage();
+        curY = 10;
+        await drawPageBanner();
+      }
+
+      setStatus('Building statistics & ranking page…');
+
+      /* ── Layout: left = stats panel (2-col compact), right = bell curve ── */
       const panelGap  = 5;
-      const statsW    = Math.round(UW * 0.38);
+      const statsW    = Math.round(UW * (isClassReport ? 0.38 : 0.30));
       const bellW     = UW - statsW - panelGap;
       const bellX     = ML + statsW + panelGap;
       const topRowY   = curY;
@@ -513,33 +542,89 @@ export default function DownloadReportModal({
           ['Highest',   String(_statsMax),       GREEN],
           ['Lowest',    String(_statsMin),       Number(_statsMin) >= 50 ? GREEN : Number(_statsMin) >= 40 ? AMBER : RED],
         ];
-        const sRowH    = 7.5;
-        const sRowGap  = 0.4;
-        const sHeaderH = 9;
-        const panelH   = sHeaderH + statsList.length * (sRowH + sRowGap) + 2;
 
-        doc.setFillColor(248, 250, 253);
-        doc.roundedRect(ML, topRowY, statsW, panelH, 2.5, 2.5, 'F');
-        doc.setDrawColor(203, 213, 225);
-        doc.setLineWidth(0.4);
-        doc.roundedRect(ML, topRowY, statsW, panelH, 2.5, 2.5, 'S');
-        doc.setFillColor(...NAVY);
-        doc.roundedRect(ML, topRowY, statsW, sHeaderH, 2.5, 2.5, 'F');
-        doc.rect(ML, topRowY + sHeaderH - 3, statsW, 3, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.text('Class Statistics', ML + statsW / 2, topRowY + 6, { align: 'center' });
-        statsList.forEach(([lbl, val, valColor], i) => {
-          const ry = topRowY + sHeaderH + i * (sRowH + sRowGap);
-          if (i % 2 === 0) { doc.setFillColor(239, 246, 255); doc.rect(ML + 1, ry, statsW - 2, sRowH, 'F'); }
-          if (lbl === 'Pass Rate') { doc.setFillColor(...valColor); doc.rect(ML + 1, ry, 2, sRowH, 'F'); }
-          doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(55, 65, 81);
-          doc.text(lbl, ML + 5, ry + 5);
-          doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...valColor);
-          doc.text(val, ML + statsW - 4, ry + 5, { align: 'right' });
-          if (i < statsList.length - 1) { doc.setDrawColor(220, 230, 242); doc.setLineWidth(0.15); doc.line(ML + 3, ry + sRowH + sRowGap / 2, ML + statsW - 3, ry + sRowH + sRowGap / 2); }
-        });
+        // Staff view: 2-column compact table (4 rows × 2 cols)
+        // Class report: original single-column tall panel
+        const sHeaderH = 8;
+        let panelH: number;
+
+        if (!isClassReport) {
+          // Compact 2-col grid: 4 rows — stretch to fill remaining page space
+          const numCols2  = 2;
+          const numRows2  = Math.ceil(statsList.length / numCols2);
+          const availH    = PH - 18 - topRowY;              // remaining page space
+          panelH          = Math.max(sHeaderH + numRows2 * 7 + 2, availH);
+          const sRowH2    = (panelH - sHeaderH - 2) / numRows2;
+          const sFontSz   = Math.min(9.5, Math.max(6.5, sRowH2 * 0.52));
+          const colW2s    = statsW / numCols2;
+
+          doc.setFillColor(248, 250, 253);
+          doc.roundedRect(ML, topRowY, statsW, panelH, 2, 2, 'F');
+          doc.setDrawColor(203, 213, 225);
+          doc.setLineWidth(0.35);
+          doc.roundedRect(ML, topRowY, statsW, panelH, 2, 2, 'S');
+          // Header bar
+          doc.setFillColor(...NAVY);
+          doc.roundedRect(ML, topRowY, statsW, sHeaderH, 2, 2, 'F');
+          doc.rect(ML, topRowY + sHeaderH - 3, statsW, 3, 'F');
+          doc.setTextColor(255, 255, 255);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8);
+          doc.text('Class Statistics', ML + statsW / 2, topRowY + 5.5, { align: 'center' });
+          // Vertical divider between 2 cols
+          doc.setDrawColor(203, 213, 225);
+          doc.setLineWidth(0.2);
+          doc.line(ML + colW2s, topRowY + sHeaderH, ML + colW2s, topRowY + panelH - 1);
+
+          for (let si = 0; si < statsList.length; si++) {
+            const col = si % numCols2;
+            const row = Math.floor(si / numCols2);
+            const [lbl, val, valColor] = statsList[si];
+            const rx = ML + col * colW2s;
+            const ry = topRowY + sHeaderH + row * sRowH2;
+            if (row % 2 === 0 && col === 0) {
+              doc.setFillColor(239, 246, 255);
+              doc.rect(ML + 1, ry, statsW - 2, sRowH2, 'F');
+            }
+            // Row separator
+            if (col === 0 && row > 0) {
+              doc.setDrawColor(220, 230, 242); doc.setLineWidth(0.15);
+              doc.line(ML + 2, ry, ML + statsW - 2, ry);
+            }
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(sFontSz); doc.setTextColor(55, 65, 81);
+            doc.text(lbl, rx + 3, ry + sRowH2 * 0.55);
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(sFontSz); doc.setTextColor(...valColor);
+            doc.text(val, rx + colW2s - 3, ry + sRowH2 * 0.55, { align: 'right' });
+          }
+        } else {
+          const sRowH    = 7.5;
+          const sRowGap  = 0.4;
+          panelH = sHeaderH + statsList.length * (sRowH + sRowGap) + 2;
+
+          doc.setFillColor(248, 250, 253);
+          doc.roundedRect(ML, topRowY, statsW, panelH, 2.5, 2.5, 'F');
+          doc.setDrawColor(203, 213, 225);
+          doc.setLineWidth(0.4);
+          doc.roundedRect(ML, topRowY, statsW, panelH, 2.5, 2.5, 'S');
+          doc.setFillColor(...NAVY);
+          doc.roundedRect(ML, topRowY, statsW, sHeaderH, 2.5, 2.5, 'F');
+          doc.rect(ML, topRowY + sHeaderH - 3, statsW, 3, 'F');
+          doc.setTextColor(255, 255, 255);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8);
+          doc.text('Class Statistics', ML + statsW / 2, topRowY + 6, { align: 'center' });
+          statsList.forEach(([lbl, val, valColor], i) => {
+            const ry = topRowY + sHeaderH + i * (sRowH + sRowGap);
+            if (i % 2 === 0) { doc.setFillColor(239, 246, 255); doc.rect(ML + 1, ry, statsW - 2, sRowH, 'F'); }
+            if (lbl === 'Pass Rate') { doc.setFillColor(...valColor); doc.rect(ML + 1, ry, 2, sRowH, 'F'); }
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(55, 65, 81);
+            doc.text(lbl, ML + 5, ry + 5);
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...valColor);
+            doc.text(val, ML + statsW - 4, ry + 5, { align: 'right' });
+            if (i < statsList.length - 1) { doc.setDrawColor(220, 230, 242); doc.setLineWidth(0.15); doc.line(ML + 3, ry + sRowH + sRowGap / 2, ML + statsW - 3, ry + sRowH + sRowGap / 2); }
+          });
+        }
+
         // Record height for aligning the bell graph
         curY = topRowY + panelH;
       }
@@ -770,110 +855,112 @@ export default function DownloadReportModal({
 
       curY += 6;
 
-      /* ── Ranking Table (below stats & bell, same page) ── */
-      setStatus('Building ranking table…');
+      /* ── Ranking Table (class report only — staff PDF is single page, no ranking) ── */
+      if (isClassReport) {
+        setStatus('Building ranking table…');
 
-      const PASS_PCT = 0.5;
-      const isPassed = (row: SheetRow): boolean => {
-        for (const col of cols) {
-          const mark = row.marks[col.key];
-          if (mark == null) return false;
-          if (mark < col.max * PASS_PCT) return false;
-        }
-        return true;
-      };
-
-      const rankedRows = (() => {
-        const passed = rows.filter((r) => isPassed(r) && r.total100 != null);
-        const sorted = [...passed].sort((a, b) => (b.total100 ?? 0) - (a.total100 ?? 0));
-        let rank = 1;
-        return sorted.map((r, i) => {
-          if (i > 0 && r.total100 !== sorted[i - 1].total100) rank = i + 1;
-          return { ...r, rank };
-        });
-      })();
-
-      // Section heading
-      doc.setFillColor(5, 150, 105);
-      doc.rect(ML, curY, UW, 6, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
-      doc.setTextColor(255, 255, 255);
-      doc.text('Ranking Table', ML + 4, curY + 4.2);
-      curY += 8;
-
-      const rankTableHead = [
-        ['Rank', 'Roll No.', 'Name', ...cols.map((c) => `${c.label}\n/ ${c.max}`), 'Total\n/ 100'],
-      ];
-      const top3Rows = rankedRows.filter((r) => r.rank <= 3);
-      const rankTableBody = top3Rows.map((r) => [
-        String(r.rank),
-        r.regNo,
-        r.name,
-        ...cols.map((c) => (r.marks[c.key] != null ? String(r.marks[c.key]) : '—')),
-        r.total100 != null ? String(r.total100) : '—',
-      ]);
-
-      const rankRollW  = 28;
-      const rankTotalW = 14;
-      const rankRankW  = 10;
-      const rankMarkW  = cols.length > 0 ? Math.max(8, Math.floor((UW - rankRankW - rankRollW - 30 - rankTotalW) / cols.length)) : 14;
-      const rankNameW  = Math.max(20, UW - rankRankW - rankRollW - rankTotalW - cols.length * rankMarkW);
-
-      autoTable(doc, {
-        startY: curY,
-        head: rankTableHead,
-        body: rankTableBody,
-        margin: { left: ML, right: MR },
-        tableWidth: UW,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [5, 150, 105] as [number, number, number],
-          textColor: [255, 255, 255] as [number, number, number],
-          fontStyle: 'bold',
-          fontSize: 7,
-          halign: 'center',
-          cellPadding: 1.5,
-        },
-        bodyStyles: { fontSize: 6.5, cellPadding: 1.2 },
-        columnStyles: {
-          0: { halign: 'center', cellWidth: rankRankW,  fontStyle: 'bold' },
-          1: { halign: 'center', cellWidth: rankRollW },
-          2: { halign: 'left',   cellWidth: rankNameW },
-          ...Object.fromEntries(cols.map((_, i) => [i + 3, { halign: 'center' as const, cellWidth: rankMarkW }])),
-          [cols.length + 3]: {
-            halign: 'center' as const,
-            cellWidth: rankTotalW,
-            fontStyle: 'bold' as const,
-            fillColor: [209, 250, 229] as [number, number, number],
-            textColor: [5, 150, 105] as [number, number, number],
-          },
-        },
-        alternateRowStyles: { fillColor: [240, 253, 244] as [number, number, number] },
-        didParseCell: (data: any) => {
-          if (data.section === 'body' && data.column.index === 0) {
-            const v = Number(data.cell.raw);
-            if (v === 1) data.cell.styles.textColor = [217, 119, 6];
-            else if (v === 2) data.cell.styles.textColor = [100, 116, 139];
-            else if (v === 3) data.cell.styles.textColor = [194, 65, 12];
+        const PASS_PCT = 0.5;
+        const isPassed = (row: SheetRow): boolean => {
+          for (const col of cols) {
+            const mark = row.marks[col.key];
+            if (mark == null) return false;
+            if (mark < col.max * PASS_PCT) return false;
           }
-          if (data.section === 'body') {
-            const totalIdx = cols.length + 3;
-            if (data.column.index === totalIdx) {
-              const val = Number(data.cell.raw);
-              if (!isNaN(val)) {
-                if      (val >= 75) data.cell.styles.textColor = [5, 150, 105];
-                else if (val >= 50) data.cell.styles.textColor = [37, 99, 235];
-                else if (val >= 40) data.cell.styles.textColor = [217, 119, 6];
-                else                data.cell.styles.textColor = [220, 38, 38];
+          return true;
+        };
+
+        const rankedRows = (() => {
+          const passed = rows.filter((r) => isPassed(r) && r.total100 != null);
+          const sorted = [...passed].sort((a, b) => (b.total100 ?? 0) - (a.total100 ?? 0));
+          let rank = 1;
+          return sorted.map((r, i) => {
+            if (i > 0 && r.total100 !== sorted[i - 1].total100) rank = i + 1;
+            return { ...r, rank };
+          });
+        })();
+
+        // Section heading
+        doc.setFillColor(5, 150, 105);
+        doc.rect(ML, curY, UW, 6, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(255, 255, 255);
+        doc.text('Ranking Table', ML + 4, curY + 4.2);
+        curY += 8;
+
+        const rankTableHead = [
+          ['Rank', 'Roll No.', 'Name', ...cols.map((c) => `${c.label}\n/ ${c.max}`), 'Total\n/ 100'],
+        ];
+        const top3Rows = rankedRows.filter((r) => r.rank <= 3);
+        const rankTableBody = top3Rows.map((r) => [
+          String(r.rank),
+          r.regNo,
+          r.name,
+          ...cols.map((c) => (r.marks[c.key] != null ? String(r.marks[c.key]) : '—')),
+          r.total100 != null ? String(r.total100) : '—',
+        ]);
+
+        const rankRollW  = 28;
+        const rankTotalW = 14;
+        const rankRankW  = 10;
+        const rankMarkW  = cols.length > 0 ? Math.max(8, Math.floor((UW - rankRankW - rankRollW - 30 - rankTotalW) / cols.length)) : 14;
+        const rankNameW  = Math.max(20, UW - rankRankW - rankRollW - rankTotalW - cols.length * rankMarkW);
+
+        autoTable(doc, {
+          startY: curY,
+          head: rankTableHead,
+          body: rankTableBody,
+          margin: { left: ML, right: MR },
+          tableWidth: UW,
+          theme: 'grid',
+          headStyles: {
+            fillColor: [5, 150, 105] as [number, number, number],
+            textColor: [255, 255, 255] as [number, number, number],
+            fontStyle: 'bold',
+            fontSize: 7,
+            halign: 'center',
+            cellPadding: 1.5,
+          },
+          bodyStyles: { fontSize: 6.5, cellPadding: 1.2 },
+          columnStyles: {
+            0: { halign: 'center', cellWidth: rankRankW,  fontStyle: 'bold' },
+            1: { halign: 'center', cellWidth: rankRollW },
+            2: { halign: 'left',   cellWidth: rankNameW },
+            ...Object.fromEntries(cols.map((_, i) => [i + 3, { halign: 'center' as const, cellWidth: rankMarkW }])),
+            [cols.length + 3]: {
+              halign: 'center' as const,
+              cellWidth: rankTotalW,
+              fontStyle: 'bold' as const,
+              fillColor: [209, 250, 229] as [number, number, number],
+              textColor: [5, 150, 105] as [number, number, number],
+            },
+          },
+          alternateRowStyles: { fillColor: [240, 253, 244] as [number, number, number] },
+          didParseCell: (data: any) => {
+            if (data.section === 'body' && data.column.index === 0) {
+              const v = Number(data.cell.raw);
+              if (v === 1) data.cell.styles.textColor = [217, 119, 6];
+              else if (v === 2) data.cell.styles.textColor = [100, 116, 139];
+              else if (v === 3) data.cell.styles.textColor = [194, 65, 12];
+            }
+            if (data.section === 'body') {
+              const totalIdx = cols.length + 3;
+              if (data.column.index === totalIdx) {
+                const val = Number(data.cell.raw);
+                if (!isNaN(val)) {
+                  if      (val >= 75) data.cell.styles.textColor = [5, 150, 105];
+                  else if (val >= 50) data.cell.styles.textColor = [37, 99, 235];
+                  else if (val >= 40) data.cell.styles.textColor = [217, 119, 6];
+                  else                data.cell.styles.textColor = [220, 38, 38];
+                }
               }
             }
-          }
-        },
-      });
+          },
+        });
 
-      curY = (doc as any).lastAutoTable?.finalY ?? curY + 40;
-      curY += 6;
+        curY = (doc as any).lastAutoTable?.finalY ?? curY + 40;
+        curY += 6;
+      }
 
       /* ── Footer and Watermark on each page ── */
       const pageCount = (doc as any).internal.getNumberOfPages();

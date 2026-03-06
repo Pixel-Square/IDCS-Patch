@@ -198,7 +198,7 @@ def _get_cia_questions_for_export(*, subject, assessment_key: str, class_type: s
             [{ key: 'q1', label: 'Q1', max: 2.0 }, ...]
     """
     assessment_key = str(assessment_key or '').strip().lower()
-    class_type = str(class_type or '').strip().upper()
+    class_type = _normalize_obe_class_type(class_type)
     question_paper_type = str(question_paper_type or '').strip().upper()
 
     def _coerce_questions(raw):
@@ -1648,6 +1648,31 @@ def _parse_open_from(value):
     return _parse_due_at(value)
 
 
+def _normalize_obe_class_type(value) -> str:
+    raw = str(value or '').strip().upper()
+    compact = re.sub(r'[^A-Z0-9]+', '', raw)
+
+    if not compact:
+        return 'THEORY'
+    if 'TCPR' in compact:
+        return 'TCPR'
+    if 'TCPL' in compact:
+        return 'TCPL'
+    if compact == 'THEORYPMBL' or compact == 'THEORY' or compact.startswith('THEORY'):
+        return 'THEORY'
+    if compact == 'PRBL' or compact == 'PROJECT' or 'PROJECT' in compact:
+        return 'PROJECT'
+    if compact == 'LAB' or compact == 'L' or compact.startswith('LAB'):
+        return 'LAB'
+    if compact == 'PRACTICAL' or compact.startswith('PRACT'):
+        return 'PRACTICAL'
+    if compact == 'AUDIT':
+        return 'AUDIT'
+    if compact == 'SPECIAL':
+        return 'SPECIAL'
+    return raw or 'THEORY'
+
+
 def _resolve_staff_teaching_assignment(request, subject_code: str, teaching_assignment_id: int | None = None):
     user = getattr(request, 'user', None)
     staff_profile = getattr(user, 'staff_profile', None)
@@ -1795,6 +1820,10 @@ def _get_due_schedule_for_request(request, subject_code: str, assessment: str, t
             row = getattr(ta, 'curriculum_row', None)
             _add_code(getattr(row, 'course_code', None))
             _add_code(getattr(getattr(row, 'master', None), 'course_code', None))
+        except Exception:
+            pass
+        try:
+            _add_code(getattr(getattr(ta, 'elective_subject', None), 'course_code', None))
         except Exception:
             pass
 
@@ -3826,20 +3855,7 @@ def obe_progress_overview(request):
     sections = list(sections_qs or [])
 
     def _normalize_class_type(val) -> str:
-        s = str(val or '').strip().upper()
-        if not s:
-            return 'THEORY'
-        # tolerate legacy spellings
-        aliases = {
-            'THEORY': 'THEORY',
-            'SPECIAL': 'SPECIAL',
-            'LAB': 'LAB',
-            'TCPL': 'TCPL',
-            'TCPR': 'TCPR',
-            'PRACTICAL': 'PRACTICAL',
-            'PROJECT': 'PROJECT',
-        }
-        return aliases.get(s, s)
+        return _normalize_obe_class_type(val)
 
     def _resolve_ta_class_type(ta) -> str:
         try:
@@ -5969,7 +5985,7 @@ def due_schedule_subjects(request):
         return Response({'detail': 'semester_ids is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     # Use curriculum mapping by Semester so IQAC can set schedules without relying on TA presence.
-    from curriculum.models import CurriculumDepartment, CurriculumMaster
+    from curriculum.models import CurriculumDepartment, CurriculumMaster, ElectiveSubject
 
     out: dict[str, dict[str, dict]] = {}
     dept_qs = CurriculumDepartment.objects.select_related('semester').filter(semester_id__in=sem_ids)
@@ -6013,6 +6029,24 @@ def due_schedule_subjects(request):
                 'subject_name': name,
                 'class_type': class_type,
                 'enabled_assessments': enabled_assessments,
+            }
+
+    # Include elective subjects that are NOT already in curriculum department/master rows.
+    elective_qs = ElectiveSubject.objects.select_related('semester').filter(semester_id__in=sem_ids)
+    for r in elective_qs:
+        sem_id = str(getattr(r, 'semester_id', '') or '')
+        code = str(getattr(r, 'course_code', '') or '').strip()
+        name = str(getattr(r, 'course_name', '') or '').strip()
+        class_type = str(getattr(r, 'class_type', '') or '').strip() or 'THEORY'
+        if not sem_id or not code:
+            continue
+        out.setdefault(sem_id, {})
+        if code not in out[sem_id]:
+            out[sem_id][code] = {
+                'subject_code': code,
+                'subject_name': name,
+                'class_type': class_type,
+                'enabled_assessments': [],
             }
 
     return Response(

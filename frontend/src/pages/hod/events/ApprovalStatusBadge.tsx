@@ -8,10 +8,12 @@ interface Props {
 }
 
 const CONFIG: Record<EventStatus, { label: string; color: string; bg: string; border: string; Icon: React.ElementType }> = {
-  Draft:             { label: 'Draft',            color: 'text-gray-600',   bg: 'bg-gray-100',   border: 'border-gray-200',   Icon: FileText    },
-  'Pending Approval':{ label: 'Pending Approval', color: 'text-amber-700',  bg: 'bg-amber-50',   border: 'border-amber-200',  Icon: Send        },
-  Approved:          { label: 'Approved',          color: 'text-green-700',  bg: 'bg-green-50',   border: 'border-green-200',  Icon: CheckCircle },
-  Rejected:          { label: 'Rejected',          color: 'text-red-700',    bg: 'bg-red-50',     border: 'border-red-200',    Icon: XCircle     },
+  Draft:                     { label: 'Draft',                     color: 'text-gray-600',   bg: 'bg-gray-100',   border: 'border-gray-200',   Icon: FileText    },
+  'Pending IQAC Approval':   { label: 'Pending IQAC Approval',    color: 'text-amber-700',  bg: 'bg-amber-50',   border: 'border-amber-200',  Icon: Send        },
+  'Pending Branding Approval': { label: 'Forwarded to Branding', color: 'text-indigo-700', bg: 'bg-indigo-50',  border: 'border-indigo-200', Icon: Clock       },
+  Approved:                  { label: 'Approved',                 color: 'text-green-700',  bg: 'bg-green-50',   border: 'border-green-200',  Icon: CheckCircle },
+  'Rejected by IQAC':        { label: 'Rejected by IQAC',         color: 'text-rose-700',   bg: 'bg-rose-50',    border: 'border-rose-200',   Icon: XCircle     },
+  'Rejected by Branding':    { label: 'Rejected by Branding',     color: 'text-red-700',    bg: 'bg-red-50',     border: 'border-red-200',    Icon: XCircle     },
 };
 
 export default function ApprovalStatusBadge({ status, size = 'md' }: Props) {

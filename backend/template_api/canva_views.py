@@ -77,6 +77,28 @@ def _error(msg: str, status: int = 400) -> JsonResponse:
     return JsonResponse({'detail': msg}, status=status)
 
 
+def _get_request_access_token(request, body: dict | None = None) -> str:
+    body = body or {}
+    return request.GET.get('access_token', '') or body.get('access_token', '') or _get_service_token()
+
+
+def _canva_error(response: requests.Response, default_message: str) -> JsonResponse:
+    """Return a clearer Django error from a Canva API error response."""
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+
+    code = str(payload.get('code', '')).strip()
+    message = str(payload.get('message', '')).strip()
+
+    if code == 'missing_scope' and message:
+        return _error(f'{default_message}: {message}. Reconnect Canva after backend restart.', response.status_code)
+    if message:
+        return _error(f'{default_message}: {message}', response.status_code)
+    return _error(f'{default_message} ({response.status_code})', response.status_code)
+
+
 # ── Server-side OAuth (PKCE, backend-handled – same flow as ecommerce starter kit) ──
 
 CANVA_AUTH_URL = 'https://www.canva.com/api/oauth/authorize'
@@ -342,13 +364,13 @@ def connection_status(request):
 @require_http_methods(['GET', 'POST'])
 def templates_api(request):
     """
-    GET  /api/canva/templates → list all saved IDCS Canva templates
+    GET  /api/canva/templates → list saved IDCS Canva Brand Templates only
     POST /api/canva/templates → save a new template { name, canva_design_id,
                                                        thumbnail_url, is_brand_template,
                                                        edit_url, saved_by }
     """
     if request.method == 'GET':
-        items = CanvaTemplate.objects.all().order_by('-saved_at')
+        items = CanvaTemplate.objects.filter(is_brand_template=True).order_by('-saved_at')
         return JsonResponse({
             'templates': [
                 {
@@ -486,6 +508,62 @@ def oauth_revoke(request):
 
 # ── Designs ───────────────────────────────────────────────────────────────────
 
+@require_http_methods(['GET'])
+def brand_templates(request):
+    """
+    GET /api/canva/brand-templates?query=...&dataset=non_empty
+         → list the user's Canva Brand Templates with autofill datasets.
+    """
+    access_token = _get_request_access_token(request)
+    query = request.GET.get('query', '').strip()
+    continuation = request.GET.get('continuation', '').strip()
+
+    if not access_token:
+        return _error('access_token not provided and no Canva service token is configured.')
+
+    params = {
+        'limit': request.GET.get('limit', '100'),
+        'ownership': request.GET.get('ownership', 'any'),
+        'sort_by': request.GET.get('sort_by', 'modified_descending'),
+        'dataset': request.GET.get('dataset', 'non_empty'),
+    }
+    if query:
+        params['query'] = query
+    if continuation:
+        params['continuation'] = continuation
+
+    resp = requests.get(
+        f'{CANVA_API_BASE}/brand-templates',
+        headers=_canva_headers(access_token),
+        params=params,
+        timeout=20,
+    )
+    if not resp.ok:
+        logger.error('Canva list brand templates failed: %s', resp.text)
+        return _canva_error(resp, 'Failed to list brand templates')
+    return JsonResponse(resp.json())
+
+
+@require_http_methods(['GET'])
+def brand_template_dataset(request, brand_template_id: str):
+    """
+    GET /api/canva/brand-templates/<brand_template_id>/dataset
+         → return the Canva autofill dataset definition for this Brand Template.
+    """
+    access_token = _get_request_access_token(request)
+    if not access_token:
+        return _error('access_token not provided and no Canva service token is configured.')
+
+    resp = requests.get(
+        f'{CANVA_API_BASE}/brand-templates/{brand_template_id}/dataset',
+        headers=_canva_headers(access_token),
+        timeout=20,
+    )
+    if not resp.ok:
+        logger.error('Canva get brand template dataset failed: %s', resp.text)
+        return _canva_error(resp, 'Failed to load brand template dataset')
+    return JsonResponse(resp.json())
+
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
 def designs(request):
@@ -542,210 +620,6 @@ def designs(request):
         return _error(f'Failed to create design ({resp.status_code})', resp.status_code)
     return JsonResponse(resp.json())
 
-# ── Generate poster (autofill → export → proxy) — one-shot synchronous call ──
-
-@csrf_exempt
-@require_http_methods(['POST'])
-def generate_poster(request):
-    """
-    POST /api/canva/generate-poster
-    body: {
-        brand_template_id: str,       # Canva brand-template ID to autofill
-        format: 'png' | 'pdf',        # export format
-        fields: {                     # map of Canva data-set field keys → text values
-            event_title: str,
-            event_type: str,
-            department: str,
-            date_time: str,
-            venue: str,
-            organizer: str,
-            description: str,
-            contact: str,
-            resource_person: str,
-            resource_designation: str,
-            faculty_coordinator_1: str,
-            faculty_coordinator_2: str,
-            student_coordinator: str,
-            participants: str,
-        }
-    }
-
-    Full workflow executed synchronously (max ~60 s):
-      1. Submit autofill job  → job_id
-      2. Poll autofill        → design_id  (max 30 s)
-      3. Submit export job    → job_id
-      4. Poll export          → export CDN URL(s)  (max 30 s)
-      5. Proxy first export image as base64 data-URL
-      6. Return { design_id, dataUrl, export_url }
-
-    Returns an HTTP 200 even when the data-URL cannot be proxied — the
-    frontend can still offer a direct CDN download link via export_url.
-    """
-    import time as _time
-
-    body              = _json_body(request)
-    brand_template_id = body.get('brand_template_id', '').strip()
-    fmt               = body.get('format', 'png').lower()
-    fields            = body.get('fields', {})
-    access_token      = body.get('access_token', '') or _get_service_token()
-
-    if not access_token:
-        return _error(
-            'Canva service token not available. Ask the Branding admin to reconnect Canva.',
-            503,
-        )
-    if not brand_template_id:
-        return _error('brand_template_id is required.', 400)
-    if fmt not in ('png', 'pdf'):
-        return _error('format must be png or pdf.', 400)
-
-    # Build autofill data — only send non-empty fields
-    autofill_data: dict = {}
-    for key, value in fields.items():
-        if value and str(value).strip():
-            autofill_data[key] = {'type': 'text', 'text': str(value).strip()}
-
-    # ── 1. Submit autofill ───────────────────────────────────────────────────
-    af_resp = requests.post(
-        f'{CANVA_API_BASE}/autofills',
-        headers=_canva_headers(access_token),
-        json={'brand_template_id': brand_template_id, 'data': autofill_data},
-        timeout=20,
-    )
-    if not af_resp.ok:
-        logger.error('Canva autofill submit failed (%s): %s', af_resp.status_code, af_resp.text[:400])
-        try:
-            err_body = af_resp.json()
-        except Exception:
-            err_body = {}
-        err_code = err_body.get('code', '')
-        if err_code == 'missing_scope' or 'missing_scope' in af_resp.text:
-            missing = err_body.get('message', 'Missing scopes: [design:content:write]')
-            return _error(
-                f'The Canva service token is missing required permissions ({missing}). '
-                f'To fix: 1) Open the Canva Developer Portal → your app → Permissions and enable '
-                f'"design:content:write". 2) In IDCS go to Settings → Canva and click '
-                f'"Reconnect Canva Account" to issue a new token with the updated scopes.',
-                403,
-            )
-        return _error(
-            f'Canva autofill failed ({af_resp.status_code}). '
-            f'Make sure the template is a Brand Template with data-set fields configured. '
-            f'Detail: {af_resp.text[:200]}',
-            af_resp.status_code,
-        )
-
-    af_body   = af_resp.json()
-    af_job_id = (
-        af_body.get('job', {}).get('id')
-        or af_body.get('id')
-        or ''
-    )
-    if not af_job_id:
-        return _error('Canva returned no autofill job ID.', 500)
-
-    # ── 2. Poll autofill (max 30 s) ──────────────────────────────────────────
-    design_id: str | None = None
-    for _ in range(20):
-        _time.sleep(1.5)
-        p = requests.get(
-            f'{CANVA_API_BASE}/autofills/{af_job_id}',
-            headers=_canva_headers(access_token),
-            timeout=15,
-        )
-        if not p.ok:
-            continue
-        pd = p.json()
-        job_obj  = pd.get('job', pd)          # Canva wraps result in 'job'
-        status   = str(job_obj.get('status', '')).lower()
-        if status == 'success':
-            design_id = (
-                job_obj.get('result', {}).get('design', {}).get('id')
-                or job_obj.get('design', {}).get('id')
-            )
-            break
-        if status in ('failed', 'error'):
-            err = job_obj.get('error', {}).get('message', 'Unknown Canva error')
-            return _error(f'Canva autofill job failed: {err}', 500)
-
-    if not design_id:
-        return _error(
-            'Canva autofill timed out — the autofill job did not complete within 30 s. '
-            'Check that the Brand Template has correctly named data-set fields.',
-            504,
-        )
-
-    # ── 3. Submit export ─────────────────────────────────────────────────────
-    ex_resp = requests.post(
-        f'{CANVA_API_BASE}/exports',
-        headers=_canva_headers(access_token),
-        json={
-            'design_id': design_id,
-            'format':    {'type': 'PNG' if fmt == 'png' else 'PDF'},
-        },
-        timeout=20,
-    )
-    if not ex_resp.ok:
-        logger.error('Canva export submit failed (%s): %s', ex_resp.status_code, ex_resp.text)
-        return _error(f'Export submit failed ({ex_resp.status_code})', ex_resp.status_code)
-
-    ex_body   = ex_resp.json()
-    ex_job_id = (
-        ex_body.get('job', {}).get('id')
-        or ex_body.get('id')
-        or ''
-    )
-    if not ex_job_id:
-        return _error('Canva returned no export job ID.', 500)
-
-    # ── 4. Poll export (max 30 s) ────────────────────────────────────────────
-    export_url: str | None = None
-    for _ in range(20):
-        _time.sleep(1.5)
-        ep = requests.get(
-            f'{CANVA_API_BASE}/exports/{ex_job_id}',
-            headers=_canva_headers(access_token),
-            timeout=15,
-        )
-        if not ep.ok:
-            continue
-        epd      = ep.json()
-        ep_job   = epd.get('job', epd)
-        ep_status = str(ep_job.get('status', '')).lower()
-        if ep_status == 'success':
-            urls = ep_job.get('urls') or ep_job.get('result', {}).get('urls') or []
-            if urls:
-                export_url = urls[0]
-            break
-        if ep_status in ('failed', 'error'):
-            return _error('Canva export job failed.', 500)
-
-    if not export_url:
-        # Return design_id so the user can still view it in Canva editor
-        return JsonResponse({
-            'design_id':  design_id,
-            'dataUrl':    None,
-            'export_url': None,
-            'warning':    'Export URL not ready yet. Try downloading directly from Canva.',
-        })
-
-    # ── 5. Proxy export image as base64 data-URL ─────────────────────────────
-    data_url: str | None = None
-    try:
-        img_r = requests.get(export_url, timeout=30)
-        img_r.raise_for_status()
-        ct = img_r.headers.get('Content-Type', f'image/{fmt}').split(';')[0].strip()
-        if not ct.startswith('image/') and fmt != 'pdf':
-            ct = f'image/{fmt}'
-        data_url = f'data:{ct};base64,{base64.b64encode(img_r.content).decode("ascii")}'
-    except Exception as exc:
-        logger.warning('Could not proxy export image: %s', exc)
-
-    return JsonResponse({
-        'design_id':  design_id,
-        'dataUrl':    data_url,
-        'export_url': export_url,
-    })
 
 # ── Autofill ──────────────────────────────────────────────────────────────────
 
@@ -1020,107 +894,477 @@ def event_poster(request, event_id: str):
     })
 
 
-# ── n8n proxy: route poster generation through n8n then return result ─────────
+# ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
+# IDCS POSTER MAKER  (new end-to-end flow: Frontend → Django → n8n → Canva)
+# ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
+
+# ── Image helpers ─────────────────────────────────────────────────────────────
+
+def _upload_image_url_to_canva(image_url: str, access_token: str) -> str | None:
+    """
+    Upload an external image URL to Canva's asset library.
+    Returns the Canva asset_id on success, or None if it fails.
+
+    Canva API: POST /v1/asset-uploads  (import from URL via import_metadata)
+    """
+    try:
+        name_b64 = base64.b64encode(b'idcs-upload.png').decode()
+        resp = requests.post(
+            f'{CANVA_API_BASE}/asset-uploads',
+            headers=_canva_headers(access_token),
+            json={
+                'name_base64': name_b64,
+                'import_metadata': {'url': image_url},
+            },
+            timeout=20,
+        )
+        if not resp.ok:
+            logger.warning('Canva asset-upload submit failed (%s): %s', resp.status_code, resp.text[:200])
+            return None
+
+        job_id = resp.json().get('job', {}).get('id', '')
+        if not job_id:
+            return None
+
+        # Poll up to 40 s (20 × 2 s)
+        for _ in range(20):
+            time.sleep(2)
+            poll = requests.get(
+                f'{CANVA_API_BASE}/asset-uploads/{job_id}',
+                headers=_canva_headers(access_token),
+                timeout=15,
+            )
+            if not poll.ok:
+                continue
+            data = poll.json().get('job', {})
+            status = data.get('status', '')
+            if status == 'success':
+                asset_id = (
+                    data.get('result', {})
+                        .get('type', {})
+                        .get('asset', {})
+                        .get('id', '')
+                )
+                return asset_id or None
+            if status == 'failed':
+                logger.warning('Canva asset-upload job failed: %s', data)
+                return None
+    except Exception as exc:
+        logger.error('_upload_image_url_to_canva error: %s', exc)
+    return None
+
+
+def _run_generate_poster(brand_template_id: str, fields: dict, fmt: str, access_token: str) -> dict:
+    """
+    Core poster generation logic (synchronous, called inline).
+
+    1. For each image-URL field → upload to Canva assets → swap to asset_id field
+    2. Submit autofill job
+    3. Poll autofill until done → design_id
+    4. Submit export job (PNG or PDF)
+    5. Poll export until done → export_url
+    6. Optionally fetch export_url as base64 dataUrl
+    Returns dict with keys: design_id, export_url, dataUrl, error
+    """
+    result = {'design_id': '', 'export_url': '', 'dataUrl': '', 'error': ''}
+
+    if not access_token:
+        result['error'] = 'No Canva service token available.'
+        return result
+
+    # ── Step 1: handle image URL fields ────────────────────────────────────
+    autofill_data = {}
+    for key, value in fields.items():
+        if isinstance(value, dict):
+            ftype = value.get('type', 'text')
+            if ftype == 'text':
+                autofill_data[key] = {'type': 'text', 'text': str(value.get('text', ''))}
+            elif ftype == 'image':
+                image_url = value.get('url', '')
+                if image_url:
+                    asset_id = _upload_image_url_to_canva(image_url, access_token)
+                    if asset_id:
+                        autofill_data[key] = {'type': 'image', 'asset_id': asset_id}
+                    else:
+                        logger.warning('Skipping image field %s — upload failed', key)
+            # skip unknown types
+        elif isinstance(value, str) and value.strip():
+            # shorthand: bare string → text field
+            autofill_data[key] = {'type': 'text', 'text': value.strip()}
+
+    if not autofill_data:
+        result['error'] = 'No valid autofill fields provided.'
+        return result
+
+    # ── Step 2: submit autofill ─────────────────────────────────────────────
+    af_resp = requests.post(
+        f'{CANVA_API_BASE}/autofills',
+        headers=_canva_headers(access_token),
+        json={'brand_template_id': brand_template_id, 'data': autofill_data},
+        timeout=20,
+    )
+    if not af_resp.ok:
+        result['error'] = f'Autofill submit failed ({af_resp.status_code}): {af_resp.text[:200]}'
+        return result
+
+    af_job_id = af_resp.json().get('job', {}).get('id', '')
+    if not af_job_id:
+        result['error'] = 'No autofill job ID returned.'
+        return result
+
+    # ── Step 3: poll autofill ───────────────────────────────────────────────
+    design_id = ''
+    for _ in range(30):  # 60 s max
+        time.sleep(2)
+        poll = requests.get(
+            f'{CANVA_API_BASE}/autofills/{af_job_id}',
+            headers=_canva_headers(access_token),
+            timeout=15,
+        )
+        if not poll.ok:
+            continue
+        pdata = poll.json().get('job', {})
+        if pdata.get('status') == 'success':
+            design_id = (
+                pdata.get('result', {}).get('design', {}).get('id', '')
+            )
+            break
+        if pdata.get('status') == 'failed':
+            result['error'] = f'Autofill job failed: {pdata}'
+            return result
+
+    if not design_id:
+        result['error'] = 'Autofill job timed out.'
+        return result
+
+    result['design_id'] = design_id
+
+    # ── Step 4: submit export ───────────────────────────────────────────────
+    # Canva expects lowercase format type values like 'pdf' or 'png'
+    format_type = fmt if fmt in ('pdf', 'png') else 'png'
+    ex_resp = requests.post(
+        f'{CANVA_API_BASE}/exports',
+        headers=_canva_headers(access_token),
+        json={'design_id': design_id, 'format': {'type': format_type}},
+        timeout=20,
+    )
+    if not ex_resp.ok:
+        # Still return design_id; export failure is non-fatal (user can open in Canva)
+        result['error'] = f'Export submit warning ({ex_resp.status_code})'
+        logger.warning('Export submit failed: %s', ex_resp.text[:200])
+        return result
+
+    ex_job_id = ex_resp.json().get('job', {}).get('id', '')
+    if not ex_job_id:
+        return result  # return design_id without export URL
+
+    # ── Step 5: poll export ─────────────────────────────────────────────────
+    export_url = ''
+    for _ in range(30):  # 60 s max
+        time.sleep(2)
+        epoll = requests.get(
+            f'{CANVA_API_BASE}/exports/{ex_job_id}',
+            headers=_canva_headers(access_token),
+            timeout=15,
+        )
+        if not epoll.ok:
+            continue
+        edata = epoll.json().get('job', {})
+        if edata.get('status') == 'success':
+            urls = edata.get('urls', [])
+            export_url = urls[0] if urls else ''
+            break
+        if edata.get('status') == 'failed':
+            logger.warning('Export job failed: %s', edata)
+            break  # non-fatal
+
+    result['export_url'] = export_url
+
+    # ── Step 6: fetch export_url as base64 (for inline preview / download) ─
+    if export_url:
+        try:
+            img_resp = requests.get(export_url, timeout=30, stream=False)
+            if img_resp.ok:
+                mime = img_resp.headers.get('Content-Type', 'image/png').split(';')[0]
+                result['dataUrl'] = f'data:{mime};base64,' + base64.b64encode(img_resp.content).decode()
+        except Exception as exc:
+            logger.warning('Failed to fetch export image: %s', exc)
+
+    return result
+
 
 @csrf_exempt
 @require_http_methods(['POST'])
-def trigger_n8n_poster(request):
+def generate_poster(request):
     """
-    POST /api/canva/trigger-n8n-poster
+    POST /api/canva/generate-poster
 
-    Routes the poster-generation request through the n8n automation workflow
-    and returns the result to the caller in the same shape as generate_poster.
+    Called by n8n (or directly) to generate a poster from a Canva brand template.
 
-    Flow:
-      Frontend → Django (this view) → n8n webhook (sync)
-        → n8n calls /api/canva/generate-poster
-        → Django calls Canva API (autofill → poll → export → proxy)
-        → n8n responds with { ok, design_id, dataUrl, poster_url, preview_link }
-      → Django returns { design_id, dataUrl, export_url } to frontend
+    Body (JSON):
+      {
+        "brand_template_id": "BAxxxxxxxx",
+        "fields": {
+          "event_name":      { "type": "text", "text": "..." },
+          "event_date":      { "type": "text", "text": "..." },
+          "chief_guest_photo": { "type": "image", "url": "https://..." }
+        },
+        "format": "png"   // "png" | "pdf"
+      }
 
-    Falls back to calling generate_poster() directly if n8n is not configured
-    or not reachable, so the form always works even without n8n running.
-
-    Body: same as generate_poster (brand_template_id, format, fields, event_id?)
+    Returns:
+      { "design_id": "...", "export_url": "...", "dataUrl": "data:image/...", "error": "" }
     """
     body = _json_body(request)
     brand_template_id = body.get('brand_template_id', '').strip()
-    fmt               = body.get('format', 'png').lower()
     fields            = body.get('fields', {})
-    event_id          = body.get('event_id', '').strip()
+    fmt               = body.get('format', 'png').lower()
 
     if not brand_template_id:
-        return _error('brand_template_id is required.', 400)
+        return _error('brand_template_id is required.')
+    if not fields:
+        return _error('fields is required.')
 
-    webhook_url = str(getattr(settings, 'N8N_BRANDING_WEBHOOK_URL', '') or '').strip()
-    if not webhook_url:
-        # n8n not configured — generate directly (graceful fallback)
-        logger.info('N8N_BRANDING_WEBHOOK_URL not set — generating poster directly.')
-        return generate_poster(request)
+    access_token = _get_service_token()
+    if not access_token:
+        return _error('No Canva service token available. Ask the Branding admin to connect Canva.', 503)
 
-    backend_url  = str(getattr(settings, 'IDCS_BACKEND_URL', 'http://localhost:8000') or '').rstrip('/')
-    secret       = str(getattr(settings, 'N8N_WEBHOOK_SECRET', '') or '')
-    callback_url = (
-        f'{backend_url}/api/academic-calendar/events/{event_id}/poster-callback/'
-        if event_id
-        else f'{backend_url}/api/canva/noop-callback'
-    )
+    result = _run_generate_poster(brand_template_id, fields, fmt, access_token)
 
-    # Build the n8n webhook payload.
-    # form_fields are passed pre-built so the n8n Code node uses them directly
-    # without having to know the HOD form field names.
-    payload = {
-        'event_id':          event_id or 'preview',
-        'callback_url':      callback_url,
-        'secret':            secret,
-        'brand_template_id': brand_template_id,
-        'export_format':     fmt,
-        'idcs_backend_url':  backend_url,
-        'form_fields':       fields,
-    }
-
-    try:
-        resp = requests.post(
-            webhook_url,
-            json=payload,
-            timeout=135,  # n8n allows up to 120 s for the Canva request
-            headers={'Content-Type': 'application/json'},
-        )
-    except requests.exceptions.ConnectionError:
-        logger.warning('n8n not reachable at %s — falling back to direct Canva call.', webhook_url)
-        return generate_poster(request)
-    except requests.exceptions.Timeout:
-        return _error('Poster generation timed out (n8n did not respond in time). Try again.', 504)
-    except Exception as exc:
-        logger.error('n8n proxy error: %s', exc)
-        return generate_poster(request)
-
-    if not resp.ok:
-        logger.error('n8n returned HTTP %s: %s', resp.status_code, resp.text[:300])
-        return generate_poster(request)
-
-    try:
-        n8n_data = resp.json()
-    except ValueError:
-        logger.error('n8n returned non-JSON response — falling back.')
-        return generate_poster(request)
-
-    if n8n_data.get('error') and not n8n_data.get('ok'):
-        return _error(n8n_data['error'], 500)
+    if result.get('error') and not result.get('design_id'):
+        return _error(result['error'], 500)
 
     return JsonResponse({
-        'design_id':  n8n_data.get('design_id', ''),
-        'dataUrl':    n8n_data.get('dataUrl', ''),
-        'export_url': n8n_data.get('poster_url', ''),
+        'design_id':  result['design_id'],
+        'export_url': result['export_url'],
+        'dataUrl':    result['dataUrl'],
+        'warning':    result.get('error', ''),
     })
 
 
+# ── Media upload (for poster images) ──────────────────────────────────────────
+
 @csrf_exempt
 @require_http_methods(['POST'])
-def noop_callback(request):
+def upload_media(request):
     """
-    POST /api/canva/noop-callback
-    Silent no-op target for n8n poster callbacks that have no persistent event
-    (e.g. live preview requests from the HOD form).
+    POST /api/canva/upload-media
+    Multipart form upload: field name = 'file'
+
+    Saves the uploaded file to MEDIA_ROOT/poster-uploads/<uuid>.<ext>
+    and returns { "url": "http://.../<media_url>" } — an absolute URL usable
+    by n8n and Canva's asset-upload APIs.
     """
-    return JsonResponse({'ok': True})
+    uploaded = request.FILES.get('file')
+    if not uploaded:
+        return _error('No file attached. Use multipart form with field name "file".')
+
+    import uuid
+    from pathlib import Path
+    from django.conf import settings as dj_settings
+    from django.core.files.storage import default_storage
+
+    ext = Path(uploaded.name).suffix.lower() or '.png'
+    filename = f'poster-uploads/{uuid.uuid4().hex}{ext}'
+
+    from django.core.files.base import ContentFile as CF
+    saved_path = default_storage.save(filename, CF(uploaded.read()))
+    file_url = request.build_absolute_uri(dj_settings.MEDIA_URL + saved_path)
+    return JsonResponse({'url': file_url, 'path': saved_path})
+
+
+# ── Poster Maker orchestrator (called by the React frontend) ──────────────────
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def poster_maker(request):
+    """
+    POST /api/canva/poster-maker
+
+    Accepts EITHER:
+      (a) multipart/form-data  —  fields: brand_template_id, format, event_data (JSON string),
+                                  files:  logo_file, chief_guest_photo, qr_code_file, ...
+      (b) application/json     —  { brand_template_id, format, event_data: { ... },
+                                    image_urls: { logo: "...", chief_guest_photo: "..." } }
+
+    This view:
+      1. Saves any uploaded files → Django media → gets absolute URLs
+      2. Calls n8n webhook if N8N_BRANDING_WEBHOOK_URL is configured
+         (n8n then calls /api/canva/generate-poster)
+      3. Otherwise calls _run_generate_poster() directly
+      4. Returns { design_id, export_url, dataUrl, canva_edit_url, warning }
+    """
+    content_type = request.content_type or ''
+
+    # ── Parse input ────────────────────────────────────────────────────────
+    if 'multipart' in content_type or 'form-data' in content_type:
+        brand_template_id = request.POST.get('brand_template_id', '').strip()
+        fmt               = request.POST.get('format', 'png').lower()
+        event_data_raw    = request.POST.get('event_data', '{}')
+        explicit_fields_raw = request.POST.get('fields', '{}')
+        try:
+            event_data = json.loads(event_data_raw)
+        except Exception:
+            event_data = {}
+        try:
+            explicit_fields = json.loads(explicit_fields_raw)
+        except Exception:
+            explicit_fields = {}
+
+        # Save uploaded images to media
+        image_urls = {}
+        image_field_names = [
+            'logo_file', 'chief_guest_photo', 'chief_guest_photo_2',
+            'chief_guest_photo_3', 'qr_code_file', 'banner_image',
+            'extra_image_1', 'extra_image_2',
+        ]
+        for field_name in image_field_names:
+            f = request.FILES.get(field_name)
+            if not f:
+                continue
+            try:
+                import uuid
+                from pathlib import Path
+                ext = Path(f.name).suffix.lower() or '.png'
+                fname = f'poster-uploads/{uuid.uuid4().hex}{ext}'
+                from django.core.files.storage import default_storage
+                from django.core.files.base import ContentFile as CF
+                saved = default_storage.save(fname, CF(f.read()))
+                image_urls[field_name.replace('_file', '')] = request.build_absolute_uri(
+                    settings.MEDIA_URL + saved
+                )
+            except Exception as exc:
+                logger.error('Failed to save upload %s: %s', field_name, exc)
+
+    else:
+        body              = _json_body(request)
+        brand_template_id = body.get('brand_template_id', '').strip()
+        fmt               = body.get('format', 'png').lower()
+        event_data        = body.get('event_data', {})
+        image_urls        = body.get('image_urls', {})
+        explicit_fields   = body.get('fields', {})
+
+    if not brand_template_id:
+        return _error('brand_template_id is required.')
+    if fmt not in ('png', 'pdf'):
+        fmt = 'png'
+
+    # ── Build Canva autofill fields ────────────────────────────────────────
+    if isinstance(explicit_fields, dict) and explicit_fields:
+        fields = explicit_fields
+    else:
+        # Map event_data keys → Canva field names (text fields)
+        fields: dict = {}
+        text_field_map = {
+            'event_name':               'event_name',
+            'event_title':              'event_name',
+            'title':                    'event_name',
+            'organizer_department':     'organizer_department',
+            'department':               'organizer_department',
+            'start_month':              'start_month',
+            'start_day':                'start_day',
+            'end_day':                  'end_day',
+            'year':                     'year',
+            'event_date':               'event_date',
+            'date_time':                'event_date',
+            'event_time':               'event_time',
+            'venue_location':           'venue_location',
+            'venue':                    'venue_location',
+            'chief_guest_name':         'chief_guest_name',
+            'chief_guest_position':     'chief_guest_position',
+            'chief_guest_company':      'chief_guest_company',
+            'chief_guest_location':     'chief_guest_location',
+            'committee_member_1_name':  'committee_member_1_name',
+            'committee_member_1_role':  'committee_member_1_role',
+            'committee_member_2_name':  'committee_member_2_name',
+            'committee_member_2_role':  'committee_member_2_role',
+            'committee_member_3_name':  'committee_member_3_name',
+            'committee_member_3_role':  'committee_member_3_role',
+            'committee_member_4_name':  'committee_member_4_name',
+            'committee_member_4_role':  'committee_member_4_role',
+            'committee_member_5_name':  'committee_member_5_name',
+            'committee_member_5_role':  'committee_member_5_role',
+            'committee_member_6_name':  'committee_member_6_name',
+            'committee_member_6_role':  'committee_member_6_role',
+            'website_text':             'website_text',
+            'instagram_handle':         'instagram_handle',
+            'resource_person':          'resource_person',
+            'coordinators':             'coordinators',
+            'faculty_coordinator_1':    'faculty_coordinator_1',
+            'faculty_coordinator_2':    'faculty_coordinator_2',
+            'student_coordinator':      'student_coordinator',
+            'participants':             'participants',
+            'event_type':               'event_type',
+        }
+        for src_key, canva_key in text_field_map.items():
+            val = str(event_data.get(src_key, '')).strip()
+            if val and canva_key not in fields:
+                fields[canva_key] = {'type': 'text', 'text': val}
+
+        # image fields
+        image_canva_map = {
+            'logo':               'logo',
+            'chief_guest_photo':  'chief_guest_photo',
+            'chief_guest_photo_2': 'chief_guest_photo_2',
+            'chief_guest_photo_3': 'chief_guest_photo_3',
+            'qr_code':            'qr_code_image',
+            'banner_image':       'banner_image',
+            'extra_image_1':      'extra_image_1',
+            'extra_image_2':      'extra_image_2',
+        }
+        for src_key, canva_key in image_canva_map.items():
+            url = (image_urls.get(src_key) or event_data.get(src_key + '_url', '')).strip()
+            if url:
+                fields[canva_key] = {'type': 'image', 'url': url}
+
+    if not fields:
+        return _error('No event data provided.')
+
+    # ── Try n8n webhook first; fall back to direct Canva call ─────────────
+    n8n_url = getattr(settings, 'N8N_BRANDING_WEBHOOK_URL', '').strip()
+    if n8n_url:
+        try:
+            n8n_payload = {
+                'brand_template_id': brand_template_id,
+                'fields':            fields,
+                'format':            fmt,
+                'event_id':          str(event_data.get('event_id', 'manual')),
+                'callback_url':      '',
+                'secret':            getattr(settings, 'N8N_WEBHOOK_SECRET', ''),
+                'idcs_backend_url':  'http://127.0.0.1:8000',
+            }
+            n8n_resp = requests.post(n8n_url, json=n8n_payload, timeout=180)
+            if n8n_resp.ok:
+                data = n8n_resp.json()
+                if data.get('ok'):
+                    return JsonResponse({
+                        'design_id':     data.get('design_id', ''),
+                        'export_url':    data.get('poster_url', ''),
+                        'dataUrl':       data.get('dataUrl', ''),
+                        'canva_edit_url': f"https://www.canva.com/design/{data.get('design_id', '')}/edit" if data.get('design_id') else '',
+                        'via_n8n':       True,
+                    })
+                else:
+                    logger.warning('n8n returned error: %s', data.get('error'))
+        except Exception as exc:
+            logger.warning('n8n call failed (%s) — falling back to direct Canva', exc)
+
+    # ── Direct Canva path ─────────────────────────────────────────────────
+    access_token = _get_service_token()
+    if not access_token:
+        return _error('No Canva service token. Ask the Branding admin to connect Canva first.', 503)
+
+    result = _run_generate_poster(brand_template_id, fields, fmt, access_token)
+
+    if result.get('error') and not result.get('design_id'):
+        return _error(result['error'], 500)
+
+    design_id = result.get('design_id', '')
+    return JsonResponse({
+        'design_id':      design_id,
+        'export_url':     result.get('export_url', ''),
+        'dataUrl':        result.get('dataUrl', ''),
+        'canva_edit_url': f'https://www.canva.com/design/{design_id}/edit' if design_id else '',
+        'warning':        result.get('error', ''),
+        'via_n8n':        False,
+    })

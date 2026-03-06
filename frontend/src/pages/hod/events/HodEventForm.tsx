@@ -2,7 +2,6 @@ import React, { useRef } from 'react';
 import {
   Calendar, MapPin, User, Users, Tag, BookOpen,
   Upload, X, GraduationCap, Briefcase, Image as ImageIcon,
-  Building2, Phone, AlignLeft,
 } from 'lucide-react';
 import type { GuestInfo } from '../../../store/eventStore';
 
@@ -17,10 +16,6 @@ export interface ResourcePerson {
 export interface EventFormState {
   title: string;
   eventType: string;
-  department: string;
-  organizer: string;
-  description: string;
-  contact: string;
   participants: string;
   venue: string;
   dateTime: string;
@@ -130,22 +125,15 @@ export default function HodEventForm({ form, onChange }: Props) {
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Department *" icon={Building2}>
-          <input type="text" required placeholder="e.g. Computer Science" value={form.department}
-            onChange={(e)=>set('department',e.target.value)} className={cls} />
-        </Field>
-        <Field label="Organizer" icon={Briefcase} optional>
-          <input type="text" placeholder="e.g. IDCS College of Engineering" value={form.organizer}
-            onChange={(e)=>set('organizer',e.target.value)} className={cls} />
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
         <Field label="Type of Event *" icon={BookOpen}>
           <select value={form.eventType} onChange={(e)=>set('eventType',e.target.value)} className={cls}>
             <option value="">— Select —</option>
             {EVENT_TYPES.map(t=><option key={t}>{t}</option>)}
           </select>
+        </Field>
+        <Field label="Participants" icon={Users} optional>
+          <input type="text" placeholder="e.g. UG / PG Students" value={form.participants}
+            onChange={(e)=>set('participants',e.target.value)} className={cls} />
         </Field>
       </div>
 
@@ -159,23 +147,6 @@ export default function HodEventForm({ form, onChange }: Props) {
             onChange={(e)=>set('venue',e.target.value)} className={cls} />
         </Field>
       </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Contact Details" icon={Phone} optional>
-          <input type="text" placeholder="e.g. +91 9876543210" value={form.contact}
-            onChange={(e)=>set('contact',e.target.value)} className={cls} />
-        </Field>
-        <Field label="Participants" icon={Users} optional>
-          <input type="text" placeholder="e.g. UG / PG Students" value={form.participants}
-            onChange={(e)=>set('participants',e.target.value)} className={cls} />
-        </Field>
-      </div>
-
-      <Field label="Event Description" icon={AlignLeft} optional>
-        <textarea rows={2} placeholder="Brief description of the event…" value={form.description}
-          onChange={(e)=>set('description',e.target.value)}
-          className={`${cls} resize-none`} />
-      </Field>
 
       {/* Resource Persons */}
       <div className="border border-blue-100 rounded-2xl p-4 space-y-3 bg-blue-50/40">

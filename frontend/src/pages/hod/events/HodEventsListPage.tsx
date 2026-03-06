@@ -5,17 +5,19 @@ import ApprovalStatusBadge from './ApprovalStatusBadge';
 import {
   getAllEvents,
   deleteEvent,
-  setEventStatus,
+  submitEventToIqac,
   type CollegeEvent,
   type EventStatus,
 } from '../../../store/eventStore';
 
 const STATUS_FILTERS: Array<{ label: string; value: 'all' | EventStatus }> = [
-  { label: 'All',              value: 'all'              },
-  { label: 'Draft',            value: 'Draft'            },
-  { label: 'Pending Approval', value: 'Pending Approval' },
-  { label: 'Approved',         value: 'Approved'         },
-  { label: 'Rejected',         value: 'Rejected'         },
+  { label: 'All',                value: 'all'                       },
+  { label: 'Draft',              value: 'Draft'                     },
+  { label: 'Pending IQAC',       value: 'Pending IQAC Approval'     },
+  { label: 'Pending Branding',   value: 'Pending Branding Approval' },
+  { label: 'Approved',           value: 'Approved'                  },
+  { label: 'Rejected by IQAC',   value: 'Rejected by IQAC'          },
+  { label: 'Rejected by Branding', value: 'Rejected by Branding'    },
 ];
 
 export default function HodEventsListPage() {
@@ -33,7 +35,7 @@ export default function HodEventsListPage() {
   }
 
   function handleForward(id: string) {
-    setEventStatus(id, 'Pending Approval');
+    submitEventToIqac(id);
     refresh();
   }
 
@@ -66,10 +68,10 @@ export default function HodEventsListPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {[
-          { label: 'Draft',            color: 'bg-gray-100 text-gray-700'   },
-          { label: 'Pending Approval', color: 'bg-amber-50 text-amber-700'  },
-          { label: 'Approved',         color: 'bg-green-50 text-green-700'  },
-          { label: 'Rejected',         color: 'bg-red-50 text-red-700'      },
+          { label: 'Draft',                    color: 'bg-gray-100 text-gray-700'   },
+          { label: 'Pending IQAC Approval',    color: 'bg-amber-50 text-amber-700'  },
+          { label: 'Pending Branding Approval', color: 'bg-indigo-50 text-indigo-700' },
+          { label: 'Approved',                 color: 'bg-green-50 text-green-700'  },
         ].map(({ label, color }) => (
           <div key={label} className={`rounded-2xl p-4 ${color}`}>
             <p className="text-2xl font-bold">{counts[label] ?? 0}</p>
@@ -132,9 +134,15 @@ export default function HodEventsListPage() {
                   )}
                 </div>
 
-                {event.reviewNote && (
-                  <p className="mt-2 text-xs bg-gray-50 rounded-xl px-3 py-2 text-gray-600 italic">
-                    Branding note: {event.reviewNote}
+                {event.iqacReviewNote && (
+                  <p className="mt-2 text-xs bg-amber-50 rounded-xl px-3 py-2 text-amber-800 italic">
+                    IQAC note: {event.iqacReviewNote}
+                  </p>
+                )}
+
+                {event.brandingReviewNote && (
+                  <p className="mt-2 text-xs bg-indigo-50 rounded-xl px-3 py-2 text-indigo-800 italic">
+                    Branding note: {event.brandingReviewNote}
                   </p>
                 )}
 
@@ -158,7 +166,7 @@ export default function HodEventsListPage() {
                       onClick={() => handleForward(event.id)}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-medium hover:bg-indigo-100 transition-colors"
                     >
-                      <Send className="w-3.5 h-3.5" /> Forward
+                      <Send className="w-3.5 h-3.5" /> Forward to IQAC
                     </button>
                   </>
                 )}

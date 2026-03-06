@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { normalizeObeClassType } from '../../constants/classTypes';
 
 import {
   bulkResetGlobalPublishControls,
@@ -150,10 +151,7 @@ function assessmentDisplayLabel(classType: ClassTypeKey, assessment: DueAssessme
 }
 
 function normalizeClassType(v: any): ClassTypeKey {
-  const k = String(v || '')
-    .trim()
-    .toUpperCase();
-  if (k === 'THEORY') return 'THEORY';
+  const k = normalizeObeClassType(v);
   if (k === 'LAB') return 'LAB';
   if (k === 'TCPL') return 'TCPL';
   if (k === 'TCPR') return 'TCPR';

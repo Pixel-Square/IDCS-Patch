@@ -28,7 +28,7 @@ import PublishLockOverlay from './PublishLockOverlay';
 import AssessmentContainer from './containers/AssessmentContainer';
 import { ModalPortal } from './ModalPortal';
 import { fetchDeptRows, fetchMasters } from '../services/curriculum';
-import { isLabClassType, normalizeClassType } from '../constants/classTypes';
+import { isLabClassType, normalizeObeClassType } from '../constants/classTypes';
 import { downloadTotalsWithPrompt } from '../utils/assessmentTotalsDownload';
 
 const LAB_CO_MAX_OVERRIDE = { co1: 42, co2: 42, co3: 58, co4: 42, co5: 42 };
@@ -529,7 +529,7 @@ export default function LabCourseMarksEntry({
   }, [draft.sheet.coConfigs, draft.sheet.markManagerSnapshot, initialEnabledCoNums]);
 
   const [classType, setClassType] = useState<string | null>(null);
-  const normalizedClassType = useMemo(() => normalizeClassType(classType), [classType]);
+  const normalizedClassType = useMemo(() => normalizeObeClassType(classType), [classType]);
   const isLabCourse = useMemo(() => isLabClassType(classType), [classType]);
   const isTcpr = normalizedClassType === 'TCPR';
   const isTcpl = normalizedClassType === 'TCPL';

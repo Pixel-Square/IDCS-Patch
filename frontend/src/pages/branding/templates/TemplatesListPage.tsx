@@ -28,11 +28,11 @@ import {
   type CanvaTemplate,
 } from '../../../store/canvaStore';
 import {
-  listUserDesigns,
+  listUserBrandTemplates,
   fetchTemplatesFromBackend,
   saveAsTemplate,
   deleteTemplate,
-  type CanvaDesignItem,
+  type CanvaBrandTemplateItem,
 } from '../../../services/canva/CanvaTemplateService';
 import {
   disconnect,
@@ -96,7 +96,7 @@ export default function TemplatesListPage() {
 
   // Browse state
   const [showBrowse,     setShowBrowse]     = useState(false);
-  const [designs,        setDesigns]        = useState<CanvaDesignItem[]>([]);
+  const [designs,        setDesigns]        = useState<CanvaBrandTemplateItem[]>([]);
   const [searchQuery,    setSearchQuery]    = useState('');
   const [fetchingDesigns, setFetchingDesigns] = useState(false);
   const [fetchError,     setFetchError]     = useState<string | null>(null);
@@ -196,16 +196,16 @@ export default function TemplatesListPage() {
     }
   }, []);
 
-  // ── Load Canva designs ────────────────────────────────────────────────────
+  // ── Load Canva Brand Templates ────────────────────────────────────────────
 
   const loadDesigns = useCallback(async (query: string) => {
     setFetchingDesigns(true);
     setFetchError(null);
     try {
-      const items = await listUserDesigns(query);
+      const items = await listUserBrandTemplates(query);
       setDesigns(items);
     } catch (err: unknown) {
-      const msg = (err as Error).message ?? 'Failed to load designs.';
+      const msg = (err as Error).message ?? 'Failed to load brand templates.';
       setFetchError(msg);
       if (msg.toLowerCase().includes('401') || msg.toLowerCase().includes('unauthori')) {
         clearConnection();
@@ -232,7 +232,7 @@ export default function TemplatesListPage() {
 
   // ── Save / delete templates ───────────────────────────────────────────────
 
-  async function handleSaveTemplate(design: CanvaDesignItem) {
+  async function handleSaveTemplate(design: CanvaBrandTemplateItem) {
     setSavingId(design.id);
     try {
       await saveAsTemplate(design, getBrandingUser());
@@ -282,15 +282,15 @@ export default function TemplatesListPage() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Templates</h1>
           <p className="text-gray-500 text-sm max-w-sm mx-auto leading-relaxed">
-            Connect your Canva account to browse your designs and save them as reusable
-            event poster templates for HOD use.
+            Connect your Canva account to browse your Brand Templates and save them as reusable
+            autofill-ready poster templates for HOD use.
           </p>
         </div>
 
         {/* Feature list */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-6 space-y-3">
           {[
-            'Browse and save Canva designs as IDCS event templates',
+            'Browse and save Canva Brand Templates as IDCS event templates',
             'Templates are stored in the DB — shared with all HOD event flows',
             'HODs generate autofilled poster designs from your saved templates',
             'Open the autofilled design in Canva for final adjustments',
@@ -394,10 +394,10 @@ export default function TemplatesListPage() {
 
       <CanvaAppBanner />
 
-      {/* ── Browse Canva Designs (collapsed by default) ── */}
+      {/* ── Browse Canva Brand Templates (collapsed by default) ── */}
       <section className="mb-10">
         <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-          <h2 className="text-base font-bold text-gray-800">Import from Canva</h2>
+          <h2 className="text-base font-bold text-gray-800">Import Brand Templates from Canva</h2>
           <div className="flex items-center gap-2">
             {showBrowse && (
               <button onClick={() => loadDesigns(searchQuery)} disabled={fetchingDesigns}
@@ -412,13 +412,13 @@ export default function TemplatesListPage() {
                 setShowBrowse((v) => !v);
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-semibold hover:bg-purple-700 transition-colors">
-              {showBrowse ? <><ChevronUp className="w-3.5 h-3.5" /> Hide</> : <><Plus className="w-3.5 h-3.5" /> Browse Designs</>}
+              {showBrowse ? <><ChevronUp className="w-3.5 h-3.5" /> Hide</> : <><Plus className="w-3.5 h-3.5" /> Browse Brand Templates</>}
             </button>
           </div>
         </div>
 
         {!showBrowse && (
-          <p className="text-xs text-gray-400 mb-2">Browse your Canva designs and save them as branded templates.</p>
+          <p className="text-xs text-gray-400 mb-2">Browse your Canva Brand Templates and save them as autofill-ready templates.</p>
         )}
 
         {showBrowse && (<>
@@ -426,7 +426,7 @@ export default function TemplatesListPage() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search your Canva designs…"
+              placeholder="Search your Canva Brand Templates…"
               className="w-full pl-9 pr-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent" />
           </div>
           <button type="submit" className="px-4 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 transition-colors">
@@ -436,22 +436,22 @@ export default function TemplatesListPage() {
 
         {fetchingDesigns && (
           <div className="flex items-center justify-center py-12 gap-3 text-gray-500 text-sm">
-            <Loader className="w-5 h-5 animate-spin" /> Loading your Canva designs…
+            <Loader className="w-5 h-5 animate-spin" /> Loading your Canva Brand Templates…
           </div>
         )}
         {!fetchingDesigns && fetchError && (
           <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <div><p className="font-semibold">Failed to load designs</p><p className="mt-0.5">{fetchError}</p></div>
+            <div><p className="font-semibold">Failed to load Brand Templates</p><p className="mt-0.5">{fetchError}</p></div>
           </div>
         )}
         {!fetchingDesigns && !fetchError && designs.length === 0 && (
           <div className="text-center py-10 text-gray-400 text-sm">
-            No designs found.{' '}
+            No Brand Templates found.{' '}
             <a href="https://www.canva.com" target="_blank" rel="noopener noreferrer"
               className="text-purple-600 hover:underline inline-flex items-center gap-1">
               Open Canva <ExternalLink className="w-3.5 h-3.5" />
-            </a>{' '}to create one, then refresh.
+            </a>{' '}to publish a Brand Template, then refresh.
           </div>
         )}
 
@@ -495,8 +495,8 @@ export default function TemplatesListPage() {
                         }
                         {isSaving ? 'Saving…' : isSaved ? 'Re-save' : 'Save as Template'}
                       </button>
-                      {design.urls?.edit_url && (
-                        <a href={design.urls.edit_url} target="_blank" rel="noopener noreferrer"
+                      {design.create_url && (
+                        <a href={design.create_url} target="_blank" rel="noopener noreferrer"
                           className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-indigo-600 hover:border-indigo-200 transition-colors"
                           title="Open in Canva">
                           <ExternalLink className="w-4 h-4" />
@@ -528,7 +528,7 @@ export default function TemplatesListPage() {
 
         {templates.length === 0 ? (
           <div className="text-center py-10 text-gray-400 text-sm bg-white rounded-2xl border border-dashed border-gray-200">
-            No templates saved yet. Browse your Canva designs above and click{' '}
+            No templates saved yet. Browse your Canva Brand Templates above and click{' '}
             <span className="font-semibold text-purple-600">Save as Template</span>.
           </div>
         ) : (

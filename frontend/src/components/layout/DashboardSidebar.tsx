@@ -37,6 +37,7 @@ import { fetchPendingPublishRequestCount } from '../../services/obe';
   hod_obe_requests: Bell,
   hod_result_analysis: BarChart2,
   hod_events: PartyPopper,
+  iqac_event_approvals: PartyPopper,
   academic_controller: Layout,
   notifications: Bell,
   academic_calendar: Calendar,
@@ -129,6 +130,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   const rolesUpper = (data.roles || []).map(r => (r || '').toString().toUpperCase());
   const flags = data.flags || {};
   const isIqac = rolesUpper.includes('IQAC');
+  const isIqacMain = Boolean((data as any)?.is_iqac_main === true || (isIqac && String((data as any)?.username || '').trim() === '000000'));
   const canPbasManage = rolesUpper.some((r) => ['IQAC', 'ADMIN', 'PRINCIPAL', 'PS'].includes(r));
 
   
@@ -145,6 +147,13 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if (canHodObeRequests) items.push({ key: 'hod_obe_requests', label: 'HOD: OBE Requests', to: '/hod/obe-requests' });
   if (rolesUpper.includes('HOD') || rolesUpper.includes('ADVISOR')) items.push({ key: 'hod_result_analysis', label: 'Result Analysis', to: '/hod/result-analysis' });
   if (rolesUpper.includes('HOD')) items.push({ key: 'hod_events', label: 'Event Management', to: '/hod/events' });
+  // Canva Poster Maker: available to HOD, IQAC, and any staff with branding access
+  if (rolesUpper.includes('HOD') || isIqac || rolesUpper.includes('STAFF')) {
+    items.push({ key: 'poster_maker', label: '🎨 Canva Poster Maker', to: '/poster-maker' });
+  }
+  if ((isIqac || isIqacMain) && !items.some((item) => item.key === 'iqac_event_approvals')) {
+    items.push({ key: 'iqac_event_approvals', label: 'Event Approvals', to: '/iqac/event-approvals' });
+  }
 
   // Staffs page: require explicit view permission
   if (permsLower.includes('academics.view_staffs_page')) {

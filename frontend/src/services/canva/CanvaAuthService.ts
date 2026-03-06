@@ -30,6 +30,23 @@ import {
 
 // ── Server-side OAuth (primary flow) ─────────────────────────────────────────
 
+function getCanvaApiBase(): string {
+  const { protocol, hostname, port } = window.location;
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+  // In local development, bypass the Vite proxy and talk to Django directly.
+  // This keeps Canva OAuth working even if the frontend is served on :5173/:5174.
+  if (isLocalHost && port && port !== '8000') {
+    return `${protocol}//127.0.0.1:8000`;
+  }
+
+  return '';
+}
+
+function apiUrl(path: string): string {
+  return `${getCanvaApiBase()}${path}`;
+}
+
 /**
  * Start the Canva OAuth flow.
  * Redirects the browser to the Django backend /authorize endpoint,
@@ -37,7 +54,7 @@ import {
  */
 export function initiateOAuth(): void {
   const origin = encodeURIComponent(window.location.origin);
-  window.location.href = `/api/canva/oauth/authorize?origin=${origin}`;
+  window.location.href = apiUrl(`/api/canva/oauth/authorize?origin=${origin}`);
 }
 
 /**
@@ -49,7 +66,7 @@ export function initiateOAuth(): void {
  */
 export async function loadConnectionFromBackend(): Promise<CanvaConnection | null> {
   try {
-    const res = await fetch('/api/canva/oauth/connection', { credentials: 'include' });
+    const res = await fetch(apiUrl('/api/canva/oauth/connection'), { credentials: 'include' });
     if (!res.ok) return null;
     const data = await res.json() as {
       connected: boolean;
@@ -83,7 +100,7 @@ export async function loadConnectionFromBackend(): Promise<CanvaConnection | nul
  */
 export async function disconnect(): Promise<void> {
   try {
-    await fetch('/api/canva/oauth/connection', {
+    await fetch(apiUrl('/api/canva/oauth/connection'), {
       method:      'DELETE',
       credentials: 'include',
     });

@@ -9,7 +9,13 @@
 const STORAGE_KEY = 'idcs_college_events';
 const CLEANUP_KEY = 'idcs_college_events_cleanup_v2';
 
-export type EventStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected';
+export type EventStatus =
+  | 'Draft'
+  | 'Pending IQAC Approval'
+  | 'Pending Branding Approval'
+  | 'Approved'
+  | 'Rejected by IQAC'
+  | 'Rejected by Branding';
 
 export interface GuestInfo {
   name: string;
@@ -26,11 +32,83 @@ export interface CollegeEvent {
   chiefGuests: GuestInfo[];
   status: EventStatus;
   reviewNote?: string;
+  iqacReviewNote?: string;
+  brandingReviewNote?: string;
+  submittedToIqacAt?: string;
+  iqacReviewedAt?: string;
+  forwardedToBrandingAt?: string;
+  brandingReviewedAt?: string;
   createdAt: string;
   updatedAt: string;
   createdBy: string;        // username of the HOD who created it
   createdByName?: string;   // display name of the HOD who created it
   department?: string;
+}
+
+const LEGACY_STATUS_MAP: Record<string, EventStatus> = {
+  Draft: 'Draft',
+  'Pending Approval': 'Pending IQAC Approval',
+  Approved: 'Approved',
+  Rejected: 'Rejected by Branding',
+};
+
+function normalizeStatus(raw: unknown): EventStatus {
+  const key = String(raw || '').trim();
+  return LEGACY_STATUS_MAP[key] || (
+    [
+      'Draft',
+      'Pending IQAC Approval',
+      'Pending Branding Approval',
+      'Approved',
+      'Rejected by IQAC',
+      'Rejected by Branding',
+    ].includes(key)
+      ? (key as EventStatus)
+      : 'Draft'
+  );
+}
+
+function migrateEvent(raw: CollegeEvent): CollegeEvent {
+  const status = normalizeStatus((raw as any)?.status);
+  const legacyReviewNote = String((raw as any)?.reviewNote || '').trim() || undefined;
+
+  const migrated: CollegeEvent = {
+    ...raw,
+    status,
+    reviewNote: legacyReviewNote,
+    iqacReviewNote: (raw as any)?.iqacReviewNote,
+    brandingReviewNote: (raw as any)?.brandingReviewNote,
+    submittedToIqacAt: (raw as any)?.submittedToIqacAt,
+    iqacReviewedAt: (raw as any)?.iqacReviewedAt,
+    forwardedToBrandingAt: (raw as any)?.forwardedToBrandingAt,
+    brandingReviewedAt: (raw as any)?.brandingReviewedAt,
+  };
+
+  if (!migrated.submittedToIqacAt && status !== 'Draft') {
+    migrated.submittedToIqacAt = migrated.updatedAt || migrated.createdAt;
+  }
+
+  if (!migrated.iqacReviewNote && status === 'Pending Branding Approval') {
+    migrated.iqacReviewNote = legacyReviewNote;
+  }
+
+  if (!migrated.brandingReviewNote && (status === 'Approved' || status === 'Rejected by Branding')) {
+    migrated.brandingReviewNote = legacyReviewNote;
+  }
+
+  if (!migrated.iqacReviewedAt && (status === 'Pending Branding Approval' || status === 'Rejected by IQAC' || status === 'Approved' || status === 'Rejected by Branding')) {
+    migrated.iqacReviewedAt = migrated.updatedAt || migrated.createdAt;
+  }
+
+  if (!migrated.forwardedToBrandingAt && (status === 'Pending Branding Approval' || status === 'Approved' || status === 'Rejected by Branding')) {
+    migrated.forwardedToBrandingAt = migrated.iqacReviewedAt || migrated.updatedAt || migrated.createdAt;
+  }
+
+  if (!migrated.brandingReviewedAt && (status === 'Approved' || status === 'Rejected by Branding')) {
+    migrated.brandingReviewedAt = migrated.updatedAt || migrated.createdAt;
+  }
+
+  return migrated;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -39,7 +117,7 @@ function load(): CollegeEvent[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    let items: CollegeEvent[] = Array.isArray(parsed) ? (parsed as CollegeEvent[]) : [];
+    let items: CollegeEvent[] = Array.isArray(parsed) ? (parsed as CollegeEvent[]).map(migrateEvent) : [];
 
     // One-time cleanup: remove the specific old local test entry created during testing.
     const didCleanup = localStorage.getItem(CLEANUP_KEY) === '1';
@@ -79,6 +157,15 @@ export function getAllEvents(): CollegeEvent[] {
 
 /** Return events visible in the Branding approval queue (non-Draft). */
 export function getBrandingEvents(): CollegeEvent[] {
+  return getAllEvents().filter((e) => (
+    e.status === 'Pending Branding Approval'
+    || e.status === 'Approved'
+    || e.status === 'Rejected by Branding'
+  ));
+}
+
+/** Return events visible in the IQAC approval queue and history. */
+export function getIqacEvents(): CollegeEvent[] {
   return getAllEvents().filter((e) => e.status !== 'Draft');
 }
 
@@ -121,6 +208,61 @@ export function setEventStatus(
   reviewNote?: string,
 ): CollegeEvent | null {
   return updateEvent(id, { status, ...(reviewNote !== undefined ? { reviewNote } : {}) });
+}
+
+export function submitEventToIqac(id: string): CollegeEvent | null {
+  const now = new Date().toISOString();
+  return updateEvent(id, {
+    status: 'Pending IQAC Approval',
+    submittedToIqacAt: now,
+    iqacReviewedAt: undefined,
+    forwardedToBrandingAt: undefined,
+    brandingReviewedAt: undefined,
+    iqacReviewNote: undefined,
+    brandingReviewNote: undefined,
+    reviewNote: undefined,
+  });
+}
+
+export function approveEventByIqac(id: string, reviewNote?: string): CollegeEvent | null {
+  const now = new Date().toISOString();
+  return updateEvent(id, {
+    status: 'Pending Branding Approval',
+    iqacReviewNote: reviewNote || undefined,
+    reviewNote: reviewNote || undefined,
+    iqacReviewedAt: now,
+    forwardedToBrandingAt: now,
+  });
+}
+
+export function rejectEventByIqac(id: string, reviewNote?: string): CollegeEvent | null {
+  const now = new Date().toISOString();
+  return updateEvent(id, {
+    status: 'Rejected by IQAC',
+    iqacReviewNote: reviewNote || undefined,
+    reviewNote: reviewNote || undefined,
+    iqacReviewedAt: now,
+  });
+}
+
+export function approveEventByBranding(id: string, reviewNote?: string): CollegeEvent | null {
+  const now = new Date().toISOString();
+  return updateEvent(id, {
+    status: 'Approved',
+    brandingReviewNote: reviewNote || undefined,
+    reviewNote: reviewNote || undefined,
+    brandingReviewedAt: now,
+  });
+}
+
+export function rejectEventByBranding(id: string, reviewNote?: string): CollegeEvent | null {
+  const now = new Date().toISOString();
+  return updateEvent(id, {
+    status: 'Rejected by Branding',
+    brandingReviewNote: reviewNote || undefined,
+    reviewNote: reviewNote || undefined,
+    brandingReviewedAt: now,
+  });
 }
 
 /** Delete an event permanently. */
