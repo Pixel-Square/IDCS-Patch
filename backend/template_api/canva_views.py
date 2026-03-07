@@ -519,7 +519,8 @@ def brand_templates(request):
     continuation = request.GET.get('continuation', '').strip()
 
     if not access_token:
-        return _error('access_token not provided and no Canva service token is configured.')
+        # Canva not configured — return empty list so the UI degrades gracefully
+        return JsonResponse({'items': []}, status=200)
 
     params = {
         'limit': request.GET.get('limit', '100'),
@@ -552,7 +553,7 @@ def brand_template_dataset(request, brand_template_id: str):
     """
     access_token = _get_request_access_token(request)
     if not access_token:
-        return _error('access_token not provided and no Canva service token is configured.')
+        return JsonResponse({'dataset': {}}, status=200)
 
     resp = requests.get(
         f'{CANVA_API_BASE}/brand-templates/{brand_template_id}/dataset',

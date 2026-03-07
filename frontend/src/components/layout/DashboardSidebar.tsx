@@ -147,10 +147,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if (canHodObeRequests) items.push({ key: 'hod_obe_requests', label: 'HOD: OBE Requests', to: '/hod/obe-requests' });
   if (rolesUpper.includes('HOD') || rolesUpper.includes('ADVISOR')) items.push({ key: 'hod_result_analysis', label: 'Result Analysis', to: '/hod/result-analysis' });
   if (rolesUpper.includes('HOD')) items.push({ key: 'hod_events', label: 'Event Management', to: '/hod/events' });
-  // Canva Poster Maker: available to HOD, IQAC, and any staff with branding access
-  if (rolesUpper.includes('HOD') || isIqac || rolesUpper.includes('STAFF')) {
-    items.push({ key: 'poster_maker', label: '🎨 Canva Poster Maker', to: '/poster-maker' });
-  }
+
   if ((isIqac || isIqacMain) && !items.some((item) => item.key === 'iqac_event_approvals')) {
     items.push({ key: 'iqac_event_approvals', label: 'Event Approvals', to: '/iqac/event-approvals' });
   }
@@ -246,7 +243,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   }
 
   // Add Token Raise for all users at the end (no permission check needed)
-  items.push({ key: 'queries', label: 'Token Raise', to: '/queries' });
+  items.push({ key: 'queries', label: 'Raise Token ', to: '/queries' });
 
   return (
     <>
