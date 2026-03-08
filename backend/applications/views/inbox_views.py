@@ -4,6 +4,7 @@ from rest_framework.response import Response
 
 from applications.services import inbox_service
 from applications.serializers.inbox_serializers import ApproverInboxItemSerializer
+from applications import models as app_models
 
 
 class ApproverInboxView(APIView):
@@ -14,3 +15,72 @@ class ApproverInboxView(APIView):
         items = inbox_service.get_pending_approvals_for_user(user)
         serializer = ApproverInboxItemSerializer(items, many=True)
         return Response(serializer.data)
+
+
+def _display_name(user) -> str:
+    if not user:
+        return ''
+    name = f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}".strip()
+    return name or user.username
+
+
+class PastApprovalsView(APIView):
+    """GET /api/applications/past-approvals/
+
+    Returns the 50 most recent terminal-state (APPROVED/REJECTED) applications
+    that the current user has acted on, ordered by final decision date.
+    Includes gatepass exit details so approvers can see actual exit status.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        acted_app_ids = (
+            app_models.ApprovalAction.objects
+            .filter(acted_by=request.user)
+            .values_list('application_id', flat=True)
+            .distinct()
+        )
+        apps = (
+            app_models.Application.objects
+            .filter(
+                id__in=acted_app_ids,
+                current_state__in=['APPROVED', 'REJECTED'],
+            )
+            .select_related(
+                'application_type',
+                'applicant_user',
+                'student_profile__section__batch__course__department',
+                'gatepass_scanned_by',
+            )
+            .order_by('-final_decision_at')[:50]
+        )
+
+        data = []
+        for app in apps:
+            roll = None
+            if app.student_profile:
+                roll = app.student_profile.reg_no
+            elif getattr(app, 'staff_profile', None):
+                roll = getattr(app.staff_profile, 'staff_id', None)
+
+            dept = None
+            sp = app.student_profile
+            if sp and getattr(sp, 'section', None):
+                try:
+                    dept = sp.section.batch.course.department.name
+                except Exception:
+                    pass
+
+            data.append({
+                'application_id': app.id,
+                'application_type': app.application_type.name,
+                'applicant_name': _display_name(app.applicant_user),
+                'applicant_roll_or_staff_id': roll,
+                'department_name': dept,
+                'current_state': app.current_state,
+                'submitted_at': app.submitted_at.isoformat() if app.submitted_at else None,
+                'final_decision_at': app.final_decision_at.isoformat() if app.final_decision_at else None,
+                'gatepass_scanned_at': app.gatepass_scanned_at.isoformat() if app.gatepass_scanned_at else None,
+                'gatepass_scanned_by': _display_name(app.gatepass_scanned_by) if app.gatepass_scanned_by else None,
+            })
+        return Response(data)

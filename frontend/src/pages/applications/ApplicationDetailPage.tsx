@@ -77,73 +77,55 @@ function TimelineStep({ entry, index, isLast }: { entry: ApprovalTimelineEntry; 
   const isPending = entry.status === 'PENDING'
 
   return (
-    <div className="flex items-start">
-      {/* Step column */}
-      <div className="flex flex-col items-center" style={{ minWidth: 140 }}>
-        {/* Circle + connector row */}
-        <div className="flex items-center w-full">
-          {/* Left connector spacer (centered circle) */}
-          <div className="flex-1 flex items-center justify-end pr-1">
-            {index > 0 && <div className={`h-0.5 w-full ${s.connector}`} />}
-          </div>
+    <div className="flex-1 flex items-start min-w-0">
+      {/* Left connector half */}
+      <div className="flex-1 h-0.5 mt-5 self-start" style={{ backgroundColor: index > 0 ? (s.connector.includes('blue') ? '#93c5fd' : s.connector.includes('green') ? '#86efac' : s.connector.includes('red') ? '#fca5a5' : '#e5e7eb') : 'transparent' }} />
 
-          {/* Circle */}
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold border-2 flex-shrink-0 ${s.circle}`}>
-            {isPending ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10" strokeWidth="2"/>
-                <path strokeLinecap="round" d="M12 6v6l4 2" strokeWidth="2"/>
-              </svg>
-            ) : (
-              <span>{entry.step_order}</span>
-            )}
-          </div>
-
-          {/* Right connector */}
-          <div className="flex-1 flex items-center pl-1">
-            {!isLast && <div className={`h-0.5 w-full ${stepStyle('PENDING').connector}`} />}
-          </div>
+      {/* Circle + info column */}
+      <div className="flex flex-col items-center flex-shrink-0 px-1">
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold border-2 flex-shrink-0 ${s.circle}`}>
+          {isPending ? (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" strokeWidth="2"/>
+              <path strokeLinecap="round" d="M12 6v6l4 2" strokeWidth="2"/>
+            </svg>
+          ) : (
+            <span>{entry.step_order}</span>
+          )}
         </div>
 
-        {/* Step info below the circle */}
-        <div className="flex flex-col items-center mt-2 px-1 w-full text-center">
-          {/* Role chip */}
+        <div className="flex flex-col items-center mt-2 text-center w-full">
           {entry.step_role && (
-            <span className="text-xs font-semibold text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">
+            <span className="text-xs font-semibold text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full whitespace-nowrap">
               {entry.step_role}
             </span>
           )}
-
-          {/* Status badge */}
           <span className={`mt-1.5 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${s.badge}`}>
             {isPending && (
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block" />
             )}
             {s.label}
           </span>
-
-          {/* Actor name */}
           {entry.acted_by ? (
             <div className="mt-1.5 text-xs text-gray-700 leading-tight font-medium">{entry.acted_by}</div>
           ) : (
             <div className="mt-1.5 text-xs text-gray-400 italic leading-tight">Awaiting</div>
           )}
-
-          {/* Remarks */}
           {entry.remarks && (
-            <div className="mt-1 text-xs text-gray-500 italic leading-tight max-w-[130px]">
-              "{entry.remarks}"
+            <div className="mt-1 text-xs text-gray-500 italic leading-tight max-w-[100px] truncate" title={entry.remarks}>
+              &ldquo;{entry.remarks}&rdquo;
             </div>
           )}
-
-          {/* Date */}
           {entry.acted_at && (
-            <div className="mt-1 text-xs text-gray-400 leading-tight">
+            <div className="mt-1 text-xs text-gray-400 leading-tight whitespace-nowrap">
               {new Date(entry.acted_at).toLocaleString()}
             </div>
           )}
         </div>
       </div>
+
+      {/* Right connector half */}
+      <div className="flex-1 h-0.5 mt-5 self-start bg-gray-200" style={{ visibility: isLast ? 'hidden' : 'visible' }} />
     </div>
   )
 }
@@ -155,6 +137,26 @@ export default function ApplicationDetailPage(): JSX.Element {
   const [detail, setDetail] = useState<ApplicationDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [slaRemaining, setSlaRemaining] = useState<string | null>(null)
+
+  useEffect(() => {
+    const state = detail?.current_state?.toUpperCase()
+    if (!detail?.sla_deadline || state === 'APPROVED' || state === 'REJECTED' || state === 'DRAFT') {
+      setSlaRemaining(null)
+      return
+    }
+    const update = () => {
+      const diff = Math.floor((new Date(detail.sla_deadline!).getTime() - Date.now()) / 1000)
+      if (diff <= 0) { setSlaRemaining('OVERDUE'); return }
+      const h = Math.floor(diff / 3600).toString().padStart(2, '0')
+      const m = Math.floor((diff % 3600) / 60).toString().padStart(2, '0')
+      const s = (diff % 60).toString().padStart(2, '0')
+      setSlaRemaining(`${h}:${m}:${s}`)
+    }
+    update()
+    const timer = setInterval(update, 1000)
+    return () => clearInterval(timer)
+  }, [detail])
 
   useEffect(() => {
     if (!id) return
@@ -217,21 +219,52 @@ export default function ApplicationDetailPage(): JSX.Element {
 
             {/* Approval Timeline */}
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h2 className="text-sm font-semibold text-gray-700 mb-5">Approval Timeline</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-gray-700">Approval Timeline</h2>
+              </div>
+
+              {/* SLA Countdown bar */}
+              {slaRemaining && (
+                <div className={`flex items-center gap-2 rounded-xl px-4 py-2.5 mb-5 ${
+                  slaRemaining === 'OVERDUE'
+                    ? 'bg-red-50 border border-red-200'
+                    : parseInt(slaRemaining.split(':')[0]) < 1
+                    ? 'bg-amber-50 border border-amber-200'
+                    : 'bg-indigo-50 border border-indigo-100'
+                }`}>
+                  <svg className={`w-4 h-4 shrink-0 ${
+                    slaRemaining === 'OVERDUE' ? 'text-red-500' :
+                    parseInt(slaRemaining.split(':')[0]) < 1 ? 'text-amber-500' : 'text-indigo-500'
+                  }`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+                  </svg>
+                  <span className={`text-xs font-medium ${
+                    slaRemaining === 'OVERDUE' ? 'text-red-700' :
+                    parseInt(slaRemaining.split(':')[0]) < 1 ? 'text-amber-700' : 'text-indigo-700'
+                  }`}>
+                    {slaRemaining === 'OVERDUE' ? 'SLA deadline has passed' : 'SLA time remaining'}
+                  </span>
+                  <span className={`ml-auto font-mono text-base font-bold tracking-widest ${
+                    slaRemaining === 'OVERDUE' ? 'text-red-600' :
+                    parseInt(slaRemaining.split(':')[0]) < 1 ? 'text-amber-600' : 'text-indigo-600'
+                  }`}>
+                    {slaRemaining === 'OVERDUE' ? 'OVERDUE' : slaRemaining}
+                  </span>
+                </div>
+              )}
+
               {timeline.length === 0 ? (
                 <div className="text-sm text-gray-400 italic">No flow configured. Awaiting review.</div>
               ) : (
-                <div className="overflow-x-auto pb-2">
-                  <div className="flex items-start" style={{ minWidth: timeline.length * 140 }}>
-                    {timeline.map((entry, idx) => (
-                      <TimelineStep
-                        key={`${entry.step_order}-${idx}`}
-                        entry={entry}
-                        index={idx}
-                        isLast={idx === timeline.length - 1}
-                      />
-                    ))}
-                  </div>
+                <div className="flex items-start w-full">
+                  {timeline.map((entry, idx) => (
+                    <TimelineStep
+                      key={`${entry.step_order}-${idx}`}
+                      entry={entry}
+                      index={idx}
+                      isLast={idx === timeline.length - 1}
+                    />
+                  ))}
                 </div>
               )}
             </div>

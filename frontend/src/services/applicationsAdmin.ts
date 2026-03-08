@@ -67,6 +67,7 @@ export type FlowRow = {
   department_id: number | null
   department_name: string | null
   is_active: boolean
+  sla_hours: number | null
   override_roles: Array<{ id: number; name: string }>
   steps: FlowStepRow[]
 }
@@ -169,7 +170,7 @@ export async function createApplicationFlowAdmin(typeId: number, payload: { depa
   return parseJson(await fetchWithAuth(`/api/applications/admin/types/${encodeURIComponent(String(typeId))}/flows/`, { method: 'POST', body: JSON.stringify(payload) }))
 }
 
-export async function updateApplicationFlowAdmin(id: number, payload: { is_active?: boolean; override_role_ids?: number[] }): Promise<FlowRow> {
+export async function updateApplicationFlowAdmin(id: number, payload: { is_active?: boolean; override_role_ids?: number[]; sla_hours?: number | null }): Promise<FlowRow> {
   return parseJson(await fetchWithAuth(`/api/applications/admin/flows/${encodeURIComponent(String(id))}/`, { method: 'PATCH', body: JSON.stringify(payload) }))
 }
 

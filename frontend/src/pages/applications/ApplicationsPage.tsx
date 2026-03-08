@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   fetchApplicationTypes,
@@ -27,6 +27,51 @@ function statusLabel(state: string): string {
     case 'DRAFT': return 'Draft'
     default: return state || '—'
   }
+}
+
+function useCountdown(deadline: string | null): string | null {
+  const [display, setDisplay] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!deadline) { setDisplay(null); return }
+    const update = () => {
+      const diff = new Date(deadline).getTime() - Date.now()
+      if (diff <= 0) { setDisplay('Expired'); return }
+      const h = Math.floor(diff / 3600000)
+      const m = Math.floor((diff % 3600000) / 60000)
+      const s = Math.floor((diff % 60000) / 1000)
+      setDisplay(
+        `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      )
+    }
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [deadline])
+
+  return display
+}
+
+function SlaCountdown({ deadline }: { deadline: string | null }): JSX.Element {
+  const display = useCountdown(deadline)
+  if (!display) return <span className="text-gray-400 text-xs">—</span>
+  const isExpired = display === 'Expired'
+  const diff = deadline ? new Date(deadline).getTime() - Date.now() : 0
+  const isUrgent = !isExpired && diff < 3600000 // < 1 hour
+  return (
+    <span className={`inline-flex items-center gap-1 font-mono text-xs font-semibold px-2 py-0.5 rounded-full ${
+      isExpired ? 'bg-red-100 text-red-600' :
+      isUrgent  ? 'bg-amber-100 text-amber-700' :
+                  'bg-indigo-50 text-indigo-700'
+    }`}>
+      {!isExpired && (
+        <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+        </svg>
+      )}
+      {display}
+    </span>
+  )
 }
 
 export default function ApplicationsPage(): JSX.Element {
@@ -115,6 +160,7 @@ export default function ApplicationsPage(): JSX.Element {
                           <th className="px-5 py-3">Application</th>
                           <th className="px-5 py-3">Status</th>
                           <th className="px-5 py-3">Current Step</th>
+                          <th className="px-5 py-3">SLA Remaining</th>
                           <th className="px-5 py-3">Submitted</th>
                           <th className="px-5 py-3"></th>
                         </tr>
@@ -126,11 +172,24 @@ export default function ApplicationsPage(): JSX.Element {
                               #{app.id} — {app.application_type_name}
                             </td>
                             <td className="px-5 py-3">
-                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${statusBadgeClass(app.current_state)}`}>
-                                {statusLabel(app.current_state)}
-                              </span>
+                              {app.needs_gatepass_scan ? (
+                                <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                                  NOT LEAVED
+                                </span>
+                              ) : app.gatepass_scanned_at ? (
+                                <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                  Exited
+                                </span>
+                              ) : (
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${statusBadgeClass(app.current_state)}`}>
+                                  {statusLabel(app.current_state)}
+                                </span>
+                              )}
                             </td>
                             <td className="px-5 py-3 text-gray-600">{app.current_step_role || '—'}</td>
+                            <td className="px-5 py-3">
+                              <SlaCountdown deadline={app.sla_deadline ?? null} />
+                            </td>
                             <td className="px-5 py-3 text-gray-500">
                               {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString() : '—'}
                             </td>

@@ -224,6 +224,66 @@ class CreateAndSubmitView(APIView):
         if unknown:
             return Response({'detail': f'Unknown fields: {", ".join(sorted(unknown))}'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # ── SLA cooldown: block resubmission within cooldown window ─────────
+        # Use a temporary app object to resolve the flow (no DB write yet).
+        _temp = app_models.Application(
+            application_type=app_type,
+            applicant_user=request.user,
+        )
+        try:
+            _pre_flow = approval_engine._get_flow_for_application(_temp)
+        except Exception:
+            _pre_flow = None
+        if _pre_flow and _pre_flow.sla_hours:
+            from datetime import timedelta
+            _recent = app_models.Application.objects.filter(
+                applicant_user=request.user,
+                application_type=app_type,
+                current_state__in=['APPROVED', 'REJECTED'],
+                final_decision_at__isnull=False,
+            ).order_by('-final_decision_at').first()
+            if _recent and _recent.final_decision_at:
+                _cooldown_until = _recent.final_decision_at + timedelta(hours=_pre_flow.sla_hours)
+                _now = timezone.now()
+                if _now < _cooldown_until:
+                    _remaining = _cooldown_until - _now
+                    _hrs = int(_remaining.total_seconds() // 3600)
+                    _mins = int((_remaining.total_seconds() % 3600) // 60)
+                    return Response({
+                        'detail': (
+                            f'Cannot submit another \'{app_type.name}\' for {_hrs}h {_mins}m '
+                            f'(cooldown until {_cooldown_until.strftime("%I:%M %p, %d %b %Y")}).'
+                        ),
+                        'cooldown': True,
+                        'cooldown_until': _cooldown_until.isoformat(),
+                        'cooldown_remaining_seconds': int(_remaining.total_seconds()),
+                    }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # ── Active-application block: prevent duplicate submissions ──────────
+        # Non-terminal states: DRAFT, SUBMITTED, IN_REVIEW
+        _TERMINAL_STATES = [
+            app_models.Application.ApplicationState.APPROVED,
+            app_models.Application.ApplicationState.REJECTED,
+            app_models.Application.ApplicationState.CANCELLED,
+        ]
+        _active_app = app_models.Application.objects.filter(
+            applicant_user=request.user,
+            application_type=app_type,
+        ).exclude(current_state__in=_TERMINAL_STATES).order_by('-created_at').first()
+        if _active_app:
+            return Response(
+                {
+                    'detail': (
+                        f'You already have a pending {app_type.name} application '
+                        f'(#{_active_app.pk}) that is currently {_active_app.get_current_state_display()}. '
+                        f'You can only submit a new one after it is fully approved or rejected.'
+                    ),
+                    'active_application_id': _active_app.pk,
+                    'active_application_state': _active_app.current_state,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         with transaction.atomic():
             # Attach applicant profile so department selection + authority resolvers
             # (e.g. MENTOR via StudentMentorMap) can work deterministically.

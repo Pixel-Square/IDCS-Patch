@@ -121,6 +121,7 @@ def _flow_payload(flow: app_models.ApprovalFlow) -> dict[str, Any]:
         'department_id': flow.department_id,
         'department_name': getattr(flow.department, 'name', None) if flow.department_id else None,
         'is_active': flow.is_active,
+        'sla_hours': flow.sla_hours,
         'override_roles': [
             {'id': role.id, 'name': role.name}
             for role in flow.override_roles.all().order_by('name')
@@ -437,6 +438,7 @@ class ApplicationsAdminFlowListCreateView(IQACOnlyAPIView):
             application_type=app_type,
             department=department,
             is_active=is_active,
+            sla_hours=request.data.get('sla_hours') or None,
         )
 
         # Enforce a single active flow per (application_type, department).
@@ -461,6 +463,11 @@ class ApplicationsAdminFlowDetailView(IQACOnlyAPIView):
         override_role_ids = request.data.get('override_role_ids')
         if isinstance(override_role_ids, list):
             flow.override_roles.set(Role.objects.filter(id__in=override_role_ids))
+
+        # Update sla_hours if provided
+        if 'sla_hours' in request.data:
+            flow.sla_hours = request.data.get('sla_hours') or None
+            flow.save(update_fields=['sla_hours'])
 
         # Enforce final-step rules when turning a flow active.
         if next_is_active and not flow.is_active:

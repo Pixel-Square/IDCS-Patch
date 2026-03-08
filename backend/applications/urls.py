@@ -1,5 +1,5 @@
 from django.urls import path
-from applications.views.inbox_views import ApproverInboxView
+from applications.views.inbox_views import ApproverInboxView, PastApprovalsView
 from applications.views.application_views import (
     ApplicationApprovalHistoryView,
     ApplicationDetailView,
@@ -32,6 +32,7 @@ from applications.views.admin_views import (
 urlpatterns = [
     path('nav/', ApplicationsNavView.as_view(), name='applications-nav'),
     path('inbox/', ApproverInboxView.as_view(), name='approver-inbox'),
+    path('past-approvals/', PastApprovalsView.as_view(), name='past-approvals'),
     path('types/', ApplicationTypeListView.as_view(), name='application-type-list'),
     path('types/<int:id>/schema/', ApplicationTypeSchemaView.as_view(), name='application-type-schema'),
     path('create-and-submit/', CreateAndSubmitView.as_view(), name='application-create-submit'),

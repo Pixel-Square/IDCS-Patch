@@ -97,17 +97,35 @@ export type SubmitApplicationResponse = {
   forwarded_to: ForwardedTo | null
 }
 
+export class ActiveApplicationError extends Error {
+  activeApplicationId: number
+  activeApplicationState: string
+  constructor(detail: string, id: number, state: string) {
+    super(detail)
+    this.name = 'ActiveApplicationError'
+    this.activeApplicationId = id
+    this.activeApplicationState = state
+  }
+}
+
 export async function createAndSubmitApplication(
   application_type_id: number,
   data: Record<string, unknown>,
 ): Promise<SubmitApplicationResponse> {
-  return parseJson(
-    await fetchWithAuth('/api/applications/create-and-submit/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ application_type_id, data }),
-    }),
-  )
+  const res = await fetchWithAuth('/api/applications/create-and-submit/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ application_type_id, data }),
+  })
+  if (res.status === 409) {
+    const json = await res.json().catch(() => ({}))
+    throw new ActiveApplicationError(
+      json.detail || 'You already have an active application of this type.',
+      json.active_application_id ?? 0,
+      json.active_application_state ?? '',
+    )
+  }
+  return parseJson(res)
 }
 
 // ─── My Applications ─────────────────────────────────────────────────────────
@@ -115,11 +133,15 @@ export async function createAndSubmitApplication(
 export type MyApplicationItem = {
   id: number
   application_type_name: string
+  application_type_code: string | null
   current_state: string
   status: string
   submitted_at: string | null
   created_at: string
   current_step_role: string | null
+  gatepass_scanned_at: string | null
+  needs_gatepass_scan: boolean
+  sla_deadline: string | null
 }
 
 export async function fetchMyApplications(): Promise<MyApplicationItem[]> {
@@ -161,6 +183,9 @@ export type ApplicationDetail = {
   dynamic_fields: DynamicFieldValue[]
   approval_history: ApprovalHistoryEntry[]
   approval_timeline: ApprovalTimelineEntry[]
+  sla_hours: number | null
+  sla_deadline: string | null
+  gatepass_scanned_at: string | null
 }
 
 export async function fetchApplicationDetail(id: number): Promise<ApplicationDetail> {
@@ -204,4 +229,32 @@ export async function submitApplicationAction(
       body: JSON.stringify({ action, remarks }),
     }),
   )
+}
+
+// ─── Past Approvals (approver history with gatepass exit info) ────────────────
+
+export type PastApprovalItem = {
+  application_id: number
+  application_type: string
+  applicant_name: string
+  applicant_roll_or_staff_id: string | null
+  department_name: string | null
+  current_state: string
+  submitted_at: string | null
+  final_decision_at: string | null
+  gatepass_scanned_at: string | null
+  gatepass_scanned_by: string | null
+}
+
+export async function fetchPastApprovals(): Promise<PastApprovalItem[]> {
+  return parseJson(await fetchWithAuth('/api/applications/past-approvals/'))
+}
+
+// ─── Cooldown error shape returned by the API (HTTP 429) ────────────────────
+
+export type CooldownError = {
+  cooldown: true
+  cooldown_until: string
+  cooldown_remaining_seconds: number
+  detail: string
 }

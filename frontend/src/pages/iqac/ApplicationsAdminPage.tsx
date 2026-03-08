@@ -188,7 +188,7 @@ export default function ApplicationsAdminPage(): JSX.Element {
   const [typeDraft, setTypeDraft] = useState<TypeDraft>(emptyTypeDraft())
   const [fieldDraft, setFieldDraft] = useState<FieldDraft>(emptyFieldDraft())
   const [newFlowDraft, setNewFlowDraft] = useState<NewFlowDraft>({ department_id: '', is_active: true, override_role_ids: [] })
-  const [flowDrafts, setFlowDrafts] = useState<Record<number, { is_active: boolean; override_role_ids: number[] }>>({})
+  const [flowDrafts, setFlowDrafts] = useState<Record<number, { is_active: boolean; override_role_ids: number[]; sla_hours: string }>>({})
   const [stepDrafts, setStepDrafts] = useState<Record<number, StepDraft>>({})
   const [newStepDrafts, setNewStepDrafts] = useState<Record<number, StepDraft>>({})
   const [permissionDrafts, setPermissionDrafts] = useState<Record<number, { can_edit_all: boolean; can_override_flow: boolean }>>({})
@@ -255,7 +255,7 @@ export default function ApplicationsAdminPage(): JSX.Element {
     }, [flows, editingFlowId])
         setSubmissions(submissionsRes)
         setFieldDraft(emptyFieldDraft((fieldsRes[fieldsRes.length - 1]?.order || 0) + 1))
-        setFlowDrafts(Object.fromEntries(flowsRes.map((flow) => [flow.id, { is_active: flow.is_active, override_role_ids: flow.override_roles.map((r) => r.id) }])))
+        setFlowDrafts(Object.fromEntries(flowsRes.map((flow) => [flow.id, { is_active: flow.is_active, override_role_ids: flow.override_roles.map((r) => r.id), sla_hours: flow.sla_hours == null ? '' : String(flow.sla_hours) }])))
         setStepDrafts(buildStepDraftsFromFlows(flowsRes))
         const studentRoleId = findRoleIdByName(rolesRes, 'student')
         setNewStepDrafts(Object.fromEntries(flowsRes.map((flow) => {
@@ -327,7 +327,7 @@ export default function ApplicationsAdminPage(): JSX.Element {
     setFlows(flowsRes)
     setRolePermissions(permissionsRes)
     setSubmissions(submissionsRes)
-    setFlowDrafts(Object.fromEntries(flowsRes.map((flow) => [flow.id, { is_active: flow.is_active, override_role_ids: flow.override_roles.map((r) => r.id) }])))
+    setFlowDrafts(Object.fromEntries(flowsRes.map((flow) => [flow.id, { is_active: flow.is_active, override_role_ids: flow.override_roles.map((r) => r.id), sla_hours: flow.sla_hours == null ? '' : String(flow.sla_hours) }])))
     setStepDrafts(buildStepDraftsFromFlows(flowsRes))
     const studentRoleId = findRoleIdByName(roles, 'student')
     setNewStepDrafts(Object.fromEntries(flowsRes.map((flow) => {
@@ -509,7 +509,7 @@ export default function ApplicationsAdminPage(): JSX.Element {
     if (!draft) return
     try {
       setBusy(`save-flow-${flowId}`)
-      await updateApplicationFlowAdmin(flowId, draft)
+      await updateApplicationFlowAdmin(flowId, { ...draft, sla_hours: draft.sla_hours ? Number(draft.sla_hours) : null })
       await refreshSelectedTypeDetail()
       await refreshBase()
       flash('Approval flow updated.')
@@ -988,7 +988,7 @@ export default function ApplicationsAdminPage(): JSX.Element {
                 </SectionCard>
 
                 {flows.map((flow) => {
-                  const flowDraft = flowDrafts[flow.id] || { is_active: flow.is_active, override_role_ids: flow.override_roles.map((r) => r.id) }
+                  const flowDraft = flowDrafts[flow.id] || { is_active: flow.is_active, override_role_ids: flow.override_roles.map((r) => r.id), sla_hours: flow.sla_hours == null ? '' : String(flow.sla_hours) }
                   const orderedSteps = [...(flow.steps || [])].sort((a, b) => (a.order || 0) - (b.order || 0))
                   const lastStep = orderedSteps[orderedSteps.length - 1]
                   const lastIsFinal = Boolean(lastStep?.is_final)
@@ -1033,6 +1033,19 @@ export default function ApplicationsAdminPage(): JSX.Element {
                             Flow is active
                           </label>
                           <div className="border border-gray-200 rounded-lg px-3 py-2">
+                            <label className="flex flex-col gap-1">
+                              <span className="text-xs text-gray-500">SLA Hours (for entire flow)</span>
+                              <input
+                                type="number"
+                                min="0"
+                                className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm w-28"
+                                placeholder="e.g. 24"
+                                value={flowDraft.sla_hours}
+                                onChange={(e) => setFlowDrafts((v) => ({ ...v, [flow.id]: { ...flowDraft, sla_hours: e.target.value } }))}
+                              />
+                            </label>
+                          </div>
+                          <div className="border border-gray-200 rounded-lg px-3 py-2">
                             <div className="text-xs text-gray-500 mb-2">Override roles</div>
                             <div className="flex flex-wrap gap-2">
                               {roles.map((role) => {
@@ -1057,7 +1070,6 @@ export default function ApplicationsAdminPage(): JSX.Element {
                               <tr className="text-left text-gray-500 border-b border-gray-100">
                                 <th className="py-2 pr-3">Order</th>
                                 <th className="py-2 pr-3">Role</th>
-                                <th className="py-2 pr-3">SLA Hours</th>
                                 <th className="py-2 pr-3">Escalate To</th>
                                 <th className="py-2 pr-3">Next Step</th>
                                 <th className="py-2 pr-3">Flags</th>
@@ -1100,7 +1112,6 @@ export default function ApplicationsAdminPage(): JSX.Element {
                                         ) : null}
                                       </div>
                                     </td>
-                                    <td className="py-3 pr-3"><input type="number" className="w-28 border border-gray-200 rounded-lg px-2 py-1.5" value={stepDraft.sla_hours} onChange={(e) => setStepDrafts((v) => ({ ...v, [step.id]: { ...stepDraft, sla_hours: e.target.value } }))} /></td>
                                     <td className="py-3 pr-3">
                                       {stepDraft.is_final ? (
                                         <div className="text-xs text-gray-500 pt-2">Final approver</div>
@@ -1165,11 +1176,11 @@ export default function ApplicationsAdminPage(): JSX.Element {
                               })}
                               {flow.steps.length === 0 ? null : lastIsFinal ? (
                                 <tr className="bg-gray-50">
-                                  <td className="py-3 pr-3 text-sm text-gray-600" colSpan={7}>Final step is already set as the last step. Remove it to add more steps.</td>
+                                  <td className="py-3 pr-3 text-sm text-gray-600" colSpan={6}>Final step is already set as the last step. Remove it to add more steps.</td>
                                 </tr>
                               ) : (
                                 <tr className="bg-gray-50 align-top">
-                                  <td className="py-3 pr-3 text-sm text-gray-600" colSpan={7}>
+                                  <td className="py-3 pr-3 text-sm text-gray-600" colSpan={6}>
                                     Steps are added automatically when you set an escalation role and click Save.
                                   </td>
                                 </tr>
@@ -1195,7 +1206,6 @@ export default function ApplicationsAdminPage(): JSX.Element {
                                     </select>
                                     <div className="text-[11px] text-gray-500 mt-1">Step 1 should be the role that fills the application (e.g., STUDENT).</div>
                                   </td>
-                                  <td className="py-3 pr-3"><input type="number" className="w-28 border border-gray-200 rounded-lg px-2 py-1.5" value={newStepDraft.sla_hours} onChange={(e) => setNewStepDrafts((v) => ({ ...v, [flow.id]: { ...newStepDraft, sla_hours: e.target.value } }))} /></td>
                                   <td className="py-3 pr-3">
                                     <select
                                       className="border border-gray-200 rounded-lg px-2 py-1.5 min-w-[150px]"

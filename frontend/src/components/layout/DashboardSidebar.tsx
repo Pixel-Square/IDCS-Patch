@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 
 
 import useDashboard from '../../hooks/useDashboard';
-import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2, PartyPopper } from 'lucide-react';
+import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2, PartyPopper, ScanLine, Shield } from 'lucide-react';
 
 import { useSidebar } from './SidebarContext';
 import { fetchPendingPublishRequestCount } from '../../services/obe';
@@ -48,6 +48,8 @@ import { ApplicationsNavResponse, fetchApplicationsNav } from '../../services/ap
   applications_admin: Layout,
   applications_inbox: ClipboardList,
   applications_home: Layout,
+  idscan_test: ScanLine,
+  idscan_gatepass: Shield,
 
 };
 
@@ -260,10 +262,16 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if (isIqac && !items.some((item) => item.key === 'applications_admin')) {
     items.push({ key: 'applications_admin', label: 'Applications Admin', to: '/iqac/applications-admin' });
   }
-  if (applicationsNav?.show_applications && !items.some((item) => item.key === 'applications_home')) {
+  // IDCSScan — available to SECURITY, IQAC, and ADMIN roles
+  const isSecurity = rolesUpper.includes('SECURITY');
+  if (isSecurity && !items.some((i) => i.key === 'idscan_test')) {
+    items.push({ key: 'idscan_test',     label: 'RFID Scanner Test', to: '/idscan/test' });
+    items.push({ key: 'idscan_gatepass', label: 'Gatepass Scanner',   to: '/idscan/gatepass' });
+  }
+  if (!isSecurity && applicationsNav?.show_applications && !items.some((item) => item.key === 'applications_home')) {
     items.push({ key: 'applications_home', label: 'My Applications', to: '/applications' });
   }
-  if (applicationsNav?.show_applications && (applicationsNav.staff_roles.length > 0 || applicationsNav.override_roles.length > 0) && !flags.is_student && !items.some((item) => item.key === 'applications_inbox')) {
+  if (!isSecurity && applicationsNav?.show_applications && (applicationsNav.staff_roles.length > 0 || applicationsNav.override_roles.length > 0) && !flags.is_student && !items.some((item) => item.key === 'applications_inbox')) {
     items.push({ key: 'applications_inbox', label: 'Approvals Inbox', to: '/applications/inbox' });
   }
   if (canPbasManage && !items.some((item) => item.key === 'pbas_manager')) {

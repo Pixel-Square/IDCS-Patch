@@ -5,9 +5,11 @@ import {
   fetchApproverInbox,
   fetchApplicationStepInfo,
   submitApplicationAction,
+  fetchPastApprovals,
   ApplicationsNavResponse,
   ApproverInboxItem,
   StepInfoResponse,
+  PastApprovalItem,
 } from '../../services/applications'
 
 type ExpandedState = {
@@ -36,6 +38,9 @@ export default function ApplicationsInboxPage(): JSX.Element {
   const [nav, setNav] = useState<ApplicationsNavResponse | null>(null)
   const [items, setItems] = useState<ApproverInboxItem[]>([])
   const [expanded, setExpanded] = useState<ExpandedState | null>(null)
+  const [pastApprovals, setPastApprovals] = useState<PastApprovalItem[]>([])
+  const [pastOpen, setPastOpen] = useState(false)
+  const [pastLoading, setPastLoading] = useState(false)
 
   const loadInbox = async () => {
     setLoading(true)
@@ -57,6 +62,19 @@ export default function ApplicationsInboxPage(): JSX.Element {
   useEffect(() => {
     loadInbox()
   }, [])
+
+  const handleTogglePastApprovals = async () => {
+    if (!pastOpen && pastApprovals.length === 0) {
+      setPastLoading(true)
+      try {
+        const data = await fetchPastApprovals()
+        setPastApprovals(data)
+      } catch { /* silent */ } finally {
+        setPastLoading(false)
+      }
+    }
+    setPastOpen((v) => !v)
+  }
 
   const roleSummary = useMemo(() => {
     const codes = (nav?.staff_roles || []).map((r) => r.code).filter(Boolean)
@@ -255,6 +273,93 @@ export default function ApplicationsInboxPage(): JSX.Element {
           </>
         )}
       </div>
+
+      {/* ── Past Approvals ──────────────────────────────────────────────── */}
+      {nav?.show_applications && (
+        <div className="mt-6 max-w-6xl mx-auto">
+          <button
+            onClick={handleTogglePastApprovals}
+            className="flex items-center gap-2 text-sm font-semibold text-indigo-700 hover:text-indigo-900 transition mb-3"
+          >
+            <span>{pastOpen ? '▼' : '▶'}</span>
+            View Past Approvals
+            {!pastOpen && pastApprovals.length > 0 && (
+              <span className="ml-1 text-xs text-gray-400">({pastApprovals.length})</span>
+            )}
+          </button>
+
+          {pastOpen && (
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Past Approvals {pastApprovals.length > 0 && `(${pastApprovals.length})`}
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">Applications you acted on — shows exit scan status.</p>
+              </div>
+
+              {pastLoading ? (
+                <div className="p-5 text-sm text-gray-400">Loading…</div>
+              ) : pastApprovals.length === 0 ? (
+                <div className="p-5 text-sm text-gray-500">No past approvals found.</div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {pastApprovals.map((row) => {
+                    const exited = !!row.gatepass_scanned_at
+                    const exitTime = row.gatepass_scanned_at
+                      ? new Date(row.gatepass_scanned_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      : null
+                    const exitDate = row.gatepass_scanned_at
+                      ? new Date(row.gatepass_scanned_at).toLocaleDateString()
+                      : null
+                    return (
+                      <div key={row.application_id} className="px-5 py-3 flex items-start justify-between gap-4 flex-wrap hover:bg-gray-50">
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="text-sm font-semibold text-gray-900">
+                            #{row.application_id} — {row.application_type}
+                          </div>
+                          <div className="text-sm text-gray-600">{row.applicant_name}</div>
+                          {row.applicant_roll_or_staff_id && (
+                            <div className="text-xs text-gray-400">{row.applicant_roll_or_staff_id}</div>
+                          )}
+                          {row.department_name && (
+                            <div className="text-xs text-gray-400">{row.department_name}</div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 flex-wrap flex-shrink-0">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusBadgeClass(row.current_state)}`}>
+                            {row.current_state}
+                          </span>
+                          {exited ? (
+                            <div className="flex flex-col items-end">
+                              <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                                Last left at {exitTime}
+                              </span>
+                              <span className="text-[10px] text-green-600 mt-0.5">{exitDate}</span>
+                              {row.gatepass_scanned_by && (
+                                <span className="text-[10px] text-gray-400 mt-0.5">
+                                  Scanned by: {row.gatepass_scanned_by}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">Not yet exited</span>
+                          )}
+                          <button
+                            onClick={() => navigate(`/applications/${row.application_id}`)}
+                            className="text-xs text-indigo-600 hover:underline"
+                          >
+                            View
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </main>
   )
 }

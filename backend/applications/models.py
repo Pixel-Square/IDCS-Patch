@@ -99,6 +99,14 @@ class Application(models.Model):
     final_decision_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Gatepass exit scan tracking — set when Security scans the student out
+    gatepass_scanned_at = models.DateTimeField(null=True, blank=True)
+    gatepass_scanned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='gatepass_scans',
+    )
 
     class Meta:
         ordering = ('-created_at',)
@@ -143,6 +151,11 @@ class ApprovalFlow(models.Model):
         related_name='approval_flows'
     )
     is_active = models.BooleanField(default=True)
+    # Overall SLA for the entire flow (hours from submission to final decision)
+    sla_hours = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Total SLA for this flow in hours (measured from submission).'
+    )
     # roles that are allowed to override this flow for this application_type/department
     override_roles = models.ManyToManyField('accounts.Role', blank=True, related_name='override_flows')
 

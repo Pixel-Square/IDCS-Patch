@@ -98,30 +98,70 @@ class ApplicationCreateSerializer(serializers.Serializer):
 
 class ApplicationListSerializer(serializers.ModelSerializer):
     application_type_name = serializers.SerializerMethodField()
+    application_type_code = serializers.SerializerMethodField()
     current_step_role = serializers.SerializerMethodField()
+    needs_gatepass_scan = serializers.SerializerMethodField()
+    sla_deadline = serializers.SerializerMethodField()
 
     class Meta:
         model = app_models.Application
-        fields = ('id', 'application_type_name', 'current_state', 'status', 'submitted_at', 'created_at', 'current_step_role')
+        fields = ('id', 'application_type_name', 'application_type_code', 'current_state', 'status', 'submitted_at', 'created_at', 'current_step_role', 'gatepass_scanned_at', 'needs_gatepass_scan', 'sla_deadline')
 
     def get_application_type_name(self, obj):
         return obj.application_type.name if obj.application_type else None
+
+    def get_application_type_code(self, obj):
+        return obj.application_type.code if obj.application_type else None
 
     def get_current_step_role(self, obj):
         step = approval_engine.get_current_approval_step(obj)
         return step.role.name if step and step.role else None
 
+    def get_needs_gatepass_scan(self, obj):
+        """True if this approved application requires an RFID gatepass exit scan."""
+        if obj.current_state != 'APPROVED':
+            return False
+        if obj.gatepass_scanned_at:
+            return False
+        # Check if the flow's final step is SECURITY
+        try:
+            flow = approval_engine._get_flow_for_application(obj)
+            if not flow:
+                return False
+            final = flow.steps.filter(is_final=True).select_related('role').first()
+            return bool(final and final.role and final.role.name.upper() == 'SECURITY')
+        except Exception:
+            return False
 
+    def get_sla_deadline(self, obj):
+        """ISO deadline string: submitted_at + flow.sla_hours, or None."""
+        if not obj.submitted_at:
+            return None
+        if obj.current_state in ('APPROVED', 'REJECTED', 'CANCELLED'):
+            return None  # Already resolved — no countdown needed
+        try:
+            flow = approval_engine._get_flow_for_application(obj)
+        except Exception:
+            return None
+        if not flow or not flow.sla_hours:
+            return None
+        from datetime import timedelta
+        deadline = obj.submitted_at + timedelta(hours=flow.sla_hours)
+        return deadline.isoformat()
 class ApplicationDetailSerializer(serializers.ModelSerializer):
     application_type = serializers.SerializerMethodField()
     dynamic_fields = serializers.SerializerMethodField()
     current_step = serializers.SerializerMethodField()
     approval_history = serializers.SerializerMethodField()
     approval_timeline = serializers.SerializerMethodField()
+    sla_hours = serializers.SerializerMethodField()
+    sla_deadline = serializers.SerializerMethodField()
 
     class Meta:
         model = app_models.Application
-        fields = ('id', 'application_type', 'current_state', 'status', 'created_at', 'submitted_at', 'dynamic_fields', 'current_step', 'approval_history', 'approval_timeline')
+        fields = ('id', 'application_type', 'current_state', 'status', 'created_at', 'submitted_at',
+                  'dynamic_fields', 'current_step', 'approval_history', 'approval_timeline',
+                  'sla_hours', 'sla_deadline', 'gatepass_scanned_at')
 
     def get_application_type(self, obj):
         return obj.application_type.name if obj.application_type else None
@@ -145,6 +185,21 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
     def get_approval_history(self, obj):
         actions = obj.actions.order_by('acted_at')
         return ApprovalActionSerializer(actions, many=True).data
+
+    def get_sla_hours(self, obj):
+        flow = approval_engine._get_flow_for_application(obj)
+        return flow.sla_hours if flow else None
+
+    def get_sla_deadline(self, obj):
+        """ISO deadline string: submitted_at + flow.sla_hours, or None."""
+        if not obj.submitted_at:
+            return None
+        flow = approval_engine._get_flow_for_application(obj)
+        if not flow or not flow.sla_hours:
+            return None
+        from datetime import timedelta
+        deadline = obj.submitted_at + timedelta(hours=flow.sla_hours)
+        return deadline.isoformat()
 
     def get_approval_timeline(self, obj):
         """Return all flow steps merged with completed actions.

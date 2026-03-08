@@ -61,6 +61,8 @@ import ApplicationsInboxPage from './pages/applications/ApplicationsInboxPage';
 import ApplicationsPage from './pages/applications/ApplicationsPage';
 import ApplicationFormPage from './pages/applications/ApplicationFormPage';
 import ApplicationDetailPage from './pages/applications/ApplicationDetailPage';
+import IDCSScanTestPage from './pages/IDCSScan/TestPage';
+import IDCSScanGatepassPage from './pages/IDCSScan/GatepassPage';
 
 type RoleObj = { name: string };
 type Me = {
@@ -299,6 +301,15 @@ export default function App() {
                 <Route
                   path="/iqac/pbas"
                   element={<ProtectedRoute user={user} requiredRoles={['IQAC', 'ADMIN', 'PRINCIPAL', 'PS']} element={<PBASManagerPage />} />}
+                />
+                {/* ── IDCSScan (SECURITY / ADMIN) ─────────────────────────── */}
+                <Route
+                  path="/idscan/test"
+                  element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<IDCSScanTestPage />} />}
+                />
+                <Route
+                  path="/idscan/gatepass"
+                  element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<IDCSScanGatepassPage />} />}
                 />
                 <Route
                   path="/advisor/timetable"

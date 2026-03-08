@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   fetchApplicationTypeSchema,
   createAndSubmitApplication,
+  ActiveApplicationError,
+  fetchMyApplications,
   ApplicationTypeSchema,
   ApplicationField,
   ForwardedTo,
@@ -154,6 +156,8 @@ export default function ApplicationFormPage(): JSX.Element {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState<{ id: number; forwardedTo: ForwardedTo | null } | null>(null)
+  const [cooldown, setCooldown] = useState<{ until: string; message: string } | null>(null)
+  const [activeApp, setActiveApp] = useState<{ id: number; state: string; message: string } | null>(null)
 
   useEffect(() => {
     if (!typeId) return
@@ -165,6 +169,21 @@ export default function ApplicationFormPage(): JSX.Element {
         const s = await fetchApplicationTypeSchema(Number(typeId))
         if (!mounted) return
         setSchema(s)
+        // Pre-check for an existing active application of this type
+        const TERMINAL = ['APPROVED', 'REJECTED', 'CANCELLED']
+        try {
+          const myApps = await fetchMyApplications()
+          const active = myApps.find(
+            (a) => a.application_type_name === s.name && !TERMINAL.includes(a.current_state),
+          )
+          if (active && mounted) {
+            setActiveApp({
+              id: active.id,
+              state: active.current_state,
+              message: `You already have a pending ${s.name} application (#${active.id}) that is currently ${active.current_state.replace('_', ' ')}. You can only submit a new one after it is fully approved or rejected.`,
+            })
+          }
+        } catch (_) {}
         // Seed defaults
         const defaults: Record<string, unknown> = {}
         for (const f of s.fields) {
@@ -202,11 +221,23 @@ export default function ApplicationFormPage(): JSX.Element {
     }
 
     setSubmitting(true)
+    setCooldown(null)
+    setActiveApp(null)
     try {
       const res = await createAndSubmitApplication(schema.id, formData)
       setSubmitted({ id: res.id, forwardedTo: res.forwarded_to })
     } catch (e: any) {
-      setError(e?.message || 'Failed to submit application.')
+      if (e instanceof ActiveApplicationError) {
+        setActiveApp({ id: e.activeApplicationId, state: e.activeApplicationState, message: e.message })
+      } else {
+        // Detect SLA cooldown (HTTP 429 detail includes cooldown info)
+        const msg: string = e?.message || ''
+        if (msg.toLowerCase().includes('cooldown') || msg.toLowerCase().includes('cannot submit')) {
+          setCooldown({ until: '', message: msg })
+        } else {
+          setError(msg || 'Failed to submit application.')
+        }
+      }
     } finally {
       setSubmitting(false)
     }
@@ -243,6 +274,30 @@ export default function ApplicationFormPage(): JSX.Element {
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
             )}
 
+            {cooldown && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <div className="font-semibold mb-0.5">&#9201; Cooldown Active</div>
+                <div>{cooldown.message}</div>
+                <div className="mt-1 text-xs text-amber-600">
+                  You may submit again once the SLA cooldown window has passed.
+                </div>
+              </div>
+            )}
+
+            {activeApp && (
+              <div className="rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+                <div className="font-semibold mb-1">&#9888; Application Already In Progress</div>
+                <div>{activeApp.message}</div>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/applications/${activeApp.id}`)}
+                  className="mt-2 text-xs font-medium text-orange-700 underline hover:text-orange-900"
+                >
+                  View Application #{activeApp.id}
+                </button>
+              </div>
+            )}
+
             <div className="space-y-4">
               {schema.fields.map((field) => (
                 <div key={field.field_key}>
@@ -258,10 +313,10 @@ export default function ApplicationFormPage(): JSX.Element {
             <div className="flex gap-3 pt-2">
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || !!cooldown || !!activeApp}
                 className="rounded-lg bg-indigo-600 text-white text-sm font-medium px-6 py-2.5 hover:bg-indigo-700 disabled:opacity-60"
               >
-                {submitting ? 'Submitting…' : 'Submit Application'}
+                {submitting ? 'Submitting…' : activeApp ? 'Application Pending' : cooldown ? 'Cooldown Active' : 'Submit Application'}
               </button>
               <button
                 type="button"
