@@ -1,7 +1,10 @@
 from typing import Any
 
+from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
@@ -15,9 +18,70 @@ from applications.serializers import (
     ApprovalActionSerializer,
 )
 from applications.services import approval_engine
+from applications.services import approver_resolver
 from applications.services import access_control
+from applications.services import application_state as app_state_svc
 from applications.serializers.approval import ApplicationApprovalHistorySerializer
-from django.shortcuts import get_object_or_404
+
+User = get_user_model()
+
+
+def _get_role_assignees(role):
+    """Return displayable info for all active users holding `role`."""
+    assignees = User.objects.filter(roles=role, is_active=True).order_by('username')
+    result = []
+    for u in assignees:
+        name = (f"{getattr(u, 'first_name', '')} {getattr(u, 'last_name', '')}".strip()
+                or u.username)
+        staff_profile = getattr(u, 'staff_profile', None)
+        staff_id = getattr(staff_profile, 'staff_id', None) if staff_profile is not None else None
+        payload = {'id': u.id, 'name': name, 'username': u.username}
+        if staff_id:
+            payload['staff_id'] = staff_id
+        result.append(payload)
+    return result
+
+
+def _get_step_assignees(application: app_models.Application, step: app_models.ApprovalStep):
+    """Resolve concrete assignee(s) for a step.
+
+    Prefer a single concrete approver when it can be resolved via the academic
+    authority mappings (mentor map / department role etc). Fallback to listing
+    all active users who explicitly hold the role.
+    """
+    if application is None or step is None or step.role is None:
+        return []
+
+    try:
+        resolved = approver_resolver.resolve_current_approver(application, step)
+    except Exception:
+        resolved = None
+
+    if resolved is not None:
+        u = resolved
+        name = (f"{getattr(u, 'first_name', '')} {getattr(u, 'last_name', '')}".strip()
+                or u.username)
+        staff_profile = getattr(u, 'staff_profile', None)
+        staff_id = getattr(staff_profile, 'staff_id', None) if staff_profile is not None else None
+        payload = {'id': u.id, 'name': name, 'username': u.username}
+        if staff_id:
+            payload['staff_id'] = staff_id
+        return [payload]
+
+    return _get_role_assignees(step.role)
+
+
+def _forwarded_to_payload(application):
+    """Return forwarded_to dict based on the application's current step."""
+    step = approval_engine.get_current_approval_step(application)
+    if step is None or step.role is None:
+        return None
+    return {
+        'role_name': step.role.name,
+        'step_order': step.order,
+        'is_final': step.is_final,
+        'assignees': _get_step_assignees(application, step),
+    }
 
 
 class CreateApplicationView(APIView):
@@ -120,4 +184,214 @@ class ApplicationApprovalHistoryView(APIView):
             'application_type': application.application_type.name if application.application_type else None,
             'current_state': application.current_state,
             'timeline': timeline,
+        })
+
+
+class CreateAndSubmitView(APIView):
+    """POST /api/applications/create-and-submit/
+    Creates, saves data, submits, and auto-advances step 1 if submitter role
+    matches step 1 role (e.g. STUDENT self-approval).
+    Returns forwarded_to info so the UI can show the success popup.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        application_type_id = request.data.get('application_type_id')
+        data = request.data.get('data') or {}
+
+        if not application_type_id:
+            return Response({'detail': 'application_type_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            app_type = app_models.ApplicationType.objects.get(pk=application_type_id, is_active=True)
+        except app_models.ApplicationType.DoesNotExist:
+            return Response({'detail': 'Application type not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not isinstance(data, dict):
+            return Response({'detail': 'data must be a JSON object'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate fields against ApplicationField definitions
+        fields_qs = list(app_models.ApplicationField.objects.filter(application_type=app_type))
+        fields_map = {f.field_key: f for f in fields_qs}
+        expected_keys = set(fields_map.keys())
+        required_keys = {f.field_key for f in fields_qs if f.is_required}
+        provided_keys = set(data.keys())
+
+        missing = required_keys - provided_keys
+        if missing:
+            return Response({'detail': f'Missing required fields: {", ".join(sorted(missing))}'}, status=status.HTTP_400_BAD_REQUEST)
+        unknown = provided_keys - expected_keys
+        if unknown:
+            return Response({'detail': f'Unknown fields: {", ".join(sorted(unknown))}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # Attach applicant profile so department selection + authority resolvers
+            # (e.g. MENTOR via StudentMentorMap) can work deterministically.
+            student_profile = None
+            staff_profile = None
+            try:
+                student_profile = getattr(request.user, 'student_profile', None)
+            except Exception:
+                student_profile = None
+            try:
+                staff_profile = getattr(request.user, 'staff_profile', None)
+            except Exception:
+                staff_profile = None
+
+            if student_profile is not None and not getattr(student_profile, 'pk', None):
+                student_profile = None
+            if staff_profile is not None and not getattr(staff_profile, 'pk', None):
+                staff_profile = None
+
+            # Enforce starter-role access: only the first-step role can initiate.
+            temp_app = app_models.Application(
+                application_type=app_type,
+                applicant_user=request.user,
+                student_profile=student_profile,
+                staff_profile=staff_profile,
+            )
+            flow = approval_engine._get_flow_for_application(temp_app)
+            if not flow:
+                return Response({'detail': 'No active approval flow configured for this application type.'}, status=status.HTTP_400_BAD_REQUEST)
+            starter_step = flow.steps.select_related('role').order_by('order').first()
+            starter_role = getattr(starter_step, 'role', None)
+            starter_role_name = (getattr(starter_role, 'name', '') or '').strip().upper()
+            if not starter_role_name:
+                return Response({'detail': 'Approval flow has no starter role configured.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            user_roles = list(request.user.roles.all())
+            allowed = False
+            if starter_role is not None and starter_role in user_roles:
+                allowed = True
+            elif starter_role_name == 'STUDENT' and student_profile is not None:
+                allowed = True
+            elif starter_role_name == 'STAFF' and staff_profile is not None:
+                allowed = True
+
+            if not allowed:
+                return Response({'detail': f'Only {starter_role_name} can create this application.'}, status=status.HTTP_403_FORBIDDEN)
+
+            application = app_models.Application.objects.create(
+                application_type=app_type,
+                applicant_user=request.user,
+                student_profile=student_profile,
+                staff_profile=staff_profile,
+                current_state=app_models.Application.ApplicationState.DRAFT,
+                status=app_models.Application.ApplicationState.DRAFT,
+            )
+
+            # Persist field data
+            rows = [
+                app_models.ApplicationData(application=application, field=fields_map[key], value=val)
+                for key, val in data.items()
+                if key in fields_map
+            ]
+            if rows:
+                app_models.ApplicationData.objects.bulk_create(rows)
+
+            # Submit (DRAFT → IN_REVIEW, binds flow & form version)
+            try:
+                application = app_state_svc.submit_application(application, request.user)
+            except Exception as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Auto-advance step 1 if user's role matches it (e.g. STUDENT role = step 1)
+            step1 = approval_engine.get_current_approval_step(application)
+            if step1 and step1.role in user_roles:
+                try:
+                    application = approval_engine.process_approval(application, request.user, 'APPROVE')
+                except Exception:
+                    pass  # stay at step 1 if auto-advance fails
+
+        application = app_models.Application.objects.get(pk=application.pk)
+        return Response({
+            'id': application.id,
+            'current_state': application.current_state,
+            'forwarded_to': _forwarded_to_payload(application),
+        }, status=status.HTTP_201_CREATED)
+
+
+class ApplicationActionView(APIView):
+    """POST /api/applications/<id>/action/
+    Body: { action: "FORWARD" | "REJECT", remarks: "" }
+    FORWARD maps to process_approval APPROVE (works for both mid-flow and final step).
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, id: int, *args, **kwargs):
+        application = get_object_or_404(app_models.Application, pk=id)
+        action = (request.data.get('action') or '').strip().upper()
+        remarks = request.data.get('remarks') or ''
+
+        if action not in ('FORWARD', 'REJECT'):
+            return Response({'detail': 'action must be FORWARD or REJECT'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine_action = 'APPROVE' if action == 'FORWARD' else 'REJECT'
+
+        try:
+            updated = approval_engine.process_approval(application, request.user, engine_action, remarks=remarks)
+        except PermissionDenied as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        forwarded_to = (
+            _forwarded_to_payload(updated)
+            if updated.current_state == app_models.Application.ApplicationState.IN_REVIEW
+            else None
+        )
+        return Response({
+            'id': updated.id,
+            'current_state': updated.current_state,
+            'forwarded_to': forwarded_to,
+        })
+
+
+class ApplicationStepInfoView(APIView):
+    """GET /api/applications/<id>/step-info/
+    Returns current step, next step, whether user can act, and the forward button label.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, id: int, *args, **kwargs):
+        application = get_object_or_404(app_models.Application, pk=id)
+
+        if not access_control.can_user_view_application(application, request.user):
+            return Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+
+        can_act = approval_engine.user_can_act(application, request.user)
+        current_step = approval_engine.get_current_approval_step(application)
+        next_step = (
+            approval_engine.get_next_approval_step(application, current_step)
+            if current_step else None
+        )
+
+        current_step_data = None
+        next_step_data = None
+        forward_label = 'Forward'
+        is_final = False
+
+        if current_step:
+            is_final = current_step.is_final
+            current_step_data = {
+                'order': current_step.order,
+                'role_name': current_step.role.name if current_step.role else '',
+                'is_final': is_final,
+            }
+            if next_step and next_step.role:
+                next_step_data = {
+                    'order': next_step.order,
+                    'role_name': next_step.role.name,
+                }
+                forward_label = f'Forward to {next_step.role.name}'
+            elif is_final:
+                forward_label = 'Approve'
+
+        return Response({
+            'can_act': can_act,
+            'current_step': current_step_data,
+            'next_step': next_step_data,
+            'is_final_step': is_final,
+            'forward_label': forward_label,
+            'current_state': application.current_state,
         })

@@ -11,6 +11,6 @@ class ApproverInboxView(APIView):
 
     def get(self, request, *args, **kwargs):
         user = request.user
-        qs = inbox_service.get_pending_approvals_for_user(user)
-        serializer = ApproverInboxItemSerializer(qs, many=True)
+        items = inbox_service.get_pending_approvals_for_user(user)
+        serializer = ApproverInboxItemSerializer(items, many=True)
         return Response(serializer.data)

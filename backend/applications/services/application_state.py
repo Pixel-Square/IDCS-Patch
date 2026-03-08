@@ -68,7 +68,8 @@ def submit_application(application: app_models.Application, user):
     """Submit an application.
 
     - Only the applicant may submit.
-    - Moves state from DRAFT -> SUBMITTED.
+    - Moves state from DRAFT -> IN_REVIEW and sets the first step.
+      (IN_REVIEW is used by inbox/query logic for approvers.)
     """
     if application.applicant_user_id != getattr(user, 'id', None):
         raise ValidationError('Only applicant may submit the application')
@@ -76,20 +77,28 @@ def submit_application(application: app_models.Application, user):
     if application.current_state not in (app_models.Application.ApplicationState.DRAFT,):
         raise ValidationError('Application is not in a state that can be submitted')
 
-    # Ensure a flow exists and set initial current_step if unset
+    # Ensure a flow exists and has at least one step.
     flow = approval_engine._get_flow_for_application(application)
-    first_step = None
-    if flow:
-        first_step = flow.steps.order_by('order').first()
+    if not flow:
+        raise ValidationError('No approval flow configured for this application type')
+
+    first_step = flow.steps.order_by('order').first()
+    if first_step is None:
+        raise ValidationError('Approval flow has no steps configured for this application type')
     # Snapshot or bind form version
     active_fv = app_models.ApplicationFormVersion.objects.filter(application_type=application.application_type, is_active=True).first()
     if active_fv is None:
         # Create snapshot from current ApplicationField definitions
         active_fv = _snapshot_schema_for_application_type(application.application_type)
 
-    # Bind form_version to application
+    # Bind form_version + mark submission time
     application.form_version = active_fv
-    application.save(update_fields=['form_version'])
+    if application.submitted_at is None:
+        application.submitted_at = timezone.now()
+    update_fields = ['form_version']
+    if application.submitted_at is not None:
+        update_fields.append('submitted_at')
+    application.save(update_fields=update_fields)
 
     # Validate application data against bound form version
     try:
@@ -98,7 +107,7 @@ def submit_application(application: app_models.Application, user):
     except Exception as exc:
         raise
 
-    _save_state(application, app_models.Application.ApplicationState.SUBMITTED, current_step=first_step)
+    _save_state(application, app_models.Application.ApplicationState.IN_REVIEW, current_step=first_step)
     # notify initial approver(s)
     try:
         notification_service.notify_application_submitted(application)

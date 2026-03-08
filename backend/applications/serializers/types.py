@@ -32,7 +32,8 @@ class ApplicationTypeSchemaSerializer(serializers.Serializer):
 
     def get_role_permissions(self, obj):
         # Return simple list of role ids and flags for client-side decisions
-        perms = obj.role_permissions.all()
+        qs = obj['role_permissions'] if isinstance(obj, dict) else obj.role_permissions.all()
+        perms = qs.all() if hasattr(qs, 'all') else qs
         return [
             {
                 'role_id': p.role_id,

@@ -8,6 +8,7 @@ import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, Cli
 
 import { useSidebar } from './SidebarContext';
 import { fetchPendingPublishRequestCount } from '../../services/obe';
+import { ApplicationsNavResponse, fetchApplicationsNav } from '../../services/applications';
 
   const ICON_MAP: Record<string, any> = {
   profile: User,
@@ -44,6 +45,9 @@ import { fetchPendingPublishRequestCount } from '../../services/obe';
   pbas: ClipboardList,
   pbas_manager: Layout,
   settings: Settings,
+  applications_admin: Layout,
+  applications_inbox: ClipboardList,
+  applications_home: Layout,
 
 };
 
@@ -54,6 +58,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   const { collapsed, toggle } = useSidebar();
   const [pendingObeReqCount, setPendingObeReqCount] = useState<number>(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [applicationsNav, setApplicationsNav] = useState<ApplicationsNavResponse | null>(null);
 
   const perms = (data?.permissions || []).map((p) => String(p || '').toLowerCase());
   const canObeMaster = perms.includes('obe.master.manage');
@@ -106,6 +111,26 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
       setExpanded((p) => ({ ...p, academic_controller: true }));
     }
   }, [loc.pathname]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!data) return;
+
+    (async () => {
+      try {
+        const nav = await fetchApplicationsNav();
+        if (!mounted) return;
+        setApplicationsNav(nav);
+      } catch {
+        if (!mounted) return;
+        setApplicationsNav({ show_applications: false, staff_roles: [], staff_department: null, override_roles: [] });
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [data]);
 
   if (loading) return (
     <aside className={`fixed top-16 left-0 h-[calc(100vh-4rem)] bg-white shadow-lg transition-all duration-300 z-30 ${collapsed ? '-translate-x-full lg:translate-x-0 lg:w-20' : 'w-full lg:w-64'}`}>
@@ -231,6 +256,15 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   }
   if (isIqac && !items.some((item) => item.key === 'academic_controller')) {
     items.push({ key: 'academic_controller', label: 'Academic Controller', to: '/iqac/academic-controller' });
+  }
+  if (isIqac && !items.some((item) => item.key === 'applications_admin')) {
+    items.push({ key: 'applications_admin', label: 'Applications Admin', to: '/iqac/applications-admin' });
+  }
+  if (applicationsNav?.show_applications && !items.some((item) => item.key === 'applications_home')) {
+    items.push({ key: 'applications_home', label: 'My Applications', to: '/applications' });
+  }
+  if (applicationsNav?.show_applications && (applicationsNav.staff_roles.length > 0 || applicationsNav.override_roles.length > 0) && !flags.is_student && !items.some((item) => item.key === 'applications_inbox')) {
+    items.push({ key: 'applications_inbox', label: 'Approvals Inbox', to: '/applications/inbox' });
   }
   if (canPbasManage && !items.some((item) => item.key === 'pbas_manager')) {
     items.push({ key: 'pbas_manager', label: 'PBAS Manager', to: '/iqac/pbas' });

@@ -92,6 +92,9 @@ def get_department_hod(student: StudentProfile, academic_year: AcademicYear) -> 
         dept = sec.batch.course.department
 
     if not dept:
+        dept = getattr(student, 'home_department', None)
+
+    if not dept:
         return None
 
     hod = (
@@ -116,6 +119,9 @@ def get_department_ahod(student: StudentProfile, academic_year: AcademicYear) ->
     sec = getattr(student, 'section', None)
     if sec and getattr(sec, 'batch', None) and getattr(sec.batch, 'course', None):
         dept = sec.batch.course.department
+
+    if not dept:
+        dept = getattr(student, 'home_department', None)
 
     if not dept:
         return None
@@ -154,11 +160,28 @@ def _get_flow_for_application(application):
         dept = getattr(staff_profile, 'department', None)
 
     qs = ApprovalFlow.objects.filter(application_type=application.application_type, is_active=True)
+    qs_with_steps = qs.filter(steps__isnull=False).distinct()
+    dept_flow = None
+    global_flow = None
+
     if dept is not None:
-        flow = qs.filter(department=dept).first()
-        if flow:
-            return flow
-    return qs.filter(department__isnull=True).first()
+        dept_flow = qs_with_steps.filter(department=dept).order_by('-id').first()
+        if dept_flow is not None:
+            try:
+                if dept_flow.steps.exists():
+                    return dept_flow
+            except Exception:
+                return dept_flow
+
+    global_flow = qs_with_steps.filter(department__isnull=True).order_by('-id').first()
+    if global_flow is not None:
+        try:
+            if global_flow.steps.exists():
+                return global_flow
+        except Exception:
+            return global_flow
+
+    return dept_flow or global_flow
 
 
 def resolve_approver(role_code: str, application_instance) -> Optional[StaffProfile]:
@@ -184,6 +207,15 @@ def resolve_approver(role_code: str, application_instance) -> Optional[StaffProf
     # application may have no explicit academic_year; try to infer from mappings
     # Prefer year from student's active mapping when possible
     student = getattr(application_instance, 'student_profile', None)
+    if student is None:
+        # Backward-compatible fallback: older Application rows may not have
+        # student_profile set even though applicant_user has one.
+        try:
+            applicant_user = getattr(application_instance, 'applicant_user', None)
+            student = getattr(applicant_user, 'student_profile', None) if applicant_user is not None else None
+        except Exception:
+            student = None
+
     if student is None:
         # If only staff_profile present, we cannot resolve student-based authorities
         return None

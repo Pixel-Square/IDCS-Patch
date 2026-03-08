@@ -56,6 +56,11 @@ import HodEventsListPage from './pages/hod/events/HodEventsListPage';
 import HodEventCreatePage from './pages/hod/events/HodEventCreatePage';
 import CanvaDesignEditorPage from './pages/hod/events/CanvaDesignEditorPage';
 import PosterMakerPage from './pages/events/PosterMakerPage';
+import ApplicationsAdminPage from './pages/iqac/ApplicationsAdminPage';
+import ApplicationsInboxPage from './pages/applications/ApplicationsInboxPage';
+import ApplicationsPage from './pages/applications/ApplicationsPage';
+import ApplicationFormPage from './pages/applications/ApplicationFormPage';
+import ApplicationDetailPage from './pages/applications/ApplicationDetailPage';
 
 type RoleObj = { name: string };
 type Me = {
@@ -167,6 +172,26 @@ export default function App() {
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/profile" element={<ProfilePage user={user} />} />
+                <Route
+                  path="/iqac/applications-admin"
+                  element={<ProtectedRoute user={user} requiredRoles={['IQAC']} element={<ApplicationsAdminPage />} />}
+                />
+                <Route
+                  path="/applications"
+                  element={<ApplicationsPage />}
+                />
+                <Route
+                  path="/applications/new/:typeId"
+                  element={<ApplicationFormPage />}
+                />
+                <Route
+                  path="/applications/inbox"
+                  element={<ApplicationsInboxPage />}
+                />
+                <Route
+                  path="/applications/:id"
+                  element={<ApplicationDetailPage />}
+                />
                 <Route path="/queries" element={<QueriesPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
                 <Route path="/academic-calendar" element={<AcademicCalendarRedirect user={user} />} />

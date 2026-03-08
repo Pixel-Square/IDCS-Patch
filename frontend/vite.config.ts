@@ -3,6 +3,12 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // Monorepo/workspace setups can accidentally pull in two copies of React
+  // (e.g. root node_modules + frontend node_modules). That triggers runtime
+  // "Invalid hook call" errors even when hooks are used correctly.
+  resolve: {
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
+  },
   build: {
     // Use a user-writable outDir; `dist/` is owned by www-data in some deployments.
     outDir: 'build_dist',

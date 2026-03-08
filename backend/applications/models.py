@@ -147,7 +147,7 @@ class ApprovalFlow(models.Model):
     override_roles = models.ManyToManyField('accounts.Role', blank=True, related_name='override_flows')
 
     class Meta:
-        unique_together = (('application_type', 'department'),)
+        pass
 
     def __str__(self):
         dept = self.department.name if self.department else 'Global'
@@ -174,6 +174,8 @@ class ApprovalStep(models.Model):
         on_delete=models.SET_NULL,
         related_name='escalation_steps'
     )
+    # Final step ends the flow (approve/reject). Non-final steps escalate to the next role.
+    is_final = models.BooleanField(default=False)
     can_override = models.BooleanField(default=False)
     auto_skip_if_unavailable = models.BooleanField(default=False)
 
