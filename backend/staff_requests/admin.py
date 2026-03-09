@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import RequestTemplate, ApprovalStep, StaffRequest, ApprovalLog, StaffLeaveBalance
+from .models import RequestTemplate, ApprovalStep, StaffRequest, ApprovalLog, StaffLeaveBalance, StaffFormUsage
 
 
 class ApprovalStepInline(admin.TabularInline):
@@ -176,4 +176,34 @@ class StaffLeaveBalanceAdmin(admin.ModelAdmin):
         """Make staff and leave_type readonly after creation"""
         if obj:  # Editing existing object
             return self.readonly_fields + ['staff', 'leave_type']
+        return self.readonly_fields
+
+
+@admin.register(StaffFormUsage)
+class StaffFormUsageAdmin(admin.ModelAdmin):
+    """Admin interface for StaffFormUsage (neutral form usage tracking)"""
+    list_display = ['staff', 'template', 'usage_count', 'reset_period_start', 'reset_period_end', 'last_used']
+    list_filter = ['template', 'reset_period_start', 'reset_period_end']
+    search_fields = ['staff__username', 'staff__first_name', 'staff__last_name', 'template__name']
+    ordering = ['staff', 'template', '-reset_period_start']
+    
+    fieldsets = (
+        ('Usage Information', {
+            'fields': ('staff', 'template', 'usage_count', 'last_used')
+        }),
+        ('Reset Period', {
+            'fields': ('reset_period_start', 'reset_period_end')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    readonly_fields = ['created_at', 'updated_at', 'last_used']
+    
+    def get_readonly_fields(self, request, obj=None):
+        """Make staff, template, and reset period readonly after creation"""
+        if obj:  # Editing existing object
+            return self.readonly_fields + ['staff', 'template', 'reset_period_start', 'reset_period_end']
         return self.readonly_fields

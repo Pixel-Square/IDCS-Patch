@@ -233,6 +233,176 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=False, methods=['get'])
+    def organization_analytics(self, request):
+        """
+        Get organization-wide staff attendance analytics with date range filter
+        
+        Query Parameters:
+        - from_date: start date in YYYY-MM-DD format (required)
+        - to_date: end date in YYYY-MM-DD format (required)
+        - department_id: optional filter by department
+        - format: 'json' (default) or 'csv' for download
+        """
+        user = request.user
+        
+        # Only HR, PS, IQAC, and ADMIN can access organization analytics
+        is_hr = hasattr(user, 'user_roles') and user.user_roles.filter(role__name='HR').exists()
+        is_ps = hasattr(user, 'user_roles') and user.user_roles.filter(role__name='PS').exists()
+        is_iqac = hasattr(user, 'user_roles') and user.user_roles.filter(role__name='IQAC').exists()
+        is_admin = hasattr(user, 'user_roles') and user.user_roles.filter(role__name='ADMIN').exists()
+        
+        if not (user.is_superuser or is_hr or is_ps or is_iqac or is_admin):
+            return Response(
+                {'error': 'Only HR, PS, IQAC, or ADMIN can access organization analytics'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Get date range parameters
+        from_date_str = request.query_params.get('from_date')
+        to_date_str = request.query_params.get('to_date')
+        department_id = request.query_params.get('department_id')
+        export_format = request.query_params.get('format', 'json')
+        
+        if not from_date_str or not to_date_str:
+            return Response(
+                {'error': 'Both from_date and to_date are required (format: YYYY-MM-DD)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
+            to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response(
+                {'error': 'Invalid date format. Use YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Base queryset
+        queryset = AttendanceRecord.objects.filter(
+            date__gte=from_date,
+            date__lte=to_date
+        ).select_related('user', 'user__staff_profile', 'user__staff_profile__department')
+        
+        # Filter by department if specified
+        if department_id:
+            queryset = queryset.filter(user__staff_profile__department_id=department_id)
+        
+        # Get all unique staff in the range
+        from accounts.models import User
+        from academics.models import StaffProfile, Department
+        
+        staff_users = User.objects.filter(
+            staff_profile__isnull=False
+        ).select_related('staff_profile', 'staff_profile__department')
+        
+        if department_id:
+            staff_users = staff_users.filter(staff_profile__department_id=department_id)
+        
+        # Build analytics data
+        analytics_by_staff = {}
+        for user_obj in staff_users:
+            staff_profile = getattr(user_obj, 'staff_profile', None)
+            staff_identifier = getattr(staff_profile, 'staff_id', None) or user_obj.id
+            analytics_by_staff[user_obj.id] = {
+                'staff_id': staff_identifier,
+                'name': f"{user_obj.first_name} {user_obj.last_name}".strip() or user_obj.username,
+                'email': user_obj.email,
+                'department': getattr(user_obj.staff_profile, 'department', None).__str__() if getattr(user_obj.staff_profile, 'department', None) else 'N/A',
+                'present': 0,
+                'absent': 0,
+                'partial': 0,
+                'no_record': 0,
+            }
+        
+        # Count records by status
+        for record in queryset:
+            if record.user.id in analytics_by_staff:
+                if record.status == 'present':
+                    analytics_by_staff[record.user.id]['present'] += 1
+                elif record.status == 'absent':
+                    analytics_by_staff[record.user.id]['absent'] += 1
+                elif record.status == 'partial':
+                    analytics_by_staff[record.user.id]['partial'] += 1
+                else:
+                    analytics_by_staff[record.user.id]['no_record'] += 1
+        
+        # Convert to list
+        analytics_list = list(analytics_by_staff.values())
+        
+        # Calculate summary statistics
+        total_staff = len(analytics_list)
+        total_present = sum(item['present'] for item in analytics_list)
+        total_absent = sum(item['absent'] for item in analytics_list)
+        total_partial = sum(item['partial'] for item in analytics_list)
+        total_records = total_present + total_absent + total_partial
+        working_days = (to_date - from_date).days + 1
+        
+        if export_format == 'csv':
+            # Generate CSV export
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Write header
+            writer.writerow([
+                'Date Range', f'{from_date_str} to {to_date_str}',
+                'Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ])
+            writer.writerow([])
+            
+            # Write summary
+            writer.writerow(['ORGANIZATION ATTENDANCE SUMMARY'])
+            writer.writerow(['Total Staff', total_staff])
+            writer.writerow(['Total Records', total_records])
+            writer.writerow(['Total Present Days', total_present])
+            writer.writerow(['Total Absent Days', total_absent])
+            writer.writerow(['Total Partial Days', total_partial])
+            writer.writerow(['Working Days in Period', working_days])
+            writer.writerow([])
+            
+            # Write staff-wise details
+            writer.writerow(['STAFF-WISE ATTENDANCE'])
+            writer.writerow(['Staff Name', 'Email', 'Department', 'Present', 'Absent', 'Partial', 'No Record', 'Attendance %'])
+            
+            for item in sorted(analytics_list, key=lambda x: x['name']):
+                total_days = item['present'] + item['absent'] + item['partial']
+                attendance_pct = (item['present'] / total_days * 100) if total_days > 0 else 0
+                writer.writerow([
+                    item['name'],
+                    item['email'],
+                    item['department'],
+                    item['present'],
+                    item['absent'],
+                    item['partial'],
+                    item['no_record'],
+                    f"{attendance_pct:.2f}%"
+                ])
+            
+            # Return CSV file
+            response = Response(output.getvalue(), content_type='text/csv')
+            filename = f"organization_attendance_{from_date_str}_to_{to_date_str}.csv"
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+        
+        else:
+            # Return JSON
+            return Response({
+                'date_range': {
+                    'from_date': from_date_str,
+                    'to_date': to_date_str,
+                    'working_days': working_days,
+                },
+                'summary': {
+                    'total_staff': total_staff,
+                    'total_records': total_records,
+                    'total_present': total_present,
+                    'total_absent': total_absent,
+                    'total_partial': total_partial,
+                },
+                'staff_analytics': analytics_list,
+            })
+
+    @action(detail=False, methods=['get'])
     def available_departments(self, request):
         """Get list of departments the user can view attendance for"""
         user = request.user
@@ -243,12 +413,13 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         is_hod = hasattr(user, 'user_roles') and user.user_roles.filter(role__name='HOD').exists()
         is_iqac = hasattr(user, 'user_roles') and user.user_roles.filter(role__name='IQAC').exists()
         is_admin = hasattr(user, 'user_roles') and user.user_roles.filter(role__name='ADMIN').exists()
+        is_hr = hasattr(user, 'user_roles') and user.user_roles.filter(role__name='HR').exists()
         
         from academics.models import Department
         
         departments = []
         
-        if is_superuser or is_ps or is_iqac or is_admin:
+        if is_superuser or is_ps or is_iqac or is_admin or is_hr:
             # These roles can see all departments
             dept_queryset = Department.objects.all()
         elif is_hod:

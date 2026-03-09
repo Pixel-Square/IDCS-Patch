@@ -37,10 +37,27 @@ class RequestTemplate(models.Model):
     # Leave and Attendance Policy
     # Example: {
     #   "action": "deduct",  // "deduct", "earn", or "neutral"
-    #   "allotment_per_role": {"STAFF": 6, "HOD": 10},  // Initial balance for deduct action
-    #   "reset_duration": "yearly",  // "yearly" or "monthly"
-    #   "overdraft_name": "LOP",  // Penalty count if allotment exceeded
-    #   "attendance_status": "CL"  // Status code for attendance register
+    #   "allotment_per_role": {"STAFF": 6, "HOD": 10},  // Initial balance for deduct action (optional)
+    #   "from_date": "2026-06-01",  // REQUIRED: Start date for reset period (e.g., academic year start)
+    #   "to_date": "2027-05-31",  // REQUIRED: End date for reset period (e.g., academic year end)
+    #   "overdraft_name": "LOP",  // Loss of Pay tracking field name
+    #   "lop_non_reset": true,  // If true, LOP accumulates indefinitely (recommended: true)
+    #   "attendance_status": "CL",  // Status code for attendance register
+    #   
+    #   // LOP Logic: LOP = Total absent days - Approved deduct form days covering those dates
+    #   // When staff marked absent: LOP increases automatically
+    #   // When deduct form approved for absent date: LOP decreases by that count
+    #   // Example: Absent 4 days = LOP:4, then approve leave for 2 absent days = LOP:2
+    #   
+    #   // Reset Behavior (run: python manage.py reset_leave_balances):
+    #   // - COL (earn): Resets to 0 when to_date passes
+    #   // - Deduct forms: Reset to allotment_per_role when new period starts
+    #   // - LOP: Resets to 0 when to_date passes (unless lop_non_reset=true)
+    #   
+    #   "max_uses": 5,  // For neutral action: max uses per staff per period
+    #   "usage_reset_duration": "monthly",  // For neutral action: "yearly" or "monthly"
+    #   "usage_from_date": "2026-01-01",  // For neutral: optional custom usage reset period start
+    #   "usage_to_date": "2026-01-31"  // For neutral: optional custom usage reset period end
     # }
     leave_policy = models.JSONField(
         default=dict,
@@ -264,6 +281,62 @@ class StaffLeaveBalance(models.Model):
     
     def __str__(self):
         return f"{self.staff.get_full_name() or self.staff.username} - {self.leave_type}: {self.balance}"
+
+
+class StaffFormUsage(models.Model):
+    """
+    Tracks usage count for neutral forms (like OD) per staff member.
+    Used to enforce max_uses limits and track when usage exceeds allowed count.
+    """
+    staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='form_usages'
+    )
+    template = models.ForeignKey(
+        RequestTemplate,
+        on_delete=models.CASCADE,
+        related_name='staff_usages'
+    )
+    usage_count = models.IntegerField(
+        default=0,
+        help_text="Number of times this form has been used in current period"
+    )
+    reset_period_start = models.DateField(
+        help_text="Start date of current tracking period"
+    )
+    reset_period_end = models.DateField(
+        help_text="End date of current tracking period"
+    )
+    last_used = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="Last time this form was used"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = [['staff', 'template', 'reset_period_start']]
+        ordering = ['staff', 'template']
+        verbose_name = 'Staff Form Usage'
+        verbose_name_plural = 'Staff Form Usages'
+    
+    def __str__(self):
+        return f"{self.staff.get_full_name() or self.staff.username} - {self.template.name}: {self.usage_count} uses"
+    
+    def is_within_limit(self, max_uses):
+        """Check if usage is within allowed limit"""
+        if max_uses is None:
+            return True
+        return self.usage_count < max_uses
+    
+    def increment_usage(self):
+        """Increment usage count and update last_used timestamp"""
+        from django.utils import timezone
+        self.usage_count += 1
+        self.last_used = timezone.now()
+        self.save(update_fields=['usage_count', 'last_used', 'updated_at'])
 
 
 class ApprovalLog(models.Model):

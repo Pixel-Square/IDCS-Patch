@@ -270,6 +270,10 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if ((permsLower.includes('staff_requests.manage_templates') || rolesUpper.includes('HR')) && !items.some(item => item.key === 'hr_request_templates')) {
     items.push({ key: 'hr_request_templates', label: 'HR: Request Templates', to: '/hr/request-templates' });
   }
+
+  if (rolesUpper.includes('HR') && !items.some(item => item.key === 'hr_staff_attendance_analytics')) {
+    items.push({ key: 'hr_staff_attendance_analytics', label: 'HR: Staff Attendance Analytics', to: '/hr/staff-attendance-analytics' });
+  }
   
   // Staff Requests system
   // Note: 'My Requests' moved into My Calendar; keep direct link removed to avoid duplication

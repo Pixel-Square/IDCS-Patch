@@ -57,6 +57,7 @@ import HODStaffAttendancePage from './pages/hod/StaffAttendance';
 import IQACStaffAttendancePage from './pages/iqac/StaffAttendance';
 import PSStaffAttendanceViewPage from './pages/PS/StaffAttendanceView';
 import RequestTemplatesPage from './pages/hr/RequestTemplatesPage';
+import OrganizationStaffAttendanceAnalytics from './pages/hr/OrganizationStaffAttendanceAnalytics';
 import MyRequestsPage from './pages/staff-requests/MyRequestsPage';
 import PendingApprovalsPage from './pages/staff-requests/PendingApprovalsPage';
 
@@ -337,6 +338,10 @@ export default function App() {
                 <Route
                   path="/hr/request-templates"
                   element={<ProtectedRoute user={user} requiredRoles={['HR']} requiredPermissions={['staff_requests.manage_templates']} element={<RequestTemplatesPage />} />}
+                />
+                <Route
+                  path="/hr/staff-attendance-analytics"
+                  element={<ProtectedRoute user={user} requiredRoles={['HR']} requiredPermissions={['staff_requests.manage_templates']} element={<OrganizationStaffAttendanceAnalytics />} />}
                 />
                 
                 {/* Staff Requests Routes */}

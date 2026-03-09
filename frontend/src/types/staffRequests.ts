@@ -24,9 +24,18 @@ export interface ApprovalStep {
 export interface LeavePolicy {
   action?: 'deduct' | 'earn' | 'neutral';
   allotment_per_role?: Record<string, number>;
-  reset_duration?: 'yearly' | 'monthly';
-  overdraft_name?: string;
+  from_date?: string; // REQUIRED: Start date for reset period (YYYY-MM-DD)
+  to_date?: string; // REQUIRED: End date for reset period (YYYY-MM-DD)
+  overdraft_name?: string; // LOP field name (Loss of Pay)
+  lop_non_reset?: boolean; // If true, LOP never resets (recommended)
   attendance_status?: string;
+  // LOP Logic: LOP = Absent days - Approved deduct days for those absent dates
+  // Absent 4 days = LOP:4, approve leave for 2 = LOP:2
+  // Reset Behavior: COL resets to 0, Deduct resets to allotment, LOP resets to 0 (unless lop_non_reset)
+  max_uses?: number; // For neutral: Maximum uses per staff per period
+  usage_reset_duration?: 'yearly' | 'monthly'; // For neutral: Reset period for usage
+  usage_from_date?: string; // For neutral: Custom usage reset start date
+  usage_to_date?: string; // For neutral: Custom usage reset end date
 }
 
 export interface AttendanceAction {

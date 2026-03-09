@@ -432,21 +432,44 @@ export default function TemplateEditorModal({ template, onClose, onSaved }: Prop
 
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Reset Duration
+                              Reset Period <span className="text-red-500">*</span>
                             </label>
-                            <select
-                              value={leavePolicy.reset_duration || 'yearly'}
-                              onChange={(e) => handleLeavePolicyChange({ reset_duration: e.target.value as 'yearly' | 'monthly' })}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            >
-                              <option value="yearly">Yearly</option>
-                              <option value="monthly">Monthly</option>
-                            </select>
+                            <p className="text-xs text-gray-500 mb-2">
+                              Define the date range for leave balance reset (e.g., Academic Year: June 1 - May 31).
+                              When this period ends, balances will be reset automatically.
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">From Date</label>
+                                <input
+                                  type="date"
+                                  value={leavePolicy.from_date || ''}
+                                  onChange={(e) => handleLeavePolicyChange({ from_date: e.target.value })}
+                                  required
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">To Date</label>
+                                <input
+                                  type="date"
+                                  value={leavePolicy.to_date || ''}
+                                  onChange={(e) => handleLeavePolicyChange({ to_date: e.target.value })}
+                                  required
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                              <strong>Reset Behavior:</strong> When period ends, balances reset automatically:
+                              <br />• <strong>Deduct forms:</strong> Reset to allotment per role
+                              <br />• <strong>LOP:</strong> Resets to 0 (unless "LOP Does Not Reset" is checked)
+                            </div>
                           </div>
 
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Overdraft Field Name
+                              Overdraft Field Name (LOP)
                             </label>
                             <input
                               type="text"
@@ -456,8 +479,129 @@ export default function TemplateEditorModal({ template, onClose, onSaved }: Prop
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                             <p className="text-xs text-gray-500 mt-1">
-                              If staff exceed their allotment, this field will count the extra days.
+                              If staff exceed their allotment, this field will count the extra days (Loss of Pay).
                             </p>
+                          </div>
+
+                          <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                            <input
+                              type="checkbox"
+                              id="lop-non-reset"
+                              checked={leavePolicy.lop_non_reset || false}
+                              onChange={(e) => handleLeavePolicyChange({ lop_non_reset: e.target.checked })}
+                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <div className="flex-1">
+                              <label htmlFor="lop-non-reset" className="block text-sm font-medium text-gray-900 cursor-pointer">
+                                LOP Does Not Reset
+                              </label>
+                              <p className="text-xs text-gray-600 mt-0.5">
+                                When checked, LOP accumulates indefinitely across all periods and never resets.
+                              </p>
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {leavePolicy.action === 'earn' && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Reset Period <span className="text-red-500">*</span>
+                            </label>
+                            <p className="text-xs text-gray-500 mb-2">
+                              Define when COL balance should reset to 0 (e.g., Academic Year: June 1 - May 31).
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">From Date</label>
+                                <input
+                                  type="date"
+                                  value={leavePolicy.from_date || ''}
+                                  onChange={(e) => handleLeavePolicyChange({ from_date: e.target.value })}
+                                  required
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">To Date</label>
+                                <input
+                                  type="date"
+                                  value={leavePolicy.to_date || ''}
+                                  onChange={(e) => handleLeavePolicyChange({ to_date: e.target.value })}
+                                  required
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                              <strong>Reset Behavior:</strong> COL balance will automatically reset to <strong>0</strong> when the period ends (after to_date).
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {leavePolicy.action === 'neutral' && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Maximum Uses per Staff
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={leavePolicy.max_uses || ''}
+                              onChange={(e) => handleLeavePolicyChange({ max_uses: e.target.value ? parseInt(e.target.value) : undefined })}
+                              placeholder="e.g., 5"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                              Maximum number of times a staff member can use this form per reset period. If exceeded, it will count as LOP.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Usage Reset Duration
+                            </label>
+                            <select
+                              value={leavePolicy.usage_reset_duration || 'monthly'}
+                              onChange={(e) => handleLeavePolicyChange({ usage_reset_duration: e.target.value as 'yearly' | 'monthly' })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            >
+                              <option value="yearly">Yearly</option>
+                              <option value="monthly">Monthly</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Custom Usage Reset Period (Optional)
+                            </label>
+                            <p className="text-xs text-gray-500 mb-2">
+                              Override yearly/monthly with a specific date range for usage tracking.
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">From Date</label>
+                                <input
+                                  type="date"
+                                  value={leavePolicy.usage_from_date || ''}
+                                  onChange={(e) => handleLeavePolicyChange({ usage_from_date: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">To Date</label>
+                                <input
+                                  type="date"
+                                  value={leavePolicy.usage_to_date || ''}
+                                  onChange={(e) => handleLeavePolicyChange({ usage_to_date: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                              </div>
+                            </div>
                           </div>
                         </>
                       )}

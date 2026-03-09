@@ -242,21 +242,23 @@ class RequestTemplateViewSet(viewsets.ModelViewSet):
             date=check_date
         ).first()
         
-        # For absent dates, only allow permission forms with attendance_action
+        # For absent dates, show all forms except earn/COL type
+        # This allows staff to request late entry, OD, leave, etc. on absent dates
         if attendance and attendance.status == 'absent':
-            # Find templates that can change attendance status (like Late Entry Permission)
-            permission_templates = RequestTemplate.objects.filter(
-                is_active=True,
-                attendance_action__change_status=True
+            # Get all active templates except those with 'earn' action
+            absent_templates = RequestTemplate.objects.filter(
+                is_active=True
+            ).exclude(
+                leave_policy__action='earn'
             )
             
             return Response({
-                'templates': RequestTemplateSerializer(permission_templates, many=True).data,
-                'message': 'Absent date - Only permission forms available',
+                'templates': RequestTemplateSerializer(absent_templates, many=True).data,
+                'message': 'Absent date - All forms except Earn available',
                 'is_holiday': is_holiday_or_sunday,
                 'is_absent': True,
                 'attendance_status': attendance.status,
-                'total_available': permission_templates.count()
+                'total_available': absent_templates.count()
             })
         
         # Get all active templates
@@ -565,84 +567,120 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
         # Apply action
         if action == 'deduct':
             overdraft_name = leave_policy.get('overdraft_name', 'LOP')
-            # If user has requested to claim COL for this deduct request, try using COL balance first
-            claim_col = False
-            try:
-                claim_col = bool(staff_request.form_data.get('claim_col'))
-            except Exception:
-                claim_col = False
-
-            remaining_days = days
-
-            if claim_col:
-                # Find COL template
-                from .models import RequestTemplate as RQTemplate
-                col_template = RQTemplate.objects.filter(
-                    is_active=True,
-                    leave_policy__action='earn'
-                ).filter(
-                    Q(name__icontains='Compensatory') | Q(name__icontains='COL')
-                ).first()
-
-                if col_template:
-                    col_balance_obj = StaffLeaveBalance.objects.filter(
-                        staff=staff_request.applicant,
-                        leave_type=col_template.name
-                    ).first()
-
-                    col_available = col_balance_obj.balance if col_balance_obj else 0.0
-                    if col_available > 0:
-                        use_from_col = min(col_available, remaining_days)
-                        # Deduct from COL
-                        col_balance_obj.balance = col_available - use_from_col
-                        col_balance_obj.save()
-                        logger.info(f'[LeaveBalance] Claimed {use_from_col} days from COL ({col_template.name}) for request {staff_request.id}')
-                        remaining_days -= use_from_col
-
-            # If COL covered all days, skip creating/modifying the leave balance entirely
-            if remaining_days <= 0:
-                logger.info(f'[LeaveBalance] All days covered by COL for request {staff_request.id}')
-            else:
-                # Get or create leave balance only when needed
-                balance_obj, created = StaffLeaveBalance.objects.get_or_create(
-                    staff=staff_request.applicant,
-                    leave_type=leave_type,
-                    defaults={'balance': 0.0}
-                )
-
-                logger.info(f'[LeaveBalance] Balance object - Created: {created}, Initial Balance: {balance_obj.balance}')
-
-                # Initialize balance for new entries (deduct action only)
-                if created:
-                    allotment = leave_policy.get('allotment_per_role', {})
-                    # Get user's role (simplified - use first matching role)
-                    user_role = self._get_primary_role(staff_request.applicant)
-                    balance_obj.balance = allotment.get(user_role, 0.0)
-                    balance_obj.save()
-                    logger.info(f'[LeaveBalance] Initialized deduct balance for role {user_role}: {balance_obj.balance}')
-
-                # Now handle remaining_days using normal deduct logic
-                if balance_obj.balance >= remaining_days:
-                    # Sufficient balance - deduct normally
-                    old_balance = balance_obj.balance
-                    balance_obj.balance -= remaining_days
-                    balance_obj.save()
-                    logger.info(f'[LeaveBalance] Deducted {remaining_days} days: {old_balance} -> {balance_obj.balance}')
-                else:
-                    # Insufficient balance - deduct all and overflow to LOP
-                    overflow = remaining_days - balance_obj.balance
-                    balance_obj.balance = 0.0
-                    balance_obj.save()
-
-                    # Add overflow to LOP
-                    lop_balance, _ = StaffLeaveBalance.objects.get_or_create(
+            
+            # NEW LOP LOGIC: Check if this approval covers absent dates
+            # LOP = Total absent days - Approved deduct form days for those absent dates
+            request_dates = self._extract_dates_from_form_data(form_data)
+            
+            if request_dates:
+                # Import AttendanceRecord model
+                from staff_attendance.models import AttendanceRecord
+                
+                # Check which request dates were marked absent
+                absent_dates_count = AttendanceRecord.objects.filter(
+                    user=staff_request.applicant,
+                    date__in=request_dates,
+                    status='absent'
+                ).count()
+                
+                logger.info(f'[LOP] Request covers {len(request_dates)} dates, {absent_dates_count} were absent')
+                
+                # If this deduct form covers absent dates, reduce LOP
+                if absent_dates_count > 0:
+                    lop_balance, created = StaffLeaveBalance.objects.get_or_create(
                         staff=staff_request.applicant,
                         leave_type=overdraft_name,
                         defaults={'balance': 0.0}
                     )
-                    lop_balance.balance += overflow
+                    
+                    # Reduce LOP by the number of absent dates being covered
+                    # (These absent dates are now "explained" by approved leave)
+                    old_lop = lop_balance.balance
+                    lop_balance.balance = max(0, lop_balance.balance - absent_dates_count)
                     lop_balance.save()
-                    logger.info(f'[LeaveBalance] Insufficient balance - overflow {overflow} days to {overdraft_name}')
+                    
+                    logger.info(f'[LOP] Reduced LOP for {absent_dates_count} covered absent dates: {old_lop} -> {lop_balance.balance}')
+            
+            # Handle regular balance deduction (if allotment configured)
+            allotment = leave_policy.get('allotment_per_role', {})
+            if allotment:
+                # If user has requested to claim COL for this deduct request, try using COL balance first
+                claim_col = False
+                try:
+                    claim_col = bool(staff_request.form_data.get('claim_col'))
+                except Exception:
+                    claim_col = False
+
+                remaining_days = days
+
+                if claim_col:
+                    # Find COL template
+                    from .models import RequestTemplate as RQTemplate
+                    col_template = RQTemplate.objects.filter(
+                        is_active=True,
+                        leave_policy__action='earn'
+                    ).filter(
+                        Q(name__icontains='Compensatory') | Q(name__icontains='COL')
+                    ).first()
+
+                    if col_template:
+                        col_balance_obj = StaffLeaveBalance.objects.filter(
+                            staff=staff_request.applicant,
+                            leave_type=col_template.name
+                        ).first()
+
+                        col_available = col_balance_obj.balance if col_balance_obj else 0.0
+                        if col_available > 0:
+                            use_from_col = min(col_available, remaining_days)
+                            # Deduct from COL
+                            col_balance_obj.balance = col_available - use_from_col
+                            col_balance_obj.save()
+                            logger.info(f'[LeaveBalance] Claimed {use_from_col} days from COL ({col_template.name}) for request {staff_request.id}')
+                            remaining_days -= use_from_col
+
+                # If COL covered all days, skip creating/modifying the leave balance entirely
+                if remaining_days <= 0:
+                    logger.info(f'[LeaveBalance] All days covered by COL for request {staff_request.id}')
+                else:
+                    # Get or create leave balance only when needed
+                    balance_obj, created = StaffLeaveBalance.objects.get_or_create(
+                        staff=staff_request.applicant,
+                        leave_type=leave_type,
+                        defaults={'balance': 0.0}
+                    )
+
+                    logger.info(f'[LeaveBalance] Balance object - Created: {created}, Initial Balance: {balance_obj.balance}')
+
+                    # Initialize balance for new entries (deduct action only)
+                    if created:
+                        # Get user's role (simplified - use first matching role)
+                        user_role = self._get_primary_role(staff_request.applicant)
+                        balance_obj.balance = allotment.get(user_role, 0.0)
+                        balance_obj.save()
+                        logger.info(f'[LeaveBalance] Initialized deduct balance for role {user_role}: {balance_obj.balance}')
+
+                    # Now handle remaining_days using normal deduct logic
+                    if balance_obj.balance >= remaining_days:
+                        # Sufficient balance - deduct normally
+                        old_balance = balance_obj.balance
+                        balance_obj.balance -= remaining_days
+                        balance_obj.save()
+                        logger.info(f'[LeaveBalance] Deducted {remaining_days} days: {old_balance} -> {balance_obj.balance}')
+                    else:
+                        # Insufficient balance - deduct all and overflow to LOP
+                        overflow = remaining_days - balance_obj.balance
+                        balance_obj.balance = 0.0
+                        balance_obj.save()
+
+                        # Add overflow to LOP (this is additional LOP on top of absent-based LOP)
+                        lop_balance, _ = StaffLeaveBalance.objects.get_or_create(
+                            staff=staff_request.applicant,
+                            leave_type=overdraft_name,
+                            defaults={'balance': 0.0}
+                        )
+                        lop_balance.balance += overflow
+                        lop_balance.save()
+                        logger.info(f'[LeaveBalance] Insufficient balance - overflow {overflow} days to {overdraft_name}')
         
         elif action == 'earn':
             # Get or create balance for earn action
@@ -682,19 +720,77 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
                 logger.info(f'[LeaveBalance] Earned {days} days: {old_balance} -> {balance_obj.balance}')
         
         elif action == 'neutral':
-            # Get or create balance for neutral action
-            balance_obj, created = StaffLeaveBalance.objects.get_or_create(
-                staff=staff_request.applicant,
-                leave_type=leave_type,
-                defaults={'balance': 0.0}
-            )
-            logger.info(f'[LeaveBalance] Neutral - Balance object - Created: {created}, Initial Balance: {balance_obj.balance}')
+            # For neutral forms (like OD), track usage and enforce max_uses limit
+            from .models import StaffFormUsage
+            from datetime import date
+            from calendar import monthrange
             
-            # Simply add days
-            old_balance = balance_obj.balance
-            balance_obj.balance += days
-            balance_obj.save()
-            logger.info(f'[LeaveBalance] Neutral action - added {days} days: {old_balance} -> {balance_obj.balance}')
+            max_uses = leave_policy.get('max_uses')
+            overdraft_name = leave_policy.get('overdraft_name', 'LOP')
+            
+            # Determine reset period
+            usage_reset = leave_policy.get('usage_reset_duration', 'monthly')
+            usage_from_date = leave_policy.get('usage_from_date')
+            usage_to_date = leave_policy.get('usage_to_date')
+            
+            if usage_from_date and usage_to_date:
+                # Custom date range
+                period_start = datetime.strptime(usage_from_date, '%Y-%m-%d').date()
+                period_end = datetime.strptime(usage_to_date, '%Y-%m-%d').date()
+            else:
+                # Calculate based on monthly/yearly
+                today = date.today()
+                if usage_reset == 'yearly':
+                    period_start = date(today.year, 1, 1)
+                    period_end = date(today.year, 12, 31)
+                else:  # monthly
+                    period_start = date(today.year, today.month, 1)
+                    # Get last day of current month
+                    last_day = monthrange(today.year, today.month)[1]
+                    period_end = date(today.year, today.month, last_day)
+            
+            # Get or create usage record for this period
+            usage_record, created = StaffFormUsage.objects.get_or_create(
+                staff=staff_request.applicant,
+                template=template,
+                reset_period_start=period_start,
+                defaults={
+                    'reset_period_end': period_end,
+                    'usage_count': 0
+                }
+            )
+            
+            logger.info(f'[FormUsage] Usage record - Created: {created}, Count: {usage_record.usage_count}, Max: {max_uses}')
+            
+            # Check if over limit
+            if max_uses is not None and not usage_record.is_within_limit(max_uses):
+                # Over limit - increment LOP instead of recording as neutral
+                lop_balance, _ = StaffLeaveBalance.objects.get_or_create(
+                    staff=staff_request.applicant,
+                    leave_type=overdraft_name,
+                    defaults={'balance': 0.0}
+                )
+                old_lop = lop_balance.balance
+                lop_balance.balance += days
+                lop_balance.save()
+                logger.info(f'[FormUsage] Over limit - incrementing {overdraft_name}: {old_lop} -> {lop_balance.balance}')
+            else:
+                # Within limit - record as neutral usage
+                balance_obj, created = StaffLeaveBalance.objects.get_or_create(
+                    staff=staff_request.applicant,
+                    leave_type=leave_type,
+                    defaults={'balance': 0.0}
+                )
+                logger.info(f'[LeaveBalance] Neutral - Balance object - Created: {created}, Initial Balance: {balance_obj.balance}')
+                
+                old_balance = balance_obj.balance
+                balance_obj.balance += days
+                balance_obj.save()
+                logger.info(f'[LeaveBalance] Neutral action - added {days} days: {old_balance} -> {balance_obj.balance}')
+            
+            # Increment usage count
+            usage_record.increment_usage()
+            logger.info(f'[FormUsage] Incremented usage count to {usage_record.usage_count}')
         
         logger.info(f'[LeaveBalance] Processing complete for request #{staff_request.id}')
         
@@ -766,6 +862,58 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
         
         # Default to 1 day if no valid date info found
         return 1.0
+    
+    def _extract_dates_from_form_data(self, form_data):
+        """
+        Extract all date values from form_data as a list of date objects.
+        Returns a list of date objects for checking against attendance records.
+        """
+        from datetime import datetime, timedelta
+        
+        dates = []
+        start_date = None
+        end_date = None
+        
+        # Try different field name patterns for date ranges
+        for start_key in ['start_date', 'from_date', 'startDate', 'fromDate', 'from']:
+            if start_key in form_data:
+                start_date = form_data[start_key]
+                break
+        
+        for end_key in ['end_date', 'to_date', 'endDate', 'toDate', 'to']:
+            if end_key in form_data:
+                end_date = form_data[end_key]
+                break
+
+        # Support single 'date' field
+        if not start_date and 'date' in form_data:
+            start_date = form_data['date']
+        if not end_date and 'date' in form_data:
+            end_date = form_data['date']
+        
+        # Parse and generate date range
+        if start_date and end_date:
+            try:
+                # Parse dates
+                if isinstance(start_date, str):
+                    start = datetime.fromisoformat(start_date.replace('Z', '+00:00')).date()
+                else:
+                    start = start_date
+                
+                if isinstance(end_date, str):
+                    end = datetime.fromisoformat(end_date.replace('Z', '+00:00')).date()
+                else:
+                    end = end_date
+                
+                # Generate all dates in range
+                current = start
+                while current <= end:
+                    dates.append(current)
+                    current += timedelta(days=1)
+            except Exception:
+                pass
+        
+        return dates
     
     def _get_date_list_from_form_data(self, form_data):
         """
