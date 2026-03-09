@@ -5748,7 +5748,21 @@ def mark_table_lock_status(request, assessment: str, subject_id: str):
         return err
 
     assessment_key = str(assessment or '').strip().lower()
-    if assessment_key not in {'ssa1', 'review1', 'ssa2', 'review2', 'cia1', 'cia2', 'formative1', 'formative2', 'model'}:
+    if assessment_key not in {
+        'ssa1',
+        'review1',
+        'ssa2',
+        'review2',
+        'cia1',
+        'cia2',
+        'formative1',
+        'formative2',
+        'model',
+        # Document-level assessments that still use the same publish/lock gate
+        'cdap',
+        'lca',
+        'articulation',
+    }:
         return Response({'detail': 'Invalid assessment.'}, status=status.HTTP_400_BAD_REQUEST)
 
     subject_code = str(subject_id or '').strip()
@@ -6200,7 +6214,21 @@ def due_schedule_upsert(request):
     if open_from is not None and due_at is not None and open_from >= due_at:
         return Response({'detail': 'open_from must be before due_at.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if assessment not in {'ssa1', 'review1', 'ssa2', 'review2', 'cia1', 'cia2', 'formative1', 'formative2', 'model'}:
+    if assessment not in {
+        'ssa1',
+        'review1',
+        'ssa2',
+        'review2',
+        'cia1',
+        'cia2',
+        'formative1',
+        'formative2',
+        'model',
+        # Document-level assessments that still use the same publish/lock gate
+        'cdap',
+        'lca',
+        'articulation',
+    }:
         return Response({'detail': 'Invalid assessment.'}, status=status.HTTP_400_BAD_REQUEST)
 
     from academics.models import Semester, Subject
