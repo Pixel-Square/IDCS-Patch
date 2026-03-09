@@ -51,13 +51,11 @@ export default function AssignedSubjectsPage() {
   const [editCustomNumbers, setEditCustomNumbers] = useState('')
   const [editRangeStart, setEditRangeStart] = useState('')
   const [editRangeEnd, setEditRangeEnd] = useState('')
-<<<<<<< HEAD
   const [staffList, setStaffList] = useState<StaffMember[]>([])
   const [staffLoading, setStaffLoading] = useState(false)
   const [viewBatchOpen, setViewBatchOpen] = useState(false)
   const [viewBatch, setViewBatch] = useState<any | null>(null)
   const [currentUserStaffId, setCurrentUserStaffId] = useState<number | null>(null)
-=======
   const [searchQuery, setSearchQuery] = useState('')
   const [editSearchQuery, setEditSearchQuery] = useState('')
 
@@ -74,8 +72,7 @@ export default function AssignedSubjectsPage() {
       })
     }
   }, [pickerOpen])
->>>>>>> 44730abc0c9f9fbdc9f85a049d9ee0da68f9519d
-
+ 
   useEffect(() => { load(); loadStaff(); loadCurrentUser() }, [])
 
   async function load() {
@@ -413,12 +410,8 @@ export default function AssignedSubjectsPage() {
     setEditingBatchName(b.name || '')
     setEditingBatch(b)
     setEditingSelectedStudentIds((b.students || []).map((s:any) => s.id))
-<<<<<<< HEAD
     setEditingStaffId(b.staff?.id || null)
     setEditSelectionFilter('all')
-=======
-    // Don't reset filter - keep pre-selected students
->>>>>>> 44730abc0c9f9fbdc9f85a049d9ee0da68f9519d
     setEditCustomNumbers('')
     setEditRangeStart('')
     setEditRangeEnd('')
@@ -718,12 +711,6 @@ export default function AssignedSubjectsPage() {
         </div>
       )}
 
-<<<<<<< HEAD
-
-      {/* Subject Batches - separated into Created and Assigned */}
-=======
-      {/* Subject Batches - existing only; creation via subject actions */}
->>>>>>> 44730abc0c9f9fbdc9f85a049d9ee0da68f9519d
       <div className="mt-6">
         <div className="bg-white rounded-xl shadow-lg p-6">
           <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
@@ -1035,7 +1022,6 @@ export default function AssignedSubjectsPage() {
               </div>
             </div>
             
-<<<<<<< HEAD
             <div className="p-6">
               {/* Staff Assignment */}
               <div className="mb-6">
@@ -1059,9 +1045,6 @@ export default function AssignedSubjectsPage() {
                 </p>
               </div>
               
-=======
-            <div className="p-6 overflow-y-auto flex-1">
->>>>>>> 44730abc0c9f9fbdc9f85a049d9ee0da68f9519d
               <div className="mb-4">
                 <h4 className="font-semibold text-gray-900 mb-2">Students ({pickerStudents.length})</h4>
                 <p className="text-sm text-gray-600 mb-4">Select students to include in this batch - all {pickerStudents.length} students shown</p>
@@ -1320,7 +1303,6 @@ export default function AssignedSubjectsPage() {
                   placeholder="Enter batch name"
                 />
               </div>
-<<<<<<< HEAD
 
               {/* Staff Assignment */}
               <div className="mb-6">
@@ -1341,11 +1323,6 @@ export default function AssignedSubjectsPage() {
                 </select>
               </div>
 
-=======
-            </div>
-            
-            <div className="p-6 overflow-y-auto flex-1">
->>>>>>> 44730abc0c9f9fbdc9f85a049d9ee0da68f9519d
               {/* Student Selection */}
               <div className="mb-4">
                 <h4 className="font-semibold text-gray-900 mb-2">Students ({editingBatchStudents.length})</h4>
