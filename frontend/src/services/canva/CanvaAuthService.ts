@@ -17,7 +17,7 @@
  *      loadConnectionFromBackend() to pull the tokens into localStorage.
  *
  * Redirect URI to register in the Canva Developer Portal:
- *   Dev  : http://localhost:5173/api/canva/oauth/callback  (via Vite proxy)
+ *   Dev  : http://localhost:5174/api/canva/oauth/callback  (via Vite proxy)
  *   Prod : https://idcs.krgi.co.in/api/canva/oauth/callback  (via Nginx)
  */
 
@@ -30,21 +30,26 @@ import {
 
 // ── Server-side OAuth (primary flow) ─────────────────────────────────────────
 
-function getCanvaApiBase(): string {
+/**
+ * Direct backend URL — used ONLY for full-page navigations (initiateOAuth),
+ * where CORS doesn't apply.  Never use for fetch() calls.
+ */
+function getDirectApiBase(): string {
   const { protocol, hostname, port } = window.location;
   const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
-
-  // In local development, bypass the Vite proxy and talk to Django directly.
-  // This keeps Canva OAuth working even if the frontend is served on :5173/:5174.
   if (isLocalHost && port && port !== '8000') {
     return `${protocol}//127.0.0.1:8000`;
   }
-
   return '';
 }
 
-function apiUrl(path: string): string {
-  return `${getCanvaApiBase()}${path}`;
+/**
+ * For fetch() calls always use a relative URL (empty base) so requests go
+ * through the Vite dev proxy (same-origin → no CORS, session cookie included).
+ * In production there is no proxy and relative URLs hit the same host.
+ */
+function fetchUrl(path: string): string {
+  return path;
 }
 
 /**
@@ -54,7 +59,9 @@ function apiUrl(path: string): string {
  */
 export function initiateOAuth(): void {
   const origin = encodeURIComponent(window.location.origin);
-  window.location.href = apiUrl(`/api/canva/oauth/authorize?origin=${origin}`);
+  // Use the direct backend URL here — this is a full-page navigation (not a
+  // fetch), so CORS rules do not apply and the proxy is not needed.
+  window.location.href = `${getDirectApiBase()}/api/canva/oauth/authorize?origin=${origin}`;
 }
 
 /**
@@ -66,7 +73,7 @@ export function initiateOAuth(): void {
  */
 export async function loadConnectionFromBackend(): Promise<CanvaConnection | null> {
   try {
-    const res = await fetch(apiUrl('/api/canva/oauth/connection'), { credentials: 'include' });
+    const res = await fetch(fetchUrl('/api/canva/oauth/connection'), { credentials: 'include' });
     if (!res.ok) return null;
     const data = await res.json() as {
       connected: boolean;
@@ -100,7 +107,7 @@ export async function loadConnectionFromBackend(): Promise<CanvaConnection | nul
  */
 export async function disconnect(): Promise<void> {
   try {
-    await fetch(apiUrl('/api/canva/oauth/connection'), {
+    await fetch(fetchUrl('/api/canva/oauth/connection'), {
       method:      'DELETE',
       credentials: 'include',
     });

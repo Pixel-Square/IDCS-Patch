@@ -42,8 +42,15 @@ type LabRowState = {
   marksA: Array<number | ''>;
   marksB: Array<number | ''>;
   marksByCo?: Record<string, Array<number | ''>>;
+  reviewComponentMarks?: Record<string, number | ''>;
   ciaExam?: number | '';
   caaExamByCo?: Record<string, number | ''>;
+};
+
+type ReviewComponent = {
+  id: string;
+  title: string;
+  max: number;
 };
 
 type CoConfig = {
@@ -66,6 +73,7 @@ type LabSheet = {
   btlsA: Array<1 | 2 | 3 | 4 | 5 | 6>;
   btlsB: Array<1 | 2 | 3 | 4 | 5 | 6>;
   coConfigs?: Record<string, CoConfig>;
+  reviewComponents?: ReviewComponent[];
   rowsByStudentId: Record<string, LabRowState>;
 
   // Mark Manager lock state
@@ -97,11 +105,13 @@ type Props = {
   cia1Embed?: React.ReactNode;
   tcprMode?: boolean;
   useSsaPublishedLockUi?: boolean;
+  projectReviewMode?: boolean;
 };
 
 const DEFAULT_EXPERIMENTS = 5;
 const DEFAULT_EXPERIMENT_MAX = 25;
 const DEFAULT_CIA_EXAM_MAX = 30;
+const REVIEW_TOTAL_MAX = 50;
 const LAB_REVIEW_EXPERIMENT_WEIGHT: Record<number, number> = { 1: 9, 2: 9, 3: 4.5, 4: 9, 5: 9 };
 const LAB_REVIEW_CAA_WEIGHT: Record<number, number> = { 1: 3, 2: 3, 3: 1.5, 4: 3, 5: 3 };
 const LAB_REVIEW_CAA_RAW_MAX: Record<number, number> = { 1: 20, 2: 20, 3: 10, 4: 20, 5: 20 };
@@ -244,6 +254,38 @@ function normalizeCaaByCo(raw: unknown): Record<string, number | ''> {
   return out;
 }
 
+function makeReviewComponentId() {
+  return `rc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeReviewComponents(raw: unknown): ReviewComponent[] {
+  const src = Array.isArray(raw) ? raw : [];
+  const out: ReviewComponent[] = [];
+  for (let i = 0; i < src.length; i++) {
+    const item: any = src[i] && typeof src[i] === 'object' ? src[i] : {};
+    const id = String(item.id || '').trim() || makeReviewComponentId();
+    const titleRaw = String(item.title || '').trim();
+    const max = clampInt(Number(item.max ?? 0), 0, REVIEW_TOTAL_MAX);
+    out.push({ id, title: titleRaw || `Title ${i + 1}`, max });
+  }
+  if (!out.length) {
+    out.push({ id: makeReviewComponentId(), title: 'Title 1', max: REVIEW_TOTAL_MAX });
+  }
+  return out;
+}
+
+function constrainReviewComponentsTotal(components: ReviewComponent[]): ReviewComponent[] {
+  const out: ReviewComponent[] = [];
+  let used = 0;
+  for (const component of components) {
+    const remaining = Math.max(0, REVIEW_TOTAL_MAX - used);
+    const nextMax = clampInt(Number(component.max), 0, remaining);
+    out.push({ ...component, max: nextMax });
+    used += nextMax;
+  }
+  return out;
+}
+
 function pct(mark: number | null, max: number): string {
   if (mark == null) return '';
   if (!Number.isFinite(max) || max <= 0) return '0';
@@ -315,8 +357,10 @@ export default function LabEntry({
   showCia1Embed,
   cia1Embed,
   useSsaPublishedLockUi,
+  projectReviewMode,
 }: Props) {
   const reviewFixedTable = assessmentKey === 'review1' || assessmentKey === 'review2';
+  const isProjectReviewMode = Boolean(projectReviewMode && reviewFixedTable);
 
   // `selectableCosArr` controls what we render in Mark Manager.
   // For Review 1/Review 2, we want CO1..CO5 checkboxes visible.
@@ -324,7 +368,7 @@ export default function LabEntry({
 
   // `tableCosArr` controls what the table is allowed to render.
   // Per requirement: Review pages should NOT change the table layout.
-  const tableCosArr = useMemo(() => (reviewFixedTable ? [coA, coB] : selectableCosArr), [reviewFixedTable, selectableCosArr, coA, coB]);
+  const tableCosArr = useMemo(() => (reviewFixedTable && !isProjectReviewMode ? [coA, coB] : selectableCosArr), [reviewFixedTable, isProjectReviewMode, selectableCosArr, coA, coB]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -352,6 +396,9 @@ export default function LabEntry({
   const [requesting, setRequesting] = useState(false);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [markManagerError, setMarkManagerError] = useState<string | null>(null);
+  const [projectReviewValidationError, setProjectReviewValidationError] = useState<string | null>(null);
+  const [reviewComponentTitleInputs, setReviewComponentTitleInputs] = useState<Record<string, string>>({});
+  const [reviewComponentMaxInputs, setReviewComponentMaxInputs] = useState<Record<string, string>>({});
   const [markManagerAnimating, setMarkManagerAnimating] = useState(false);
   const [rosterRefreshTick, setRosterRefreshTick] = useState(0);
   const [showAbsenteesOnly, setShowAbsenteesOnly] = useState(false);
@@ -369,6 +416,7 @@ export default function LabEntry({
       expCountB: DEFAULT_EXPERIMENTS,
       btlsA: Array.from({ length: DEFAULT_EXPERIMENTS }, () => 1),
       btlsB: Array.from({ length: DEFAULT_EXPERIMENTS }, () => 1),
+      reviewComponents: constrainReviewComponentsTotal(normalizeReviewComponents(null)),
       rowsByStudentId: {},
           expMaxA: DEFAULT_EXPERIMENT_MAX,
           expMaxB: DEFAULT_EXPERIMENT_MAX,
@@ -491,6 +539,7 @@ export default function LabEntry({
           const expCountB = clampInt(Number((d.sheet as any).expCountB ?? DEFAULT_EXPERIMENTS), 0, 12);
           const btlsA = normalizeBtlArray((d.sheet as any).btlsA, expCountA);
           const btlsB = normalizeBtlArray((d.sheet as any).btlsB, expCountB);
+          const reviewComponents = constrainReviewComponentsTotal(normalizeReviewComponents((d.sheet as any).reviewComponents));
           const normalizedRows: Record<string, LabRowState> = {};
           const rawRows = (d.sheet as any).rowsByStudentId && typeof (d.sheet as any).rowsByStudentId === 'object' ? (d.sheet as any).rowsByStudentId : {};
           for (const [sid, row0] of Object.entries(rawRows)) {
@@ -500,11 +549,25 @@ export default function LabEntry({
             const rawCia = row.ciaExam;
             const ciaParsed = rawCia === '' || rawCia == null ? '' : Number(rawCia);
             const ciaExam = ciaParsed === '' ? '' : Number.isFinite(ciaParsed) ? ciaParsed : '';
+            const rawComponentMarks = row.reviewComponentMarks && typeof row.reviewComponentMarks === 'object' ? row.reviewComponentMarks : {};
+            const reviewComponentMarks: Record<string, number | ''> = {};
+            for (const component of reviewComponents) {
+              const rawComponentMark = (rawComponentMarks as any)[component.id];
+              if (rawComponentMark === '' || rawComponentMark == null) {
+                reviewComponentMarks[component.id] = '';
+              } else {
+                const parsedComponentMark = Number(rawComponentMark);
+                reviewComponentMarks[component.id] = Number.isFinite(parsedComponentMark)
+                  ? clampInt(parsedComponentMark, 0, component.max)
+                  : '';
+              }
+            }
             normalizedRows[String(sid)] = {
               ...row,
               studentId: Number.isFinite(Number(row.studentId)) ? Number(row.studentId) : Number(sid),
               marksA,
               marksB,
+              reviewComponentMarks,
               ciaExam,
               caaExamByCo: normalizeCaaByCo(row.caaExamByCo),
             };
@@ -526,6 +589,7 @@ export default function LabEntry({
               expCountB,
               btlsA,
               btlsB,
+              reviewComponents,
               rowsByStudentId: normalizedRows,
               markManagerLocked: loadedLocked,
               markManagerSnapshot: loadedSnapshot,
@@ -581,7 +645,7 @@ export default function LabEntry({
           const rowsByStudentId = stored?.rowsByStudentId && typeof stored.rowsByStudentId === 'object' ? stored.rowsByStudentId : {};
           setDraft((p) => ({
             ...p,
-            sheet: { ...p.sheet, batchLabel: String(subjectId), rowsByStudentId },
+            sheet: { ...p.sheet, batchLabel: String(subjectId), reviewComponents: constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents)), rowsByStudentId },
           }));
         }
       } catch {
@@ -633,16 +697,20 @@ export default function LabEntry({
       const expCountB = clampInt(Number(p.sheet.expCountB ?? DEFAULT_EXPERIMENTS), 0, 12);
       const btlsA = normalizeBtlArray((p.sheet as any).btlsA, expCountA);
       const btlsB = normalizeBtlArray((p.sheet as any).btlsB, expCountB);
+      const reviewComponents = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents));
       const rowsByStudentId: Record<string, LabRowState> = { ...(p.sheet.rowsByStudentId || {}) };
 
       for (const s of students) {
         const k = String(s.id);
         const existing = rowsByStudentId[k];
         if (!existing) {
+          const reviewComponentMarks: Record<string, number | ''> = {};
+          for (const component of reviewComponents) reviewComponentMarks[component.id] = '';
           rowsByStudentId[k] = {
             studentId: s.id,
             marksA: Array.from({ length: expCountA }, () => ''),
             marksB: Array.from({ length: expCountB }, () => ''),
+            reviewComponentMarks,
             caaExamByCo: {},
             ciaExam: '',
           };
@@ -652,8 +720,23 @@ export default function LabEntry({
           const rawCia = (existing as any).ciaExam;
           const ciaParsed = rawCia === '' || rawCia == null ? '' : Number(rawCia);
           const ciaExam = ciaParsed === '' ? '' : Number.isFinite(ciaParsed) ? ciaParsed : '';
+          const rawComponentMarks = (existing as any).reviewComponentMarks && typeof (existing as any).reviewComponentMarks === 'object'
+            ? (existing as any).reviewComponentMarks
+            : {};
+          const reviewComponentMarks: Record<string, number | ''> = {};
+          for (const component of reviewComponents) {
+            const rawComponentMark = rawComponentMarks[component.id];
+            if (rawComponentMark === '' || rawComponentMark == null) {
+              reviewComponentMarks[component.id] = '';
+            } else {
+              const parsedComponentMark = Number(rawComponentMark);
+              reviewComponentMarks[component.id] = Number.isFinite(parsedComponentMark)
+                ? clampInt(parsedComponentMark, 0, component.max)
+                : '';
+            }
+          }
           const caaExamByCo = normalizeCaaByCo((existing as any).caaExamByCo);
-          rowsByStudentId[k] = { ...existing, marksA, marksB, ciaExam, caaExamByCo };
+          rowsByStudentId[k] = { ...existing, marksA, marksB, reviewComponentMarks, ciaExam, caaExamByCo };
         }
       }
 
@@ -666,11 +749,21 @@ export default function LabEntry({
           expCountB,
           btlsA,
           btlsB,
+          reviewComponents,
           rowsByStudentId,
         },
       };
     });
   }, [students, subjectId]);
+
+  useEffect(() => {
+    if (!isProjectReviewMode) return;
+    const nextComponents = constrainReviewComponentsTotal(normalizeReviewComponents((draft.sheet as any).reviewComponents));
+    const current = JSON.stringify((draft.sheet as any).reviewComponents || []);
+    const next = JSON.stringify(nextComponents);
+    if (current === next) return;
+    setDraft((p) => ({ ...p, sheet: { ...p.sheet, reviewComponents: nextComponents } }));
+  }, [isProjectReviewMode, draft.sheet.reviewComponents]);
 
   // Persist local mirror for counts/dashboard
   useEffect(() => {
@@ -807,7 +900,230 @@ export default function LabEntry({
   const tableVisible = markManagerLocked; // Only show table after Mark Manager is confirmed
   const tableBlocked = Boolean(globalLocked || !entryOpen || (markLock?.exists ? !markLock?.entry_open : false));
 
+  const reviewComponents = useMemo(
+    () => constrainReviewComponentsTotal(normalizeReviewComponents((draft.sheet as any).reviewComponents)),
+    [draft.sheet.reviewComponents],
+  );
+  const reviewSplitTotal = useMemo(
+    () => reviewComponents.reduce((sum, component) => sum + clampInt(Number(component.max), 0, REVIEW_TOTAL_MAX), 0),
+    [reviewComponents],
+  );
+  const reviewSplitRemaining = Math.max(0, REVIEW_TOTAL_MAX - reviewSplitTotal);
+  const hasEmptyProjectReviewTitle = isProjectReviewMode && reviewComponents.some((component) => {
+    const titleValue = Object.prototype.hasOwnProperty.call(reviewComponentTitleInputs, component.id)
+      ? reviewComponentTitleInputs[component.id]
+      : component.title;
+    return !String(titleValue || '').trim();
+  });
+
+  useEffect(() => {
+    if (!isProjectReviewMode) return;
+    setReviewComponentTitleInputs((prev) => {
+      const next: Record<string, string> = {};
+      for (const component of reviewComponents) {
+        next[component.id] = Object.prototype.hasOwnProperty.call(prev, component.id) ? prev[component.id] : component.title;
+      }
+      const same = reviewComponents.length === Object.keys(prev).length && reviewComponents.every((component) => prev[component.id] === next[component.id]);
+      return same ? prev : next;
+    });
+    setReviewComponentMaxInputs((prev) => {
+      const next: Record<string, string> = {};
+      for (const component of reviewComponents) {
+        next[component.id] = Object.prototype.hasOwnProperty.call(prev, component.id) ? prev[component.id] : String(component.max);
+      }
+      const same = reviewComponents.length === Object.keys(prev).length && reviewComponents.every((component) => prev[component.id] === next[component.id]);
+      return same ? prev : next;
+    });
+  }, [isProjectReviewMode, reviewComponents]);
+
+  useEffect(() => {
+    if (!isProjectReviewMode) return;
+    if (!hasEmptyProjectReviewTitle && projectReviewValidationError) {
+      setProjectReviewValidationError(null);
+    }
+  }, [isProjectReviewMode, hasEmptyProjectReviewTitle, projectReviewValidationError]);
+
+  function setReviewComponentTitle(componentId: string, title: string) {
+    setDraft((p) => {
+      if (p.sheet.markManagerLocked) return p;
+      const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents)).map((component) =>
+        component.id === componentId ? { ...component, title: String(title || '').slice(0, 60) } : component,
+      );
+      return { ...p, sheet: { ...p.sheet, reviewComponents: components } };
+    });
+  }
+
+  function handleReviewComponentTitleInput(componentId: string, title: string) {
+    setReviewComponentTitleInputs((prev) => ({ ...prev, [componentId]: title.slice(0, 60) }));
+    if (projectReviewValidationError) setProjectReviewValidationError(null);
+  }
+
+  function commitReviewComponentTitle(componentId: string, fallbackTitle: string) {
+    const nextTitle = String(reviewComponentTitleInputs[componentId] ?? fallbackTitle ?? '').trim();
+    if (!nextTitle) {
+      setProjectReviewValidationError('Title cannot be empty.');
+      return;
+    }
+    setProjectReviewValidationError(null);
+    setReviewComponentTitleInputs((prev) => ({ ...prev, [componentId]: nextTitle }));
+    setReviewComponentTitle(componentId, nextTitle);
+  }
+
+  function setReviewComponentMax(componentId: string, nextRaw: number) {
+    setDraft((p) => {
+      if (p.sheet.markManagerLocked) return p;
+      const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents));
+      const target = components.find((component) => component.id === componentId);
+      if (!target) return p;
+      const othersTotal = components.reduce((sum, component) => sum + (component.id === componentId ? 0 : clampInt(Number(component.max), 0, REVIEW_TOTAL_MAX)), 0);
+      const allowed = Math.max(0, REVIEW_TOTAL_MAX - othersTotal);
+      const nextMax = clampInt(Number(nextRaw), 0, allowed);
+      const nextComponents = components.map((component) => (component.id === componentId ? { ...component, max: nextMax } : component));
+
+      const nextRowsByStudentId: Record<string, LabRowState> = { ...(p.sheet.rowsByStudentId || {}) };
+      for (const sid of Object.keys(nextRowsByStudentId)) {
+        const row = nextRowsByStudentId[sid];
+        const rowMarks = row?.reviewComponentMarks && typeof row.reviewComponentMarks === 'object' ? { ...row.reviewComponentMarks } : {};
+        const rawValue = rowMarks[componentId];
+        if (rawValue !== '' && rawValue != null) {
+          const parsed = Number(rawValue);
+          rowMarks[componentId] = Number.isFinite(parsed) ? clampInt(parsed, 0, nextMax) : '';
+        }
+        nextRowsByStudentId[sid] = { ...row, reviewComponentMarks: rowMarks };
+      }
+
+      return { ...p, sheet: { ...p.sheet, reviewComponents: nextComponents, rowsByStudentId: nextRowsByStudentId } };
+    });
+  }
+
+  function handleReviewComponentMaxInput(componentId: string, rawValue: string) {
+    setReviewComponentMaxInputs((prev) => ({ ...prev, [componentId]: rawValue }));
+    if (rawValue === '') return;
+    const nextValue = Number(rawValue);
+    if (!Number.isFinite(nextValue)) return;
+    setReviewComponentMax(componentId, nextValue);
+  }
+
+  function commitReviewComponentMax(componentId: string, fallbackMax: number) {
+    const rawValue = reviewComponentMaxInputs[componentId];
+    if (rawValue == null || rawValue === '') {
+      setReviewComponentMaxInputs((prev) => ({ ...prev, [componentId]: '' }));
+      return;
+    }
+    const nextValue = Number(rawValue);
+    if (!Number.isFinite(nextValue)) {
+      setReviewComponentMaxInputs((prev) => ({ ...prev, [componentId]: String(fallbackMax) }));
+      return;
+    }
+    const othersTotal = reviewComponents.reduce(
+      (sum, component) => sum + (component.id === componentId ? 0 : clampInt(Number(component.max), 0, REVIEW_TOTAL_MAX)),
+      0,
+    );
+    const allowed = Math.max(0, REVIEW_TOTAL_MAX - othersTotal);
+    const normalizedValue = clampInt(nextValue, 0, allowed);
+    setReviewComponentMaxInputs((prev) => ({ ...prev, [componentId]: String(normalizedValue) }));
+    setReviewComponentMax(componentId, normalizedValue);
+  }
+
+  function addReviewComponent() {
+    setDraft((p) => {
+      if (p.sheet.markManagerLocked) return p;
+      const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents));
+      const used = components.reduce((sum, component) => sum + clampInt(Number(component.max), 0, REVIEW_TOTAL_MAX), 0);
+      const remaining = Math.max(0, REVIEW_TOTAL_MAX - used);
+      if (remaining <= 0) return p;
+      const id = makeReviewComponentId();
+      const nextComponents = [...components, { id, title: `Title ${components.length + 1}`, max: remaining }];
+      const nextRowsByStudentId: Record<string, LabRowState> = { ...(p.sheet.rowsByStudentId || {}) };
+      for (const sid of Object.keys(nextRowsByStudentId)) {
+        const row = nextRowsByStudentId[sid];
+        const marks = row?.reviewComponentMarks && typeof row.reviewComponentMarks === 'object' ? { ...row.reviewComponentMarks } : {};
+        marks[id] = '';
+        nextRowsByStudentId[sid] = { ...row, reviewComponentMarks: marks };
+      }
+      return { ...p, sheet: { ...p.sheet, reviewComponents: nextComponents, rowsByStudentId: nextRowsByStudentId } };
+    });
+  }
+
+  function removeReviewComponent(componentId: string) {
+    setDraft((p) => {
+      if (p.sheet.markManagerLocked) return p;
+      const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents));
+      if (components.length <= 1) return p;
+      const nextComponents = components.filter((component) => component.id !== componentId);
+      const nextRowsByStudentId: Record<string, LabRowState> = { ...(p.sheet.rowsByStudentId || {}) };
+      for (const sid of Object.keys(nextRowsByStudentId)) {
+        const row = nextRowsByStudentId[sid];
+        const marks = row?.reviewComponentMarks && typeof row.reviewComponentMarks === 'object' ? { ...row.reviewComponentMarks } : {};
+        delete marks[componentId];
+        nextRowsByStudentId[sid] = { ...row, reviewComponentMarks: marks };
+      }
+      return { ...p, sheet: { ...p.sheet, reviewComponents: nextComponents, rowsByStudentId: nextRowsByStudentId } };
+    });
+  }
+
+  function setProjectReviewMark(studentId: number, componentId: string, value: number | '') {
+    setDraft((p) => {
+      const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents));
+      const component = components.find((item) => item.id === componentId);
+      if (!component) return p;
+      const sid = String(studentId);
+      const existing = p.sheet.rowsByStudentId?.[sid] || ({ studentId, marksA: [], marksB: [], ciaExam: '' } as LabRowState);
+      const marks = existing.reviewComponentMarks && typeof existing.reviewComponentMarks === 'object' ? { ...existing.reviewComponentMarks } : {};
+      if (value === '' || value == null) {
+        marks[componentId] = '';
+      } else {
+        const n = Number(value);
+        marks[componentId] = Number.isFinite(n) ? clampInt(n, 0, component.max) : '';
+      }
+      const total = components.reduce((sum, item) => {
+        const v = marks[item.id];
+        if (typeof v !== 'number' || !Number.isFinite(v)) return sum;
+        return sum + clampInt(v, 0, item.max);
+      }, 0);
+      return {
+        ...p,
+        sheet: {
+          ...p.sheet,
+          rowsByStudentId: {
+            ...p.sheet.rowsByStudentId,
+            [sid]: { ...existing, reviewComponentMarks: marks, ciaExam: clampInt(total, 0, REVIEW_TOTAL_MAX) },
+          },
+        },
+      };
+    });
+  }
+
+  function getProjectReviewRowTotal(row: LabRowState | undefined): number {
+    if (!row) return 0;
+    const marks = row.reviewComponentMarks && typeof row.reviewComponentMarks === 'object' ? row.reviewComponentMarks : {};
+    return reviewComponents.reduce((sum, component) => {
+      const raw = marks[component.id];
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) return sum;
+      return sum + clampInt(raw, 0, component.max);
+    }, 0);
+  }
+
   const buildExportRows = () => {
+    if (isProjectReviewMode) {
+      return students.map((s, idx) => {
+        const row = draft.sheet.rowsByStudentId?.[String(s.id)];
+        const marks = row?.reviewComponentMarks && typeof row.reviewComponentMarks === 'object' ? row.reviewComponentMarks : {};
+        const out: Record<string, string | number> = {
+          'S.No': idx + 1,
+          'Register No': String(s.reg_no || ''),
+          Name: String(s.name || ''),
+          Absent: Boolean((row as any)?.absent) ? String((row as any)?.absentKind || 'AL') : '',
+        };
+        for (const component of reviewComponents) {
+          const raw = marks[component.id];
+          out[`${component.title} (${component.max})`] = typeof raw === 'number' && Number.isFinite(raw) ? raw : '';
+        }
+        out.Total = getProjectReviewRowTotal(row as LabRowState | undefined);
+        return out;
+      });
+    }
+
     return students.map((s, idx) => {
       const row = draft.sheet.rowsByStudentId?.[String(s.id)];
       const perCo: Array<{ coNumber: number; marks: Array<number | ''>; expCount: number }> = enabledCoMetas.map((m) => ({
@@ -999,6 +1315,15 @@ export default function LabEntry({
     if (!subjectId) return;
     const rows = students.map((s, idx) => {
       const row = draft.sheet.rowsByStudentId?.[String(s.id)];
+      if (isProjectReviewMode) {
+        return {
+          sno: idx + 1,
+          regNo: String(s.reg_no || ''),
+          name: String(s.name || ''),
+          total: getProjectReviewRowTotal(row as LabRowState | undefined),
+        };
+      }
+
       const perCo = enabledCoMetas.map((m) => ({
         marks: getRowMarksForCo(row as any, m.coNumber, m.expCount, coA, coB),
         expCount: m.expCount,
@@ -1093,6 +1418,15 @@ export default function LabEntry({
   }
 
   function markManagerSnapshotOf(sheet: LabSheet): string {
+    if (isProjectReviewMode) {
+      const components = constrainReviewComponentsTotal(normalizeReviewComponents((sheet as any).reviewComponents)).map((component) => ({
+        id: component.id,
+        title: String(component.title || '').trim() || 'Title',
+        max: clampInt(Number(component.max), 0, REVIEW_TOTAL_MAX),
+      }));
+      return JSON.stringify({ total: REVIEW_TOTAL_MAX, components });
+    }
+
     const cfgs = buildCoConfigs(sheet, selectableCosArr, coA, coB);
     const enabled = selectableCosArr
       .filter((n) => cfgs[String(n)]?.enabled)
@@ -1659,7 +1993,7 @@ export default function LabEntry({
           overflow: 'hidden',
         }}
       >
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>COs enabled</div>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>{isProjectReviewMode ? 'Mark Manager' : 'COs enabled'}</div>
         <div
           style={{
             ...coEnableStyle,
@@ -1706,7 +2040,13 @@ export default function LabEntry({
             </div>
 
             <button
-              onClick={() => setMarkManagerModal({ mode: markManagerLocked ? 'request' : 'confirm' })}
+              onClick={() => {
+                if (!markManagerLocked && isProjectReviewMode && hasEmptyProjectReviewTitle) {
+                  setProjectReviewValidationError('Title cannot be empty.');
+                  return;
+                }
+                setMarkManagerModal({ mode: markManagerLocked ? 'request' : 'confirm' });
+              }}
               className="obe-btn obe-btn-success"
               disabled={!subjectId || markManagerBusy}
               style={{ minWidth: 100 }}
@@ -1715,41 +2055,114 @@ export default function LabEntry({
             </button>
           </div>
 
-          <div style={{ width: '100%', display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-            {selectableCosArr.map((coNum) => {
-              const cfg = coConfigs[String(coNum)];
-              const disabled = markManagerLocked || (reviewFixedTable && coNum !== coA && coNum !== coB);
-              return (
-                <label key={coNum} style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 800, fontSize: 12, color: '#111827' }}>
-                  <input type="checkbox" checked={cfg?.enabled || false} disabled={disabled} onChange={(e) => setCoEnabled(coNum, e.target.checked)} style={bigCheckboxStyle} />
-                  CO-{coNum}
-                </label>
-              );
-            })}
-            <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 800, fontSize: 12, color: '#111827' }}>
-              <input type="checkbox" checked={ciaExamEnabled} disabled={markManagerLocked} onChange={(e) => setCiaExamEnabled(e.target.checked)} style={bigCheckboxStyle} />
-              CIA Exam
-            </label>
-          </div>
-
-          <div
-            style={{
-              width: '100%',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: 10,
-              marginTop: 8,
-            }}
-          >
-            {enabledCoMetas.map((m) => (
-              <div key={m.coNumber} style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: '#6b7280' }}>No. of experiments (CO-{m.coNumber})</div>
-                <input type="number" className="obe-input" value={m.expCount} onChange={(e) => setExpCount(m.coNumber, Number(e.target.value))} min={0} max={12} disabled={markManagerLocked} />
-                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6 }}>Max marks (per experiment)</div>
-                <input type="number" className="obe-input" value={m.expMax} onChange={(e) => setExpMax(m.coNumber, Number(e.target.value))} min={0} max={100} disabled={markManagerLocked} />
+          {isProjectReviewMode ? (
+            <>
+              <div style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                <div style={{ fontWeight: 800, color: '#111827' }}>Total Marks</div>
+                <input type="number" className="obe-input" value={REVIEW_TOTAL_MAX} disabled style={{ width: 90 }} />
+                <button
+                  type="button"
+                  className="obe-btn obe-btn-secondary"
+                  onClick={addReviewComponent}
+                  disabled={markManagerLocked || reviewSplitRemaining <= 0}
+                  title={reviewSplitRemaining <= 0 ? `Total split reached ${REVIEW_TOTAL_MAX}` : 'Add split component'}
+                  style={{ padding: '4px 10px', minWidth: 36 }}
+                >
+                  +
+                </button>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                  Used: <strong>{reviewSplitTotal}</strong> / {REVIEW_TOTAL_MAX}
+                </div>
               </div>
-            ))}
-          </div>
+
+              <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1.5fr 120px 40px', gap: 8, marginTop: 8 }}>
+                {reviewComponents.map((component, idx) => {
+                  const othersTotal = reviewComponents.reduce((sum, item) => sum + (item.id === component.id ? 0 : item.max), 0);
+                  const maxAllowed = Math.max(0, REVIEW_TOTAL_MAX - othersTotal);
+                  return (
+                    <React.Fragment key={component.id}>
+                      <input
+                        type="text"
+                        className="obe-input"
+                        value={reviewComponentTitleInputs[component.id] ?? component.title}
+                        onChange={(e) => handleReviewComponentTitleInput(component.id, e.target.value)}
+                        onBlur={() => commitReviewComponentTitle(component.id, component.title)}
+                        disabled={markManagerLocked}
+                        placeholder={`Title ${idx + 1}`}
+                      />
+                      <input
+                        type="number"
+                        className="obe-input"
+                        value={reviewComponentMaxInputs[component.id] ?? String(component.max)}
+                        onChange={(e) => handleReviewComponentMaxInput(component.id, e.target.value)}
+                        onBlur={() => commitReviewComponentMax(component.id, component.max)}
+                        min={0}
+                        max={maxAllowed}
+                        disabled={markManagerLocked}
+                      />
+                      <button
+                        type="button"
+                        className="obe-btn obe-btn-danger"
+                        onClick={() => removeReviewComponent(component.id)}
+                        disabled={markManagerLocked || reviewComponents.length <= 1}
+                        title={reviewComponents.length <= 1 ? 'At least one component is required' : 'Remove component'}
+                        style={{ padding: '4px 8px' }}
+                      >
+                        -
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+
+              <div style={{ width: '100%', fontSize: 12, color: reviewSplitTotal > REVIEW_TOTAL_MAX ? '#b91c1c' : '#6b7280', marginTop: 8 }}>
+                Split total cannot exceed {REVIEW_TOTAL_MAX}.
+              </div>
+              {projectReviewValidationError ? (
+                <div style={{ width: '100%', fontSize: 12, color: '#b91c1c', marginTop: 4 }}>
+                  {projectReviewValidationError}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div style={{ width: '100%', display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+                {selectableCosArr.map((coNum) => {
+                  const cfg = coConfigs[String(coNum)];
+                  const disabled = markManagerLocked || (reviewFixedTable && coNum !== coA && coNum !== coB);
+                  return (
+                    <label key={coNum} style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 800, fontSize: 12, color: '#111827' }}>
+                      <input type="checkbox" checked={cfg?.enabled || false} disabled={disabled} onChange={(e) => setCoEnabled(coNum, e.target.checked)} style={bigCheckboxStyle} />
+                      CO-{coNum}
+                    </label>
+                  );
+                })}
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 800, fontSize: 12, color: '#111827' }}>
+                  <input type="checkbox" checked={ciaExamEnabled} disabled={markManagerLocked} onChange={(e) => setCiaExamEnabled(e.target.checked)} style={bigCheckboxStyle} />
+                  CIA Exam
+                </label>
+              </div>
+
+              <div
+                style={{
+                  width: '100%',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: 10,
+                  marginTop: 8,
+                }}
+              >
+                {enabledCoMetas.map((m) => (
+                  <div key={m.coNumber} style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: '#6b7280' }}>No. of experiments (CO-{m.coNumber})</div>
+                    <input type="number" className="obe-input" value={m.expCount} onChange={(e) => setExpCount(m.coNumber, Number(e.target.value))} min={0} max={12} disabled={markManagerLocked} />
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6 }}>Max marks (per experiment)</div>
+                    <input type="number" className="obe-input" value={m.expMax} onChange={(e) => setExpMax(m.coNumber, Number(e.target.value))} min={0} max={100} disabled={markManagerLocked} />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {markManagerError ? <div style={{ marginTop: 8, fontSize: 12, color: '#991b1b' }}>{markManagerError}</div> : null}
@@ -1872,7 +2285,98 @@ export default function LabEntry({
                 scrollbarGutter: 'stable',
               }}
             >
-              <table className="obe-table" style={{ minWidth: minTableWidth, width: '100%', borderCollapse: 'collapse' }}>
+              {isProjectReviewMode ? (
+                <table className="obe-table" style={{ minWidth: minTableWidth, width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={cellTh} colSpan={4 + reviewComponents.length}>
+                        {draft.sheet.termLabel} &nbsp;&nbsp;|&nbsp;&nbsp; {draft.sheet.batchLabel} &nbsp;&nbsp;|&nbsp;&nbsp; {label}
+                      </th>
+                    </tr>
+                    <tr>
+                      <th style={cellTh}>S.No</th>
+                      <th style={cellTh}>Register No.</th>
+                      <th style={cellTh}>Name of the Students</th>
+                      {reviewComponents.map((component, idx) => (
+                        <th key={`pr_title_${component.id}`} style={cellTh}>{component.title || `Title ${idx + 1}`}</th>
+                      ))}
+                      <th style={cellTh}>Total</th>
+                    </tr>
+                    <tr>
+                      <th style={cellTh}> </th>
+                      <th style={cellTh}> </th>
+                      <th style={cellTh}> </th>
+                      {reviewComponents.map((component) => (
+                        <th key={`pr_max_${component.id}`} style={cellTh}>{component.max}</th>
+                      ))}
+                      <th style={cellTh}>{REVIEW_TOTAL_MAX}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {publishedEditLocked ? (
+                      <tr>
+                        <td colSpan={4 + reviewComponents.length} style={{ padding: 14, textAlign: 'center', color: '#065f46', fontWeight: 900 }}>
+                          Published — students hidden
+                        </td>
+                      </tr>
+                    ) : (
+                      <>
+                        {renderStudents.map((s, idx) => {
+                          const row = draft.sheet.rowsByStudentId?.[String(s.id)];
+                          const componentMarks = row?.reviewComponentMarks && typeof row.reviewComponentMarks === 'object' ? row.reviewComponentMarks : {};
+                          const total = getProjectReviewRowTotal(row as LabRowState | undefined);
+                          return (
+                            <tr key={`pr_${s.id}`}>
+                              <td style={{ ...cellTd, width: '30px', minWidth: '30px', fontWeight: 700 }}>{idx + 1}</td>
+                              <td style={{ ...cellTd, width: '70px', minWidth: '70px', fontWeight: 600 }}>{String(s.reg_no || '').slice(-8)}</td>
+                              <td style={{ ...cellTd, fontWeight: 600, whiteSpace: 'nowrap' }}>{String(s.name || '')}</td>
+                              {reviewComponents.map((component) => (
+                                <td key={`pr_mark_${s.id}_${component.id}`} style={{ ...cellTd, padding: '2px' }}>
+                                  <input
+                                    type="number"
+                                    value={componentMarks[component.id] ?? ''}
+                                    onChange={(e) => {
+                                      const raw = e.target.value;
+                                      if (raw === '') {
+                                        e.currentTarget.setCustomValidity('');
+                                        return setProjectReviewMark(s.id, component.id, '');
+                                      }
+                                      const next = Number(raw);
+                                      if (!Number.isFinite(next)) return;
+                                      if (next > component.max) {
+                                        e.currentTarget.setCustomValidity(`Max mark is ${component.max}`);
+                                        e.currentTarget.reportValidity();
+                                        window.setTimeout(() => e.currentTarget.setCustomValidity(''), 0);
+                                        return;
+                                      }
+                                      e.currentTarget.setCustomValidity('');
+                                      setProjectReviewMark(s.id, component.id, next);
+                                    }}
+                                    style={inputStyle}
+                                    min={0}
+                                    max={component.max}
+                                    disabled={!tableVisible || tableBlocked}
+                                  />
+                                </td>
+                              ))}
+                              <td style={{ ...cellTd, fontWeight: 700, textAlign: 'center' }}>{total}</td>
+                            </tr>
+                          );
+                        })}
+
+                        {renderStudents.length === 0 ? (
+                          <tr>
+                            <td colSpan={4 + reviewComponents.length} style={{ padding: 10, color: '#6b7280' }}>
+                              No students.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </>
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="obe-table" style={{ minWidth: minTableWidth, width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={cellTh} colSpan={headerCols}>
@@ -2167,6 +2671,7 @@ export default function LabEntry({
               )}
             </tbody>
                 </table>
+              )}
               </div>
 
 
@@ -2459,12 +2964,20 @@ export default function LabEntry({
                     <thead>
                       <tr style={{ background: '#f9fafb' }}>
                         <th style={{ textAlign: 'left', padding: 10, fontSize: 12, borderBottom: '1px solid #e5e7eb', fontWeight: 700 }}>Item</th>
-                        <th style={{ textAlign: 'right', padding: 10, fontSize: 12, borderBottom: '1px solid #e5e7eb', fontWeight: 700 }}>Experiments</th>
+                        <th style={{ textAlign: 'right', padding: 10, fontSize: 12, borderBottom: '1px solid #e5e7eb', fontWeight: 700 }}>{isProjectReviewMode ? 'Title' : 'Experiments'}</th>
                         <th style={{ textAlign: 'right', padding: 10, fontSize: 12, borderBottom: '1px solid #e5e7eb', fontWeight: 700 }}>Max marks</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {enabledCoMetas.length > 0 ? (
+                      {isProjectReviewMode ? (
+                        reviewComponents.map((component, idx) => (
+                          <tr key={component.id}>
+                            <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', fontWeight: 800 }}>Component {idx + 1}</td>
+                            <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 600 }}>{component.title || `Title ${idx + 1}`}</td>
+                            <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 600 }}>{component.max}</td>
+                          </tr>
+                        ))
+                      ) : enabledCoMetas.length > 0 ? (
                         enabledCoMetas.map((m) => (
                           <tr key={m.coNumber}>
                             <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', fontWeight: 800 }}>CO-{m.coNumber}</td>
@@ -2479,12 +2992,21 @@ export default function LabEntry({
                           </td>
                         </tr>
                       )}
-                      <tr>
-                        <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', fontWeight: 800 }}>CIA Exam</td>
-                        <td colSpan={2} style={{ padding: 10, borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 600 }}>
-                          {ciaExamEnabled ? '✅ Enabled' : '❌ Disabled'}
-                        </td>
-                      </tr>
+                      {isProjectReviewMode ? (
+                        <tr>
+                          <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', fontWeight: 800 }}>Total</td>
+                          <td colSpan={2} style={{ padding: 10, borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 600 }}>
+                            {reviewSplitTotal} / {REVIEW_TOTAL_MAX}
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr>
+                          <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', fontWeight: 800 }}>CIA Exam</td>
+                          <td colSpan={2} style={{ padding: 10, borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 600 }}>
+                            {ciaExamEnabled ? '✅ Enabled' : '❌ Disabled'}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -2507,6 +3029,10 @@ export default function LabEntry({
                   if (markManagerModal.mode === 'request') {
                     setMarkManagerModal(null);
                     await requestMarkManagerEdit();
+                    return;
+                  }
+                  if (isProjectReviewMode && hasEmptyProjectReviewTitle) {
+                    setProjectReviewValidationError('Title cannot be empty.');
                     return;
                   }
 

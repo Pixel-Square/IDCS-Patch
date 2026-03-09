@@ -45,15 +45,12 @@ import { ApplicationsNavResponse, fetchApplicationsNav } from '../../services/ap
   pbas: ClipboardList,
   pbas_manager: Layout,
   settings: Settings,
-<<<<<<< HEAD
   applications_admin: Layout,
   applications_inbox: ClipboardList,
   applications_home: Layout,
   idscan_test: ScanLine,
   idscan_gatepass: Shield,
-=======
   rf_reader: Grid,
->>>>>>> 44b6445 (JUDSON CANVA)
 
 };
 
@@ -118,7 +115,6 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
     }
   }, [loc.pathname]);
 
-<<<<<<< HEAD
   useEffect(() => {
     let mounted = true;
     if (!data) return;
@@ -138,14 +134,12 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
       mounted = false;
     };
   }, [data]);
-=======
   // auto-expand RFReader when on /iqac/rf-reader routes
   useEffect(() => {
     if (loc.pathname.startsWith('/iqac/rf-reader')) {
       setExpanded((p) => ({ ...p, rf_reader: true }));
     }
   }, [loc.pathname]);
->>>>>>> 44b6445 (JUDSON CANVA)
 
   if (loading) return (
     <aside className={`fixed top-16 left-0 h-[calc(100vh-4rem)] bg-white shadow-lg transition-all duration-300 z-30 ${collapsed ? '-translate-x-full lg:translate-x-0 lg:w-20' : 'w-full lg:w-64'}`}>

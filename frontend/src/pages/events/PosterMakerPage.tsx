@@ -36,18 +36,9 @@ import {
 
 type Step = 'select-template' | 'fill-form' | 'generating' | 'result';
 type CanvaDatasetField = { type: 'text' | 'image' | 'chart' | string };
-type EditorItemKind = 'text' | 'image';
-type EditorTextAlign = 'left' | 'center' | 'right';
 
-type EditorItem = {
-  kind: EditorItemKind;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-  fontSize: number;
-  textAlign: EditorTextAlign;
+type PosterMakerPageProps = {
+  embedded?: boolean;
 };
 
 type PosterResult = {
@@ -71,36 +62,6 @@ function buildPlaceholder(fieldKey: string, type: string): string {
   return `Enter ${humanizeFieldKey(fieldKey)}`;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function buildInitialEditorItems(dataset: Record<string, CanvaDatasetField>): Record<string, EditorItem> {
-  const supportedEntries = Object.entries(dataset).filter(([, def]) => def.type === 'text' || def.type === 'image');
-
-  return supportedEntries.reduce<Record<string, EditorItem>>((acc, [fieldKey, def], index) => {
-    const column = index % 2;
-    const row = Math.floor(index / 2);
-    const kind = def.type === 'image' ? 'image' : 'text';
-    const width = kind === 'image' ? 26 : 38;
-    const height = kind === 'image' ? 24 : 12;
-    const x = 8 + (column * 44);
-    const y = 8 + (row * 14);
-
-    acc[fieldKey] = {
-      kind,
-      x: clamp(x, 0, 100 - width),
-      y: clamp(y, 0, 100 - height),
-      width,
-      height,
-      rotation: 0,
-      fontSize: kind === 'image' ? 16 : 18,
-      textAlign: 'center',
-    };
-    return acc;
-  }, {});
-}
-
 async function uploadImageToMedia(file: File): Promise<string> {
   const fd = new FormData();
   fd.append('file', file);
@@ -110,7 +71,7 @@ async function uploadImageToMedia(file: File): Promise<string> {
   return data.url;
 }
 
-export default function PosterMakerPage() {
+export default function PosterMakerPage({ embedded = false }: PosterMakerPageProps) {
   const [step, setStep] = useState<Step>('select-template');
   const [templates, setTemplates] = useState<CanvaBrandTemplateItem[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
@@ -123,13 +84,16 @@ export default function PosterMakerPage() {
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [imageFiles, setImageFiles] = useState<Record<string, File>>({});
   const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
-  const [editorItems, setEditorItems] = useState<Record<string, EditorItem>>({});
-  const [selectedEditorKey, setSelectedEditorKey] = useState('');
   const [genProgress, setGenProgress] = useState('');
   const [result, setResult] = useState<PosterResult | null>(null);
   const [error, setError] = useState('');
   const [format, setFormat] = useState<'png' | 'pdf'>('png');
+  const [canvaEditMode, setCanvaEditMode] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadedBack, setUploadedBack] = useState(false);
+  const uploadEditRef = useRef<HTMLInputElement>(null);
   const downloadRef = useRef<HTMLAnchorElement>(null);
+  const canvaPopupRef = useRef<Window | null>(null);
 
   const datasetEntries = Object.entries(templateDataset);
   const textFields = datasetEntries.filter(([, def]) => def.type === 'text');
@@ -146,8 +110,6 @@ export default function PosterMakerPage() {
     setFieldValues({});
     setImageFiles({});
     setImagePreviews({});
-    setEditorItems({});
-    setSelectedEditorKey('');
     setDatasetError('');
   };
 
@@ -190,9 +152,6 @@ export default function PosterMakerPage() {
     try {
       const dataset = await getBrandTemplateDataset(tpl.id);
       setTemplateDataset(dataset);
-      const initialEditorItems = buildInitialEditorItems(dataset);
-      setEditorItems(initialEditorItems);
-      setSelectedEditorKey(Object.keys(initialEditorItems)[0] ?? '');
       if (!Object.keys(dataset).length) {
         setDatasetError('This Brand Template has no autofill dataset fields. Add data fields in Canva first.');
       }
@@ -226,12 +185,6 @@ export default function PosterMakerPage() {
       delete next[key];
       return next;
     });
-  };
-
-  const resetEditorLayout = () => {
-    const next = buildInitialEditorItems(templateDataset);
-    setEditorItems(next);
-    setSelectedEditorKey(Object.keys(next)[0] ?? '');
   };
 
   async function handleGenerate() {
@@ -326,6 +279,16 @@ export default function PosterMakerPage() {
     }
   }
 
+  function handleUploadBack(file: File) {
+    const objectUrl = URL.createObjectURL(file);
+    setResult((prev) => {
+      if (!prev) return prev;
+      if (prev.dataUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.dataUrl);
+      return { ...prev, dataUrl: objectUrl, export_url: '', canva_edit_url: prev.canva_edit_url };
+    });
+    setUploadedBack(true);
+  }
+
   function reset() {
     setStep('select-template');
     setSelectedTemplate(null);
@@ -333,17 +296,24 @@ export default function PosterMakerPage() {
     setResult(null);
     setError('');
     setGenProgress('');
+    setCanvaEditMode(false);
+    setUploadedBack(false);
+    if (canvaPopupRef.current && !canvaPopupRef.current.closed) canvaPopupRef.current.close();
+    canvaPopupRef.current = null;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>
+      <div className={`${embedded ? 'rounded-3xl border border-violet-100 bg-white shadow-sm overflow-hidden' : ''}`}>
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center gap-3">
           <Sparkles className="w-6 h-6 text-violet-600" />
           <div>
             <h1 className="text-xl font-bold text-gray-900">Canva Poster Maker</h1>
             <p className="text-sm text-gray-500">
-              Live Canva Brand Templates → dynamic IDCS fields → Canva autofill → download
+              {embedded
+                ? 'Create event posters from live Canva Brand Templates without leaving this workspace.'
+                : 'Live Canva Brand Templates → dynamic IDCS fields → Canva autofill → download'}
             </p>
           </div>
           {step !== 'select-template' && (
@@ -381,7 +351,7 @@ export default function PosterMakerPage() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className={`${canvaEditMode ? 'max-w-screen-2xl' : 'max-w-5xl'} mx-auto px-6 py-8`}>
         {step === 'select-template' && (
           <div>
             <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
@@ -615,39 +585,6 @@ export default function PosterMakerPage() {
                   </div>
                 )}
 
-                {supportedFieldCount > 0 && (
-                  <div className="mt-6 rounded-xl border border-violet-200 bg-violet-50/40 p-4">
-                    <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
-                      <div>
-                        <h4 className="text-sm font-semibold text-violet-900">Mini Layout Editor</h4>
-                        <p className="text-xs text-violet-700 mt-1 max-w-2xl">
-                          Drag placeholders in this IDCS draft editor and adjust size, rotation, and alignment.
-                          This helps plan layout visually before generation, but it does not change Canva's internal template structure.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={resetEditorLayout}
-                        className="text-xs font-medium text-violet-700 hover:text-violet-900"
-                      >
-                        Reset layout
-                      </button>
-                    </div>
-
-                    <DraftLayoutEditor
-                      templateTitle={selectedTemplate.title}
-                      backgroundUrl={selectedTemplate.thumbnail?.url ?? ''}
-                      textFields={textFields.map(([fieldKey]) => fieldKey)}
-                      imageFields={imageFields.map(([fieldKey]) => fieldKey)}
-                      fieldValues={fieldValues}
-                      imagePreviews={imagePreviews}
-                      items={editorItems}
-                      onItemsChange={setEditorItems}
-                      selectedKey={selectedEditorKey}
-                      onSelectedKeyChange={setSelectedEditorKey}
-                    />
-                  </div>
-                )}
               </div>
             )}
 
@@ -692,75 +629,248 @@ export default function PosterMakerPage() {
         )}
 
         {step === 'result' && result && (
-          <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-6">
-              <div className="inline-flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 rounded-full px-4 py-1.5 text-sm font-medium mb-4">
-                <CheckCircle2 className="w-4 h-4" />
-                Live Preview Ready!
+          <div className={canvaEditMode ? 'flex gap-4 items-start' : 'max-w-2xl mx-auto'}>
+
+            {/* ── Left panel: preview + upload-back + buttons ── */}
+            <div className={canvaEditMode ? 'w-[400px] flex-shrink-0' : ''}>
+              <div className="text-center mb-6">
+                <div className="inline-flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 rounded-full px-4 py-1.5 text-sm font-medium mb-4">
+                  <CheckCircle2 className="w-4 h-4" />
+                  Live Preview Ready!
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900">{selectedTemplate?.title}</h2>
+                {result.warning && (
+                  <p className="text-xs text-amber-600 mt-1 flex items-center justify-center gap-1">
+                    <Info className="w-3.5 h-3.5" />
+                    {result.warning}
+                  </p>
+                )}
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">{selectedTemplate?.title}</h2>
-              {result.warning && (
-                <p className="text-xs text-amber-600 mt-1 flex items-center justify-center gap-1">
-                  <Info className="w-3.5 h-3.5" />
-                  {result.warning}
-                </p>
-              )}
-            </div>
 
-            <div className="rounded-2xl overflow-hidden border border-gray-200 shadow-lg mb-6">
-              {result.dataUrl ? (
-                <img src={result.dataUrl} alt="Generated poster" className="w-full object-contain max-h-[600px]" />
-              ) : result.export_url ? (
-                <div className="bg-gray-50 p-8 text-center">
-                  <ImageIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500 text-sm">Preview not available — use the download link below.</p>
-                </div>
-              ) : (
-                <div className="bg-gray-50 p-8 text-center">
-                  <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-3" />
-                  <p className="text-gray-600 text-sm">Poster created! Open it in Canva to view and download.</p>
+              <div className="rounded-2xl overflow-hidden border border-gray-200 shadow-lg mb-6">
+                {result.dataUrl ? (
+                  <img src={result.dataUrl} alt="Generated poster" className="w-full object-contain max-h-[600px]" />
+                ) : result.export_url ? (
+                  <img
+                    src={result.export_url}
+                    alt="Generated poster"
+                    className="w-full object-contain max-h-[600px]"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                      const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
+                ) : (
+                  <div className="bg-gray-50 p-8 text-center">
+                    <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-3" />
+                    <p className="text-gray-600 text-sm">Poster created! Open it in Canva to view and download.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Upload-back zone — shown once Canva iframe is open */}
+              {canvaEditMode && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) handleUploadBack(file);
+                  }}
+                  onClick={() => uploadEditRef.current?.click()}
+                  className={`mb-6 rounded-2xl border-2 border-dashed cursor-pointer transition-colors p-6 text-center ${
+                    isDragOver
+                      ? 'border-violet-500 bg-violet-50'
+                      : uploadedBack
+                      ? 'border-green-400 bg-green-50'
+                      : 'border-gray-300 bg-gray-50 hover:border-violet-400 hover:bg-violet-50/40'
+                  }`}
+                >
+                  {uploadedBack ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <CheckCircle2 className="w-8 h-8 text-green-500" />
+                      <p className="font-semibold text-green-700 text-sm">Edited poster uploaded!</p>
+                      <p className="text-xs text-gray-500">Preview updated. Click Download to save it.</p>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setUploadedBack(false); uploadEditRef.current?.click(); }}
+                        className="mt-1 text-xs text-violet-600 hover:underline"
+                      >
+                        Upload a different file
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <Upload className="w-8 h-8 text-violet-400" />
+                      <p className="font-semibold text-gray-700 text-sm">
+                        {isDragOver ? 'Drop your edited poster here' : 'Upload your edited poster back into IDCS'}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        In Canva: edit → Share → Download → drop the file here (PNG or PDF)
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
 
-            <div className="flex flex-wrap gap-3 justify-center">
-              {(result.dataUrl || result.export_url) && (
+              <input
+                ref={uploadEditRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,application/pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadBack(file);
+                  e.target.value = '';
+                }}
+              />
+
+              <div className="flex flex-wrap gap-3 justify-center">
+                {(result.dataUrl || result.export_url) && (
+                  <button
+                    onClick={handleDownload}
+                    className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl shadow transition-colors"
+                  >
+                    <Download className="w-5 h-5" />
+                    Download {format.toUpperCase()}
+                  </button>
+                )}
+                {result.canva_edit_url && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const w = 1280, h = 860;
+                      const left = Math.round((window.screen.width - w) / 2);
+                      const top = Math.round((window.screen.height - h) / 2);
+                      const popup = window.open(
+                        result.canva_edit_url,
+                        'canva-editor',
+                        `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes`
+                      );
+                      canvaPopupRef.current = popup;
+                      setCanvaEditMode(true);
+                    }}
+                    className="flex items-center gap-2 px-6 py-3 bg-white border border-gray-300 hover:border-violet-400 text-gray-700 hover:text-violet-700 font-semibold rounded-xl shadow-sm transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    {canvaEditMode ? 'Reopen Canva Window' : 'Open in Canva'}
+                  </button>
+                )}
                 <button
-                  onClick={handleDownload}
-                  className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl shadow transition-colors"
+                  onClick={reset}
+                  className="flex items-center gap-2 px-6 py-3 bg-white border border-gray-200 hover:border-gray-300 text-gray-600 font-medium rounded-xl transition-colors"
                 >
-                  <Download className="w-5 h-5" />
-                  Download {format.toUpperCase()}
+                  <RefreshCw className="w-4 h-4" />
+                  Make Another
                 </button>
+              </div>
+
+              {result.design_id && (
+                <p className="text-center text-xs text-gray-400 mt-4">Canva Design ID: {result.design_id}</p>
               )}
-              {result.canva_edit_url && (
-                <a
-                  href={result.canva_edit_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-6 py-3 bg-white border border-gray-300 hover:border-violet-400 text-gray-700 hover:text-violet-700 font-semibold rounded-xl shadow-sm transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  Open in Canva
-                </a>
-              )}
-              <button
-                onClick={reset}
-                className="flex items-center gap-2 px-6 py-3 bg-white border border-gray-200 hover:border-gray-300 text-gray-600 font-medium rounded-xl transition-colors"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Make Another
-              </button>
             </div>
 
-            {result.design_id && (
-              <p className="text-center text-xs text-gray-400 mt-4">Canva Design ID: {result.design_id}</p>
+            {/* ── Right panel: Canva editing status + upload-back ── */}
+            {canvaEditMode && result.canva_edit_url && (
+              <div className="flex-1 rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white shadow-lg flex flex-col" style={{ minHeight: '85vh' }}>
+                {/* Header */}
+                <div className="flex items-center gap-3 px-6 py-4 border-b border-violet-100">
+                  <div className="relative">
+                    <div className="w-3 h-3 rounded-full bg-green-400"></div>
+                    <div className="absolute inset-0 w-3 h-3 rounded-full bg-green-400 animate-ping opacity-75"></div>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">Canva Editor is open</p>
+                    <p className="text-xs text-gray-500">Editing in a separate window</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { if (canvaPopupRef.current && !canvaPopupRef.current.closed) canvaPopupRef.current.focus(); }}
+                    className="ml-auto flex items-center gap-1.5 text-xs text-violet-600 hover:text-violet-800 font-medium bg-violet-100 hover:bg-violet-200 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Bring to front
+                  </button>
+                </div>
+
+                {/* Steps */}
+                <div className="px-6 py-6 flex-1">
+                  <div className="mb-6">
+                    <p className="text-sm font-semibold text-gray-700 mb-3">How to edit &amp; import back:</p>
+                    <ol className="space-y-3">
+                      {[
+                        { step: '1', text: 'Edit your poster in the Canva window that just opened' },
+                        { step: '2', text: 'Click Share → Download → choose PNG or PDF' },
+                        { step: '3', text: 'Drop the downloaded file into the upload zone below' },
+                      ].map(({ step, text }) => (
+                        <li key={step} className="flex items-start gap-3">
+                          <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{step}</span>
+                          <span className="text-sm text-gray-600">{text}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+
+                  {/* Upload-back zone */}
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                    onDragLeave={() => setIsDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragOver(false);
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) handleUploadBack(file);
+                    }}
+                    onClick={() => uploadEditRef.current?.click()}
+                    className={`rounded-2xl border-2 border-dashed cursor-pointer transition-all p-8 text-center ${
+                      isDragOver
+                        ? 'border-violet-500 bg-violet-100 scale-[1.02]'
+                        : uploadedBack
+                        ? 'border-green-400 bg-green-50'
+                        : 'border-violet-300 bg-white hover:border-violet-500 hover:bg-violet-50'
+                    }`}
+                  >
+                    {uploadedBack ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
+                          <CheckCircle2 className="w-8 h-8 text-green-500" />
+                        </div>
+                        <p className="font-semibold text-green-700">Edited poster uploaded!</p>
+                        <p className="text-sm text-gray-500">Left panel preview is updated. Click Download to save.</p>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setUploadedBack(false); uploadEditRef.current?.click(); }}
+                          className="mt-2 text-xs text-violet-600 hover:underline"
+                        >
+                          Upload a different file
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-14 h-14 rounded-full bg-violet-100 flex items-center justify-center">
+                          <Upload className="w-7 h-7 text-violet-500" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-700">
+                            {isDragOver ? 'Drop your file here!' : 'Drop your edited Canva poster here'}
+                          </p>
+                          <p className="text-sm text-gray-400 mt-1">PNG, JPEG, WebP or PDF • click to browse</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
       </div>
 
       <a ref={downloadRef} className="hidden" />
+      </div>
     </div>
   );
 }
@@ -865,349 +975,3 @@ function ImageUploadField({
   );
 }
 
-function DraftLayoutEditor({
-  templateTitle,
-  backgroundUrl,
-  textFields,
-  imageFields,
-  fieldValues,
-  imagePreviews,
-  items,
-  onItemsChange,
-  selectedKey,
-  onSelectedKeyChange,
-}: {
-  templateTitle: string;
-  backgroundUrl: string;
-  textFields: string[];
-  imageFields: string[];
-  fieldValues: Record<string, string>;
-  imagePreviews: Record<string, string>;
-  items: Record<string, EditorItem>;
-  onItemsChange: React.Dispatch<React.SetStateAction<Record<string, EditorItem>>>;
-  selectedKey: string;
-  onSelectedKeyChange: (key: string) => void;
-}) {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const [dragState, setDragState] = useState<{
-    key: string;
-    startX: number;
-    startY: number;
-    originX: number;
-    originY: number;
-  } | null>(null);
-
-  const orderedKeys = [...textFields, ...imageFields].filter((key) => !!items[key]);
-  const selectedItem = selectedKey ? items[selectedKey] : undefined;
-
-  useEffect(() => {
-    if (!selectedKey && orderedKeys[0]) {
-      onSelectedKeyChange(orderedKeys[0]);
-    }
-  }, [orderedKeys, onSelectedKeyChange, selectedKey]);
-
-  useEffect(() => {
-    if (!dragState) return;
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-
-      const deltaX = ((event.clientX - dragState.startX) / rect.width) * 100;
-      const deltaY = ((event.clientY - dragState.startY) / rect.height) * 100;
-
-      onItemsChange((prev) => {
-        const current = prev[dragState.key];
-        if (!current) return prev;
-
-        const nextX = clamp(dragState.originX + deltaX, 0, 100 - current.width);
-        const nextY = clamp(dragState.originY + deltaY, 0, 100 - current.height);
-
-        return {
-          ...prev,
-          [dragState.key]: {
-            ...current,
-            x: nextX,
-            y: nextY,
-          },
-        };
-      });
-    };
-
-    const handlePointerUp = () => setDragState(null);
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [dragState, onItemsChange]);
-
-  const updateSelectedItem = (patch: Partial<EditorItem>) => {
-    if (!selectedKey) return;
-    onItemsChange((prev) => {
-      const current = prev[selectedKey];
-      if (!current) return prev;
-
-      const next = { ...current, ...patch };
-      next.width = clamp(next.width, 10, 90);
-      next.height = clamp(next.height, 8, 90);
-      next.x = clamp(next.x, 0, 100 - next.width);
-      next.y = clamp(next.y, 0, 100 - next.height);
-      next.rotation = clamp(next.rotation, -180, 180);
-      next.fontSize = clamp(next.fontSize, 12, 48);
-
-      return {
-        ...prev,
-        [selectedKey]: next,
-      };
-    });
-  };
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.2fr)_320px] gap-4">
-      <div>
-        <div className="rounded-2xl overflow-hidden border border-violet-200 bg-white shadow-sm">
-          <div className="px-4 py-3 border-b border-violet-100 flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Draft Canvas</p>
-              <p className="text-xs text-gray-500">Drag items directly on the poster draft.</p>
-            </div>
-            <div className="text-[11px] text-gray-400">{templateTitle}</div>
-          </div>
-
-          <div className="p-4 bg-gradient-to-br from-violet-50 to-white">
-            <div
-              ref={canvasRef}
-              className="relative mx-auto aspect-[3/4] w-full max-w-[420px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-inner select-none"
-            >
-              {backgroundUrl ? (
-                <img
-                  src={`/api/canva/thumbnail-proxy/?url=${encodeURIComponent(backgroundUrl)}`}
-                  alt={templateTitle}
-                  className="absolute inset-0 h-full w-full object-cover"
-                  draggable={false}
-                />
-              ) : (
-                <div className="absolute inset-0 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
-                  Template preview unavailable
-                </div>
-              )}
-
-              <div className="absolute inset-0 bg-black/5" />
-
-              {orderedKeys.map((key) => {
-                const item = items[key];
-                if (!item) return null;
-
-                const isSelected = key === selectedKey;
-                const textValue = (fieldValues[key] ?? '').trim();
-                const imagePreview = imagePreviews[key];
-
-                return (
-                  <div
-                    key={key}
-                    role="button"
-                    tabIndex={0}
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      onSelectedKeyChange(key);
-                      setDragState({
-                        key,
-                        startX: event.clientX,
-                        startY: event.clientY,
-                        originX: item.x,
-                        originY: item.y,
-                      });
-                    }}
-                    onClick={() => onSelectedKeyChange(key)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        onSelectedKeyChange(key);
-                      }
-                    }}
-                    className={`absolute cursor-move overflow-hidden rounded-lg border-2 transition-all ${
-                      isSelected
-                        ? 'border-violet-500 shadow-[0_0_0_3px_rgba(139,92,246,0.15)]'
-                        : 'border-white/80 hover:border-violet-300'
-                    }`}
-                    style={{
-                      left: `${item.x}%`,
-                      top: `${item.y}%`,
-                      width: `${item.width}%`,
-                      height: `${item.height}%`,
-                      transform: `rotate(${item.rotation}deg)`,
-                      transformOrigin: 'center center',
-                      background: item.kind === 'image' ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.88)',
-                    }}
-                  >
-                    {item.kind === 'image' ? (
-                      imagePreview ? (
-                        <img src={imagePreview} alt={humanizeFieldKey(key)} className="h-full w-full object-cover" draggable={false} />
-                      ) : (
-                        <div className="h-full w-full flex flex-col items-center justify-center gap-1 bg-violet-100/60 text-violet-700 px-2 text-center">
-                          <ImageIcon className="w-5 h-5" />
-                          <span className="text-[10px] font-medium leading-tight">{humanizeFieldKey(key)}</span>
-                        </div>
-                      )
-                    ) : (
-                      <div
-                        className="h-full w-full flex items-center px-2 text-gray-800 font-semibold leading-tight"
-                        style={{
-                          fontSize: `${item.fontSize}px`,
-                          justifyContent: item.textAlign === 'left' ? 'flex-start' : item.textAlign === 'right' ? 'flex-end' : 'center',
-                          textAlign: item.textAlign,
-                        }}
-                      >
-                        {textValue || humanizeFieldKey(key)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
-        <div className="mb-4">
-          <h5 className="text-sm font-semibold text-gray-900">Selected Placeholder</h5>
-          <p className="text-xs text-gray-500 mt-1">Choose an item and adjust its draft placement.</p>
-        </div>
-
-        {orderedKeys.length > 0 && (
-          <div className="mb-4">
-            <label className="block text-xs font-medium text-gray-600 uppercase tracking-wide mb-1.5">Placeholder</label>
-            <select
-              value={selectedKey}
-              onChange={(e) => onSelectedKeyChange(e.target.value)}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-            >
-              {orderedKeys.map((key) => (
-                <option key={key} value={key}>{humanizeFieldKey(key)}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {!selectedItem ? (
-          <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-            Select a placeholder to adjust it.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <RangeControl
-              label="Horizontal"
-              value={selectedItem.x}
-              min={0}
-              max={100 - selectedItem.width}
-              onChange={(value) => updateSelectedItem({ x: value })}
-            />
-            <RangeControl
-              label="Vertical"
-              value={selectedItem.y}
-              min={0}
-              max={100 - selectedItem.height}
-              onChange={(value) => updateSelectedItem({ y: value })}
-            />
-            <RangeControl
-              label="Width"
-              value={selectedItem.width}
-              min={10}
-              max={90}
-              onChange={(value) => updateSelectedItem({ width: value })}
-            />
-            <RangeControl
-              label="Height"
-              value={selectedItem.height}
-              min={8}
-              max={90}
-              onChange={(value) => updateSelectedItem({ height: value })}
-            />
-            <RangeControl
-              label="Rotation"
-              value={selectedItem.rotation}
-              min={-180}
-              max={180}
-              onChange={(value) => updateSelectedItem({ rotation: value })}
-            />
-
-            {selectedItem.kind === 'text' && (
-              <>
-                <RangeControl
-                  label="Text Size"
-                  value={selectedItem.fontSize}
-                  min={12}
-                  max={48}
-                  step={1}
-                  onChange={(value) => updateSelectedItem({ fontSize: value })}
-                />
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 uppercase tracking-wide mb-1.5">Text Align</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(['left', 'center', 'right'] as const).map((align) => (
-                      <button
-                        key={align}
-                        type="button"
-                        onClick={() => updateSelectedItem({ textAlign: align })}
-                        className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                          selectedItem.textAlign === align
-                            ? 'border-violet-500 bg-violet-50 text-violet-700'
-                            : 'border-gray-200 text-gray-600 hover:border-violet-300'
-                        }`}
-                      >
-                        {align.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-[11px] text-amber-800">
-              This editor is safe and optional. It is an IDCS-side draft layout tool for checking placeholder placement before Canva generation.
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function RangeControl({
-  label,
-  value,
-  min,
-  max,
-  step = 1,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="block">
-      <div className="mb-1.5 flex items-center justify-between gap-3 text-xs font-medium text-gray-600 uppercase tracking-wide">
-        <span>{label}</span>
-        <span className="text-gray-400 normal-case">{value.toFixed(step < 1 ? 1 : 0)}</span>
-      </div>
-      <input
-        type="range"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-violet-600"
-      />
-    </label>
-  );
-}
