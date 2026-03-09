@@ -132,12 +132,26 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                 # These roles can see any department
                 queryset = queryset.filter(user__staff_profile__department_id=department_id)
             elif is_hod:
-                # HOD can only see their own department
-                if user_department and user_department.id == department_id:
-                    queryset = queryset.filter(user__staff_profile__department_id=department_id)
+                # HOD can see departments where they are HOD or AHOD
+                from academics.models import DepartmentRole, AcademicYear
+                if user_staff_profile:
+                    current_year = AcademicYear.objects.filter(is_active=True).first()
+                    if current_year:
+                        hod_dept_ids = DepartmentRole.objects.filter(
+                            staff=user_staff_profile,
+                            role__in=['HOD', 'AHOD'],
+                            academic_year=current_year,
+                            is_active=True
+                        ).values_list('department_id', flat=True)
+                        if department_id in hod_dept_ids:
+                            queryset = queryset.filter(user__staff_profile__department_id=department_id)
+                        else:
+                            return Response({'error': 'Permission denied: You are not HOD/AHOD for this department'}, 
+                                          status=status.HTTP_403_FORBIDDEN)
+                    else:
+                        return Response({'error': 'No active academic year'}, status=status.HTTP_400_BAD_REQUEST)
                 else:
-                    return Response({'error': 'Permission denied: HOD can only view their own department'}, 
-                                  status=status.HTTP_403_FORBIDDEN)
+                    return Response({'error': 'Staff profile required'}, status=status.HTTP_403_FORBIDDEN)
             else:
                 # Regular staff cannot filter by department
                 queryset = queryset.filter(user=user)
@@ -146,9 +160,26 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
             if is_superuser or has_view_perm or is_ps or is_iqac or is_admin:
                 # These roles can see all records
                 pass
-            elif is_hod and user_department:
-                # HOD sees their department
-                queryset = queryset.filter(user__staff_profile__department_id=user_department.id)
+            elif is_hod:
+                # HOD sees all their departments where they are HOD/AHOD
+                from academics.models import DepartmentRole, AcademicYear
+                if user_staff_profile:
+                    current_year = AcademicYear.objects.filter(is_active=True).first()
+                    if current_year:
+                        hod_dept_ids = DepartmentRole.objects.filter(
+                            staff=user_staff_profile,
+                            role__in=['HOD', 'AHOD'],
+                            academic_year=current_year,
+                            is_active=True
+                        ).values_list('department_id', flat=True)
+                        if hod_dept_ids:
+                            queryset = queryset.filter(user__staff_profile__department_id__in=hod_dept_ids)
+                        else:
+                            queryset = queryset.filter(user=user)
+                    else:
+                        queryset = queryset.filter(user=user)
+                else:
+                    queryset = queryset.filter(user=user)
             else:
                 # Regular staff can only see their own records
                 queryset = queryset.filter(user=user)
@@ -221,10 +252,22 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
             # These roles can see all departments
             dept_queryset = Department.objects.all()
         elif is_hod:
-            # HOD can only see their own department
+            # HOD can see all departments where they are HOD or AHOD
+            from academics.models import DepartmentRole, AcademicYear
             user_staff_profile = getattr(user, 'staff_profile', None)
-            if user_staff_profile and user_staff_profile.department:
-                dept_queryset = Department.objects.filter(id=user_staff_profile.department.id)
+            if user_staff_profile:
+                current_year = AcademicYear.objects.filter(is_active=True).first()
+                if current_year:
+                    roles = DepartmentRole.objects.filter(
+                        staff=user_staff_profile,
+                        role__in=['HOD', 'AHOD'],
+                        academic_year=current_year,
+                        is_active=True
+                    ).select_related('department')
+                    dept_ids = [role.department.id for role in roles]
+                    dept_queryset = Department.objects.filter(id__in=dept_ids)
+                else:
+                    dept_queryset = Department.objects.none()
             else:
                 dept_queryset = Department.objects.none()
         else:
@@ -414,9 +457,9 @@ class CSVUploadViewSet(viewsets.ViewSet):
             BIOMETRIC_STATUSES = ['present', 'absent', 'partial', 'half_day']
             if record.status in BIOMETRIC_STATUSES:
                 # Only recalculate for biometric statuses
-                if reself._check_time_based_absence(record.morning_in, record.evening_out):
+                if self._check_time_based_absence(record.morning_in, record.evening_out):
                     record.status = 'absent'  # Time limit violated = absent
-                elif cord.morning_in is None:
+                elif record.morning_in is None:
                     record.status = 'absent'  # No morning entry = absent
                 elif record.morning_in and record.evening_out:
                     record.status = 'present'  # Has morning + evening = present
@@ -551,12 +594,15 @@ class CSVUploadViewSet(viewsets.ViewSet):
                         t_in, t_out = self._parse_time_range(row.get(self._col(today_day), ''))
                         # If there's attendance data on a holiday, it's COL
                         if t_in or t_out:
-                            # Save attendance record for holiday work
+                            # Save attendance record for holiday work (respects overwrite_existing)
                             if self._upsert_record(user, today, t_in, t_out,
-                                                   'today', overwrite_existing, source_file):
+                                                   'backfill', overwrite_existing, source_file):
                                 row_saved = True
                                 # Award COL for working on holiday
                                 self._auto_create_col_for_holiday(user, today)
+                        elif overwrite_existing:
+                            # If overwrite_existing and no data, delete any existing record for this holiday
+                            AttendanceRecord.objects.filter(user=user, date=today).delete()
                         # else: no attendance on holiday = skip (don't save absent record)
                     else:
                         # Normal working day processing
@@ -572,12 +618,15 @@ class CSVUploadViewSet(viewsets.ViewSet):
                         if self._is_holiday(yest_date):
                             y_in, y_out = self._parse_time_range(row.get(self._col(yest_day), ''))
                             if y_in or y_out:
-                                # Save attendance for holiday work
+                                # Save attendance for holiday work (respects overwrite_existing)
                                 if self._upsert_record(user, yest_date, y_in, y_out,
-                                                       'yesterday', overwrite_existing, source_file):
+                                                       'backfill', overwrite_existing, source_file):
                                     row_saved = True
                                     # Award COL for working on holiday
                                     self._auto_create_col_for_holiday(user, yest_date)
+                            elif overwrite_existing:
+                                # If overwrite_existing and no data, delete any existing record for this holiday
+                                AttendanceRecord.objects.filter(user=user, date=yest_date).delete()
                         else:
                             # Normal yesterday processing
                             y_in, y_out = self._parse_time_range(row.get(self._col(yest_day), ''))
@@ -592,12 +641,15 @@ class CSVUploadViewSet(viewsets.ViewSet):
                         if self._is_holiday(past_date):
                             p_in, p_out = self._parse_time_range(row.get(self._col(d), ''))
                             if p_in or p_out:
-                                # Save attendance for holiday work
+                                # Save attendance for holiday work (respects overwrite_existing)
                                 if self._upsert_record(user, past_date, p_in, p_out,
                                                        'backfill', overwrite_existing, source_file):
                                     row_saved = True
                                     # Award COL for working on holiday
                                     self._auto_create_col_for_holiday(user, past_date)
+                            elif overwrite_existing:
+                                # If overwrite_existing and no data, delete any existing record for this holiday
+                                AttendanceRecord.objects.filter(user=user, date=past_date).delete()
                         else:
                             # Normal backfill processing
                             p_in, p_out = self._parse_time_range(row.get(self._col(d), ''))

@@ -34,6 +34,8 @@ export default function HODStaffAttendancePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>('');
+  const [departments, setDepartments] = useState<Array<{id:number;name:string}>>([]);
+  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
 
   useEffect(() => {
     const today = new Date();
@@ -44,25 +46,38 @@ export default function HODStaffAttendancePage() {
     if (selectedDate) {
       fetchAttendanceForDate();
     }
-  }, [selectedDate]);
+  }, [selectedDate, selectedDeptId]);
+
+  useEffect(() => {
+    fetchAvailableDepartments();
+  }, []);
 
   const fetchAttendanceForDate = async () => {
     try {
       setLoading(true);
       setError(null);
       const url = `${getApiBase()}/api/staff-attendance/records/monthly_records/`;
-      const response = await apiClient.get(url, {
-        params: {
-          from_date: selectedDate,
-          to_date: selectedDate
-        }
-      });
+      const params: any = { from_date: selectedDate, to_date: selectedDate };
+      if (selectedDeptId) params.department_id = selectedDeptId;
+      const response = await apiClient.get(url, { params });
       setAttendanceData(response.data);
     } catch (err) {
       console.error('Failed to fetch attendance:', err);
       setError('Failed to load attendance records for your department');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAvailableDepartments = async () => {
+    try {
+      const url = `${getApiBase()}/api/staff-attendance/records/available_departments/`;
+      const resp = await apiClient.get(url);
+      const list = resp.data.departments || [];
+      setDepartments(list);
+      if (list.length === 1) setSelectedDeptId(list[0].id);
+    } catch (e) {
+      console.error('Failed to fetch departments', e);
     }
   };
 
@@ -139,6 +154,21 @@ export default function HODStaffAttendancePage() {
 
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
           <div className="flex items-end gap-4 mb-4">
+            {departments.length > 0 && (
+              <div className="w-64">
+                <label className="block text-sm font-medium text-gray-900 mb-2">Department</label>
+                <select
+                  value={selectedDeptId ?? ''}
+                  onChange={(e) => setSelectedDeptId(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All My Departments</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex-1">
               <label className="block text-sm font-medium text-gray-900 mb-2">Select Date</label>
               <input
