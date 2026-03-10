@@ -159,13 +159,12 @@ function getVisibleTabs(classType: string | null | undefined, enabledAssessments
     });
   }
 
-  // PROJECT: show only Review 1, Review 2 and MODEL Review (plus dashboard)
+  // PROJECT: show only Review 1 and Review 2 (plus dashboard)
   if (ct === 'PROJECT') {
     return [
       { key: 'dashboard', label: 'Dashboard' },
       { key: 'review1', label: 'Review 1' },
       { key: 'review2', label: 'Review 2' },
-      { key: 'model', label: 'MODEL Review' },
     ];
   }
 

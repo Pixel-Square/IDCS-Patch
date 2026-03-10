@@ -65,6 +65,16 @@ import RequestTemplatesPage from './pages/hr/RequestTemplatesPage';
 import OrganizationStaffAttendanceAnalytics from './pages/hr/OrganizationStaffAttendanceAnalytics';
 import MyRequestsPage from './pages/staff-requests/MyRequestsPage';
 import PendingApprovalsPage from './pages/staff-requests/PendingApprovalsPage';
+import ApplicationsAdminPage from './pages/iqac/ApplicationsAdminPage';
+import ApplicationsInboxPage from './pages/applications/ApplicationsInboxPage';
+import ApplicationsPage from './pages/applications/ApplicationsPage';
+import ApplicationFormPage from './pages/applications/ApplicationFormPage';
+import ApplicationDetailPage from './pages/applications/ApplicationDetailPage';
+import IDCSScanTestPage from './pages/IDCSScan/TestPage';
+import IDCSScanGatepassPage from './pages/IDCSScan/GatepassPage';
+import RFReaderCreateGatePage from './pages/RFReader/CreateGatePage';
+import RFReaderTestStudentsPage from './pages/RFReader/TestStudentsPage';
+import RFReaderAddStudentsRFPage from './pages/RFReader/AddStudentsRFPage';
 
 type RoleObj = { name: string };
 type Me = {
@@ -176,6 +186,26 @@ export default function App() {
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/profile" element={<ProfilePage user={user} />} />
+                <Route
+                  path="/iqac/applications-admin"
+                  element={<ProtectedRoute user={user} requiredRoles={['IQAC']} element={<ApplicationsAdminPage />} />}
+                />
+                <Route
+                  path="/applications"
+                  element={<ApplicationsPage />}
+                />
+                <Route
+                  path="/applications/new/:typeId"
+                  element={<ApplicationFormPage />}
+                />
+                <Route
+                  path="/applications/inbox"
+                  element={<ApplicationsInboxPage />}
+                />
+                <Route
+                  path="/applications/:id"
+                  element={<ApplicationDetailPage />}
+                />
                 <Route path="/queries" element={<QueriesPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
                 <Route
@@ -296,6 +326,37 @@ export default function App() {
                 <Route
                   path="/ps/staff-attendance/view"
                   element={<ProtectedRoute user={user} requiredRoles={['PS', 'ADMIN']} element={<PSStaffAttendanceViewPage />} />}
+                />
+                {/* ── IDCSScan (SECURITY / ADMIN) ─────────────────────────── */}
+                <Route
+                  path="/idscan/test"
+                  element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<IDCSScanTestPage />} />}
+                />
+                <Route
+                  path="/idscan/gatepass"
+                  element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<IDCSScanGatepassPage />} />}
+                />
+                <Route
+                  path="/iqac/rf-reader"
+                  element={
+                    <ProtectedRoute
+                      user={user}
+                      requiredRoles={["IQAC"]}
+                      element={<Navigate to="/iqac/rf-reader/create-gate" replace />}
+                    />
+                  }
+                />
+                <Route
+                  path="/iqac/rf-reader/create-gate"
+                  element={<ProtectedRoute user={user} requiredRoles={["IQAC"]} element={<RFReaderCreateGatePage />} />}
+                />
+                <Route
+                  path="/iqac/rf-reader/test-students"
+                  element={<ProtectedRoute user={user} requiredRoles={["IQAC"]} element={<RFReaderTestStudentsPage />} />}
+                />
+                <Route
+                  path="/iqac/rf-reader/add-students-rf"
+                  element={<ProtectedRoute user={user} requiredRoles={["IQAC"]} element={<RFReaderAddStudentsRFPage />} />}
                 />
                 <Route
                   path="/advisor/timetable"

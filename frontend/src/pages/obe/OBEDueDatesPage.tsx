@@ -42,7 +42,7 @@ const THEORY_DEFAULT_ASSESSMENTS: DueAssessmentKey[] = ['ssa1', 'formative1', 'c
 const TCPR_ASSESSMENTS: DueAssessmentKey[] = ['ssa1', 'review1', 'cia1', 'ssa2', 'review2', 'cia2', 'model'];
 const LAB_ASSESSMENTS: DueAssessmentKey[] = ['cia1', 'cia2', 'model'];
 const PRACTICAL_ASSESSMENTS: DueAssessmentKey[] = ['cia1', 'cia2', 'model'];
-const PROJECT_ASSESSMENTS: DueAssessmentKey[] = ['review1', 'review2', 'model'];
+const PROJECT_ASSESSMENTS: DueAssessmentKey[] = ['review1', 'review2'];
 const SPECIAL_ALLOWED_ASSESSMENTS: DueAssessmentKey[] = ['ssa1', 'formative1', 'cia1', 'ssa2', 'formative2', 'cia2'];
 
 const ALL_ASSESSMENTS: DueAssessmentKey[] = ['ssa1', 'review1', 'formative1', 'cia1', 'ssa2', 'review2', 'formative2', 'cia2', 'model'];
@@ -133,10 +133,6 @@ function assessmentDisplayLabel(classType: ClassTypeKey, assessment: DueAssessme
     if (assessment === 'cia2') return 'CIA 2 Review';
     if (assessment === 'model') return 'MODEL Review';
   }
-  if (classType === 'PROJECT') {
-    if (assessment === 'model') return 'MODEL Review';
-  }
-
   // default labels
   if (assessment === 'ssa1') return 'SSA1';
   if (assessment === 'ssa2') return 'SSA2';

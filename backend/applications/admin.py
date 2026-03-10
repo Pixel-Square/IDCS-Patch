@@ -44,7 +44,7 @@ class ApplicationFormVersionAdmin(admin.ModelAdmin):
 class ApprovalStepInline(admin.TabularInline):
     model = models.ApprovalStep
     extra = 0
-    fields = ('order', 'role', 'can_override', 'auto_skip_if_unavailable')
+    fields = ('order', 'role', 'is_final', 'escalate_to_role', 'can_override', 'auto_skip_if_unavailable')
 
 
 class ApprovalFlowAdmin(admin.ModelAdmin):

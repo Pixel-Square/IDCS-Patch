@@ -10,7 +10,7 @@ type Props = {
 };
 
 export default function Review2Entry({ subjectId, teachingAssignmentId, label, classType }: Props) {
-  const useSsaPublishedLockUi = normalizeObeClassType(classType || '') === 'PROJECT';
+  const isProjectClass = normalizeObeClassType(classType || '') === 'PROJECT';
   return (
     <LabEntry
       subjectId={subjectId}
@@ -20,7 +20,8 @@ export default function Review2Entry({ subjectId, teachingAssignmentId, label, c
       coA={3}
       coB={4}
       allCos={[1, 2, 3, 4, 5]}
-      useSsaPublishedLockUi={useSsaPublishedLockUi}
+      useSsaPublishedLockUi={isProjectClass}
+      projectReviewMode={isProjectClass}
     />
   );
 }

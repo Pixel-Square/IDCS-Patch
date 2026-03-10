@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { PlusCircle, Trash2, Calendar, MapPin, Users, RefreshCw, Send } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { PlusCircle, Trash2, Calendar, MapPin, Users, RefreshCw, Send, Sparkles } from 'lucide-react';
 import ApprovalStatusBadge from './ApprovalStatusBadge';
+import PosterMakerPage from '../../events/PosterMakerPage';
 import {
   getAllEvents,
   deleteEvent,
@@ -22,11 +23,17 @@ const STATUS_FILTERS: Array<{ label: string; value: 'all' | EventStatus }> = [
 
 export default function HodEventsListPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [events, setEvents] = useState<CollegeEvent[]>(getAllEvents);
   const [filter, setFilter] = useState<'all' | EventStatus>('all');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const activeTab = searchParams.get('tab') === 'poster-maker' ? 'poster-maker' : 'events';
 
   function refresh() { setEvents(getAllEvents()); }
+
+  function setActiveTab(tab: 'events' | 'poster-maker') {
+    setSearchParams(tab === 'events' ? {} : { tab }, { replace: true });
+  }
 
   function handleDelete(id: string) {
     deleteEvent(id);
@@ -49,21 +56,75 @@ export default function HodEventsListPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">My Events</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Manage events you've created and track their approval status.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Event Management</h1>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {activeTab === 'events'
+              ? "Manage events you've created and track their approval status."
+              : 'Create Canva-powered event posters directly from live Brand Templates.'}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={refresh} className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors" title="Refresh">
-            <RefreshCw className="w-4 h-4" />
-          </button>
-          <Link
-            to="/hod/events/create"
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
+        {activeTab === 'events' ? (
+          <div className="flex items-center gap-2">
+            <button onClick={refresh} className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-100 transition-colors" title="Refresh">
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <Link
+              to="/hod/events/create"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
+            >
+              <PlusCircle className="w-4 h-4" /> New Event
+            </Link>
+          </div>
+        ) : (
+          <button
+            onClick={() => setActiveTab('events')}
+            className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
           >
-            <PlusCircle className="w-4 h-4" /> New Event
-          </Link>
-        </div>
+            Back to Events
+          </button>
+        )}
       </div>
+
+      <div className="flex gap-2 flex-wrap mb-6">
+        {[
+          { key: 'events' as const, label: 'My Events' },
+          { key: 'poster-maker' as const, label: 'Canva Poster Maker' },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+              activeTab === key
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-white border border-gray-200 text-gray-600 hover:border-indigo-300'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'poster-maker' && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-violet-100 bg-gradient-to-r from-violet-50 via-white to-fuchsia-50 p-5 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Canva Poster Maker</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Pick a live Brand Template, fill the mapped event fields, and generate a downloadable poster for your department event.
+                </p>
+              </div>
+            </div>
+          </div>
+          <PosterMakerPage embedded />
+        </div>
+      )}
+
+      {activeTab === 'events' && (
+        <>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -189,6 +250,8 @@ export default function HodEventsListPage() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import BrandingRecentsPage from './BrandingRecentsPage';
 import TemplatesListPage from './templates/TemplatesListPage';
 import TemplateEditorPage from './templates/TemplateEditorPage';
 import CanvaOAuthCallbackPage from './templates/CanvaOAuthCallbackPage';
+import PosterMakerPage from '../events/PosterMakerPage';
 
 /**
  * Top-level layout for the Branding role.
@@ -58,6 +59,7 @@ export default function BrandingLayout() {
             <Route path="create"         element={<BrandingCreatePage />}        />
             <Route path="event-approval" element={<BrandingEventApprovalPage />} />
             <Route path="recents"          element={<BrandingRecentsPage />}       />
+            <Route path="poster-maker"     element={<PosterMakerPage embedded />}   />
             <Route path="templates"        element={<TemplatesListPage />}          />
             <Route path="templates/editor" element={<TemplateEditorPage />}         />
             {/* Canva OAuth callback — must be inside BrandingLayout for the /branding/* guard */}

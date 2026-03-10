@@ -22,13 +22,31 @@ def _get_applicant_department(application):
         return staff.department
 
     student = getattr(application, 'student_profile', None)
+    if student is None:
+        # Backward-compatible fallback for older Application rows
+        try:
+            applicant_user = getattr(application, 'applicant_user', None)
+            student = getattr(applicant_user, 'student_profile', None) if applicant_user is not None else None
+        except Exception:
+            student = None
     try:
         if student is not None and student.section is not None:
             # sections are batch-wise; resolve course via section.batch
-            return student.section.batch.course.department
+            dept = student.section.batch.course.department
+            if dept is not None:
+                return dept
     except Exception:
         # Defensive: if relationship missing, fall back to None
-        return None
+        pass
+
+    # Fallback: many datasets rely on StudentProfile.home_department
+    try:
+        if student is not None:
+            dept = getattr(student, 'home_department', None)
+            if dept is not None:
+                return dept
+    except Exception:
+        pass
 
     return None
 
@@ -40,12 +58,30 @@ def _get_flow_for_application(application) -> Optional[app_models.ApprovalFlow]:
     """
     dept = _get_applicant_department(application)
     qs = app_models.ApprovalFlow.objects.filter(application_type=application.application_type, is_active=True)
-    if dept is not None:
-        flow = qs.filter(department=dept).first()
-        if flow:
-            return flow
+    # Only consider flows that have at least one step configured.
+    qs_with_steps = qs.filter(steps__isnull=False).distinct()
+    dept_flow = None
+    global_flow = None
 
-    return qs.filter(department__isnull=True).first()
+    if dept is not None:
+        dept_flow = qs_with_steps.filter(department=dept).order_by('-id').first()
+        if dept_flow is not None:
+            try:
+                if dept_flow.steps.exists():
+                    return dept_flow
+            except Exception:
+                return dept_flow
+
+    global_flow = qs_with_steps.filter(department__isnull=True).order_by('-id').first()
+    if global_flow is not None:
+        try:
+            if global_flow.steps.exists():
+                return global_flow
+        except Exception:
+            return global_flow
+
+    # No flow with steps; keep legacy preference order.
+    return dept_flow or global_flow
 
 
 def get_current_approval_step(application) -> Optional[app_models.ApprovalStep]:
@@ -55,15 +91,29 @@ def get_current_approval_step(application) -> Optional[app_models.ApprovalStep]:
     step in the matching approval flow (ordered by `order`) is returned.
     Returns None if no flow or no steps exist.
     """
+    flow = _get_flow_for_application(application)
+
     if application.current_step_id:
         # Refresh from DB to ensure up-to-date instance
-        return app_models.ApprovalStep.objects.filter(pk=application.current_step_id).first()
+        step = app_models.ApprovalStep.objects.select_related('approval_flow', 'role').filter(pk=application.current_step_id).first()
+        if step is None:
+            return None
 
-    flow = _get_flow_for_application(application)
+        # If there's an active flow for the application, ensure the stored step
+        # belongs to that flow; otherwise fall back to the first step of the
+        # active flow (prevents stale steps from inactive/old flows).
+        if flow is not None:
+            if step.approval_flow_id == flow.id:
+                return step
+            return flow.steps.select_related('role').order_by('order').first()
+
+        # No active flow configured; keep legacy behavior.
+        return step
+
     if not flow:
         return None
 
-    return flow.steps.order_by('order').first()
+    return flow.steps.select_related('role').order_by('order').first()
 
 
 def get_next_approval_step(application, current_step: Optional[app_models.ApprovalStep]) -> Optional[app_models.ApprovalStep]:
@@ -148,6 +198,16 @@ def user_can_act(application: app_models.Application, user) -> bool:
     if current_step is None:
         return False
 
+    # Prefer concrete approver mapping (mentor/advisor/HOD etc.) when resolvable.
+    try:
+        from applications.services import approver_resolver
+        resolved = approver_resolver.resolve_current_approver(application, current_step)
+        if resolved is not None:
+            return getattr(resolved, 'id', None) == getattr(user, 'id', None)
+    except Exception:
+        # fall back to role-based checks
+        pass
+
     # User can act if any of their roles matches the current step role
     user_roles = _user_roles(user)
     if current_step.role in user_roles:
@@ -157,6 +217,18 @@ def user_can_act(application: app_models.Application, user) -> bool:
     try:
         from applications.services import sla_engine
         if getattr(current_step, 'escalate_to_role', None) and sla_engine.is_step_overdue(application):
+            # If escalation role can be resolved to a concrete user, prefer that.
+            try:
+                from academics.services import authority_resolver
+                esc_role = current_step.escalate_to_role
+                esc_code = getattr(esc_role, 'name', '')
+                staff = authority_resolver.resolve_approver(str(esc_code), application)
+                esc_user = getattr(staff, 'user', None) if staff is not None else None
+                if esc_user is not None:
+                    return getattr(esc_user, 'id', None) == getattr(user, 'id', None)
+            except Exception:
+                pass
+
             if current_step.escalate_to_role in user_roles:
                 return True
     except Exception:
@@ -248,11 +320,43 @@ def process_approval(application: app_models.Application, user, action: str, rem
 
         # Permission check: either user matches current step role, or they may override
         allowed = False
-        if current_step and current_step.role in _user_roles(user):
-            allowed = True
-
         if user_is_override:
             allowed = True
+        elif current_step is not None:
+            # Prefer concrete approver mapping when possible.
+            resolved = None
+            try:
+                from applications.services import approver_resolver
+                resolved = approver_resolver.resolve_current_approver(application, current_step)
+            except Exception:
+                resolved = None
+
+            if resolved is not None:
+                allowed = getattr(resolved, 'id', None) == getattr(user, 'id', None)
+            else:
+                # Fallback: role-based permission when no mapping exists.
+                if current_step.role in _user_roles(user):
+                    allowed = True
+
+            # SLA escalation: if overdue, also allow escalate role (or concrete assignee for it)
+            try:
+                from applications.services import sla_engine
+                if (not allowed) and getattr(current_step, 'escalate_to_role', None) and sla_engine.is_step_overdue(application):
+                    esc_role = current_step.escalate_to_role
+                    esc_user = None
+                    try:
+                        from academics.services import authority_resolver
+                        staff = authority_resolver.resolve_approver(str(getattr(esc_role, 'name', '')), application)
+                        esc_user = getattr(staff, 'user', None) if staff is not None else None
+                    except Exception:
+                        esc_user = None
+                    if esc_user is not None:
+                        allowed = getattr(esc_user, 'id', None) == getattr(user, 'id', None)
+                    else:
+                        if esc_role in _user_roles(user):
+                            allowed = True
+            except Exception:
+                pass
 
         if not allowed:
             raise PermissionDenied('User is not authorized to take this action on the application')

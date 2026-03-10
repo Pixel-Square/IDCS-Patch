@@ -1,0 +1,47 @@
+#include <ESP8266WiFi.h>
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define SS_PIN 2   // D4
+#define RST_PIN 0  // D3 (Connect this to RFID RST)
+
+MFRC522 rfid(SS_PIN, RST_PIN);
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Wait for you to open the Serial Monitor
+  while (!Serial) { delay(10); }
+
+  Serial.println("\n--- MANUAL RESET DETECTED ---");
+  
+  SPI.begin();
+  rfid.PCD_Init();
+
+  // Test if RFID is alive
+  byte v = rfid.PCD_ReadRegister(rfid.VersionReg);
+  if (v == 0x00 || v == 0xFF) {
+    Serial.println("STATUS: RFID NOT FOUND. Press your new switch now!");
+  } else {
+    Serial.println("STATUS: RFID READY. System live.");
+  }
+
+  WiFi.begin("Rfreader", "12345678");
+}
+
+void loop() {
+  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+    String uid = "";
+    for (byte i = 0; i < rfid.uid.size; i++) {
+      uid += String(rfid.uid.uidByte[i] < 0x10 ? "0" : "");
+      uid += String(rfid.uid.uidByte[i], HEX);
+    }
+    uid.toUpperCase();
+    
+    // Output to USB for your application
+    Serial.println("UID:" + uid);
+
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+  }
+}

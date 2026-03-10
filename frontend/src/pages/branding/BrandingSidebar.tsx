@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Menu,
   LayoutTemplate,
+  Sparkles,
 } from 'lucide-react';
 
 interface NavItem {
@@ -25,6 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'create',         label: 'Create',           to: '/branding/create',          icon: PlusCircle     },
   { key: 'event-approval', label: 'Event Approval',   to: '/branding/event-approval',  icon: CheckSquare    },
   { key: 'recents',        label: 'Recents',          to: '/branding/recents',         icon: Clock          },
+  { key: 'poster-maker',   label: 'Canva Poster Maker', to: '/branding/poster-maker',  icon: Sparkles       },
   { key: 'templates',      label: 'Templates',        to: '/branding/templates',       icon: LayoutTemplate },
 ];
 

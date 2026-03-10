@@ -1,13 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-
-
-
 import useDashboard from '../../hooks/useDashboard';
-import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2, PartyPopper, FileText } from 'lucide-react';
-
+import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2, PartyPopper, FileText, ScanLine, Shield } from 'lucide-react';
 import { useSidebar } from './SidebarContext';
 import { fetchPendingPublishRequestCount } from '../../services/obe';
+import { ApplicationsNavResponse, fetchApplicationsNav } from '../../services/applications';
 
   const ICON_MAP: Record<string, any> = {
   profile: User,
@@ -46,7 +43,12 @@ import { fetchPendingPublishRequestCount } from '../../services/obe';
   settings: Settings,
   hr_request_templates: FileText,
   staff_requests_approvals: Bell,
-
+  applications_admin: Layout,
+  applications_inbox: ClipboardList,
+  applications_home: Layout,
+  idscan_test: ScanLine,
+  idscan_gatepass: Shield,
+  rf_reader: Grid,
 };
 
 export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string }) {
@@ -56,6 +58,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   const { collapsed, toggle } = useSidebar();
   const [pendingObeReqCount, setPendingObeReqCount] = useState<number>(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [applicationsNav, setApplicationsNav] = useState<ApplicationsNavResponse | null>(null);
 
   const perms = (data?.permissions || []).map((p) => String(p || '').toLowerCase());
   const canObeMaster = perms.includes('obe.master.manage');
@@ -110,6 +113,32 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   useEffect(() => {
     if (loc.pathname.startsWith('/iqac/academic-controller')) {
       setExpanded((p) => ({ ...p, academic_controller: true }));
+    }
+  }, [loc.pathname]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!data) return;
+
+    (async () => {
+      try {
+        const nav = await fetchApplicationsNav();
+        if (!mounted) return;
+        setApplicationsNav(nav);
+      } catch {
+        if (!mounted) return;
+        setApplicationsNav({ show_applications: false, staff_roles: [], staff_department: null, override_roles: [] });
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [data]);
+  // auto-expand RFReader when on /iqac/rf-reader routes
+  useEffect(() => {
+    if (loc.pathname.startsWith('/iqac/rf-reader')) {
+      setExpanded((p) => ({ ...p, rf_reader: true }));
     }
   }, [loc.pathname]);
 
@@ -236,6 +265,11 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
     items.push({ key: 'settings', label: 'Settings', to: '/settings' });
   }
 
+  // RFReader (IQAC only)
+  if (isIqac && !items.some((item) => item.key === 'rf_reader')) {
+    items.push({ key: 'rf_reader', label: 'RFReader', to: '/iqac/rf-reader' });
+  }
+
   // Only add OBE once
   // Group OBE-related links under a single Academic page
   // Show Academic for all staff
@@ -245,12 +279,30 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if (isIqac && !items.some((item) => item.key === 'academic_controller')) {
     items.push({ key: 'academic_controller', label: 'Academic Controller', to: '/iqac/academic-controller' });
   }
-
   // PBAS Manager intentionally hidden from sidebar for all users
   
   // IQAC staff attendance
   if (rolesUpper.includes('IQAC') && !items.some((item) => item.key === 'iqac_staff_attendance')) {
     items.push({ key: 'iqac_staff_attendance', label: 'Staff Attendance', to: '/iqac/staff-attendance' });
+  }
+
+  if (isIqac && !items.some((item) => item.key === 'applications_admin')) {
+    items.push({ key: 'applications_admin', label: 'Applications Admin', to: '/iqac/applications-admin' });
+  }
+  // IDCSScan — available to SECURITY, IQAC, and ADMIN roles
+  const isSecurity = rolesUpper.includes('SECURITY');
+  if (isSecurity && !items.some((i) => i.key === 'idscan_test')) {
+    items.push({ key: 'idscan_test',     label: 'RFID Scanner Test', to: '/idscan/test' });
+    items.push({ key: 'idscan_gatepass', label: 'Gatepass Scanner',   to: '/idscan/gatepass' });
+  }
+  if (!isSecurity && applicationsNav?.show_applications && !items.some((item) => item.key === 'applications_home')) {
+    items.push({ key: 'applications_home', label: 'My Applications', to: '/applications' });
+  }
+  if (!isSecurity && applicationsNav?.show_applications && (applicationsNav.staff_roles.length > 0 || applicationsNav.override_roles.length > 0) && !flags.is_student && !items.some((item) => item.key === 'applications_inbox')) {
+    items.push({ key: 'applications_inbox', label: 'Approvals Inbox', to: '/applications/inbox' });
+  }
+  if (canPbasManage && !items.some((item) => item.key === 'pbas_manager')) {
+    items.push({ key: 'pbas_manager', label: 'PBAS Manager', to: '/iqac/pbas' });
   }
 
   // PS (Principal Secretary) specific features
@@ -335,6 +387,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
                       // toggle submenu expansion for specific groups
                       if (i.key === 'academic') setExpanded((p) => ({ ...p, academic: !p.academic }));
                       if (i.key === 'academic_controller') setExpanded((p) => ({ ...p, academic_controller: !p.academic_controller }));
+                      if (i.key === 'rf_reader') setExpanded((p) => ({ ...p, rf_reader: !p.rf_reader }));
                     }}
                   >
                     <Icon className={`flex-shrink-0 ${collapsed ? 'lg:w-5 lg:h-5' : 'w-6 h-6'}`} />
@@ -388,6 +441,40 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
                       <li>
                         <Link to={'/iqac/academic-controller?tab=courses'} className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${loc.pathname.startsWith('/iqac/academic-controller') && new URLSearchParams(loc.search).get('tab') === 'courses' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`} onClick={() => { if (window.innerWidth < 1024) toggle(); }}>
                           <Grid className="w-4 h-4" /> <span>Courses</span>
+                        </Link>
+                      </li>
+                    </ul>
+                  ) : null}
+
+                  {/* Submenu for RFReader (IQAC).
+                      Hidden when sidebar is collapsed. */}
+                  {i.key === 'rf_reader' && expanded.rf_reader && !collapsed ? (
+                    <ul className="pl-8 mt-1 space-y-1">
+                      <li>
+                        <Link
+                          to={'/iqac/rf-reader/create-gate'}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${loc.pathname.startsWith('/iqac/rf-reader') && loc.pathname.includes('/create-gate') ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                          onClick={() => { if (window.innerWidth < 1024) toggle(); }}
+                        >
+                          <Grid className="w-4 h-4" /> <span>Create Gate</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to={'/iqac/rf-reader/test-students'}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${loc.pathname.startsWith('/iqac/rf-reader') && loc.pathname.includes('/test-students') ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                          onClick={() => { if (window.innerWidth < 1024) toggle(); }}
+                        >
+                          <Grid className="w-4 h-4" /> <span>Test Students</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to={'/iqac/rf-reader/add-students-rf'}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${loc.pathname.startsWith('/iqac/rf-reader') && loc.pathname.includes('/add-students-rf') ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                          onClick={() => { if (window.innerWidth < 1024) toggle(); }}
+                        >
+                          <Grid className="w-4 h-4" /> <span>Add Students RF</span>
                         </Link>
                       </li>
                     </ul>

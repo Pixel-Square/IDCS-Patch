@@ -3,6 +3,12 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // Monorepo/workspace setups can accidentally pull in two copies of React
+  // (e.g. root node_modules + frontend node_modules). That triggers runtime
+  // "Invalid hook call" errors even when hooks are used correctly.
+  resolve: {
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
+  },
   build: {
     // Use a user-writable outDir; `dist/` is owned by www-data in some deployments.
     outDir: 'build_dist',
@@ -10,7 +16,7 @@ export default defineConfig({
   server: {
     host: true,
     allowedHosts: ['idcs.krgi.co.in', "idcs.zynix.us"],
-    port: 80,
+    port: Number(process.env.PORT || process.env.VITE_DEV_PORT || 80),
     // Dev convenience: when the frontend is served by Vite (often :80) and the
     // Django API is on a different port (often :8000), proxy `/api/...` so
     // same-origin API calls don't 404 with HTML.

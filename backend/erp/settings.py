@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'powerbi_portal.apps.PowerbiPortalConfig',
     'pbas.apps.PbasConfig',
     'staff_attendance.apps.StaffAttendanceConfig',
+    'idcsscan',
 ]
 # Staff requests dynamic forms & workflow engine
 INSTALLED_APPS.append('staff_requests')
@@ -279,12 +280,20 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:81',
     'http://localhost:8000',
     'http://localhost:83',
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'http://localhost:5176',
+    'http://localhost:5177',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:5173',
     'http://127.0.0.1:4173',
     'http://127.0.0.1:82',
     'http://127.0.0.1:8000',
     'http://127.0.0.1:83',
+    'http://127.0.0.1:5174',
+    'http://127.0.0.1:5175',
+    'http://127.0.0.1:5176',
+    'http://127.0.0.1:5177',
     # Production/front-end hosts
     'https://idcs.krgi.co.in',
     'https://db.krgi.co.in',
@@ -376,7 +385,7 @@ CANVA_CLIENT_ID     = os.getenv('CANVA_CLIENT_ID', '')
 CANVA_CLIENT_SECRET = os.getenv('CANVA_CLIENT_SECRET', '')
 # Full URL that Canva redirects the browser to after authorisation.
 # Must be registered in the Canva Developer Portal under your app's "Redirect URLs".
-# Dev (via Vite proxy):   http://localhost:5173/api/canva/oauth/callback
+# Dev (via Vite proxy):   http://localhost:5174/api/canva/oauth/callback
 # Production (via Nginx): https://idcs.krgi.co.in/api/canva/oauth/callback
 CANVA_REDIRECT_URI  = os.getenv('CANVA_REDIRECT_URI', '')
 

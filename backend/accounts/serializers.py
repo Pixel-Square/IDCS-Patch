@@ -377,8 +377,16 @@ class IdentifierTokenObtainPairSerializer(serializers.Serializer):
             raise serializers.ValidationError('User account is disabled.')
 
         # Check for inactive or debarred students
-        if hasattr(user, 'student_profile') and user.student_profile:
-            student_status = getattr(user.student_profile, 'status', 'ACTIVE')
+        # NOTE: `hasattr(user, 'student_profile')` is unsafe for OneToOne reverse
+        # relations because it can raise RelatedObjectDoesNotExist (500). Use
+        # a guarded getattr instead.
+        try:
+            student_profile = getattr(user, 'student_profile', None)
+        except Exception:
+            student_profile = None
+
+        if student_profile:
+            student_status = getattr(student_profile, 'status', 'ACTIVE')
             if student_status == 'INACTIVE':
                 raise serializers.ValidationError('Your student account is inactive. Please contact administration.')
             if student_status == 'DEBAR':
