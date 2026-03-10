@@ -165,7 +165,7 @@ class StudentBulkImportView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── Parse file ──────────────────────────────────────────────────────────
+        # -- Parse file --
         rows = []  # list of (row_number, dict)
 
         if is_excel:
@@ -212,7 +212,7 @@ class StudentBulkImportView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── Import ──────────────────────────────────────────────────────────────
+        # -- Import --
         from academics.models import Department, Section, StudentProfile, StudentSectionAssignment
 
         created_count = 0
@@ -301,7 +301,7 @@ class StudentBulkImportView(APIView):
                             )
                             continue
 
-                    # ── Update existing student ──────────────────────────────
+                    # -- Update existing student --
                     existing = StudentProfile.objects.filter(reg_no=reg_no).first()
                     if existing:
                         existing.status = row_status
@@ -340,7 +340,7 @@ class StudentBulkImportView(APIView):
                                 user_obj.save(update_fields=['email', 'first_name', 'last_name'])
                         updated_count += 1
 
-                    # ── Create new student ───────────────────────────────────
+                    # -- Create new student --
                     else:
                         # Generate a unique username from the reg_no
                         base_username = re.sub(r'[^a-zA-Z0-9]', '', reg_no).lower() or 'student'
@@ -386,7 +386,7 @@ class StudentBulkImportView(APIView):
                         created_count += 1
 
                 except Exception as exc:
-                    errors.append(f'Row {row_idx}: Unexpected error — {exc}')
+                    errors.append(f'Row {row_idx}: Unexpected error - {exc}')
 
         return Response({
             'message': 'Import completed.',
