@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import TimetableTemplate, TimetableSlot, TimetableAssignment
-from .models import SpecialTimetable, SpecialTimetableEntry
+from .models import SpecialTimetable, SpecialTimetableEntry, PeriodSwapRequest
 
 
 class PeriodDefinitionSerializer(serializers.ModelSerializer):
@@ -215,3 +215,52 @@ class SpecialTimetableSerializer(serializers.ModelSerializer):
     class Meta:
         model = SpecialTimetable
         fields = ('id', 'name', 'section', 'created_by', 'is_active', 'created_at', 'entries')
+
+
+class PeriodSwapRequestSerializer(serializers.ModelSerializer):
+    requested_by_name = serializers.SerializerMethodField()
+    requested_to_name = serializers.SerializerMethodField()
+    section_name = serializers.SerializerMethodField()
+    from_period_label = serializers.SerializerMethodField()
+    to_period_label = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = PeriodSwapRequest
+        fields = (
+            'id', 'section', 'section_name', 'requested_by', 'requested_by_name',
+            'requested_to', 'requested_to_name', 'from_date', 'from_period',
+            'from_period_label', 'from_subject_text', 'to_date', 'to_period',
+            'to_period_label', 'to_subject_text', 'status', 'reason',
+            'response_message', 'created_at', 'updated_at', 'responded_at'
+        )
+        read_only_fields = ('created_at', 'updated_at', 'responded_at')
+    
+    def get_requested_by_name(self, obj):
+        try:
+            return obj.requested_by.user.get_full_name() if obj.requested_by.user else obj.requested_by.staff_id
+        except:
+            return 'Unknown'
+    
+    def get_requested_to_name(self, obj):
+        try:
+            return obj.requested_to.user.get_full_name() if obj.requested_to.user else obj.requested_to.staff_id
+        except:
+            return 'Unknown'
+    
+    def get_section_name(self, obj):
+        try:
+            return obj.section.name
+        except:
+            return 'Unknown'
+    
+    def get_from_period_label(self, obj):
+        try:
+            return obj.from_period.label or f"Period {obj.from_period.index}"
+        except:
+            return 'Unknown'
+    
+    def get_to_period_label(self, obj):
+        try:
+            return obj.to_period.label or f"Period {obj.to_period.index}"
+        except:
+            return 'Unknown'

@@ -3,6 +3,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .models import TimetableTemplate, TimetableSlot, TimetableAssignment, SpecialTimetable, SpecialTimetableEntry
 from .serializers import TimetableTemplateSerializer, PeriodDefinitionSerializer, TimetableAssignmentSerializer, SpecialTimetableSerializer, SpecialTimetableEntrySerializer
+from .models import PeriodSwapRequest
+from .serializers import PeriodSwapRequestSerializer
 from accounts.utils import get_user_permissions
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
@@ -1886,3 +1888,423 @@ class SpecialTimetableEntryViewSet(viewsets.ModelViewSet):
         except Exception:
             # non-fatal; do not block entry creation
             pass
+
+
+class PeriodSwapRequestView(APIView):
+    """Handle period swap requests that require approval.
+    
+    POST /api/timetable/swap-requests/
+        Create a new swap request between any two periods
+        Body: { section_id, from_date, from_period_id, to_date, to_period_id, reason }
+        
+        Staff can request swaps for:
+        - Their own period with another staff's period
+        - Any two periods in a section (allows coordinators/HODs to initiate swaps)
+        
+        Validations:
+        - Both periods must have different assigned staff
+        - Cannot swap elective periods
+        - Cannot swap custom subject periods
+        - Cannot swap same subject with same staff
+    
+    GET /api/timetable/swap-requests/
+        List swap requests (pending, received, or sent by the user)
+        Query params: status (PENDING, APPROVED, REJECTED, CANCELLED)
+    """
+    permission_classes = (IsAuthenticated,)
+    
+    def post(self, request):
+        """Create a new period swap request."""
+        from academics.models import Section, StaffProfile
+        import datetime
+        
+        user = request.user
+        staff_profile = getattr(user, 'staff_profile', None)
+        if not staff_profile:
+            raise PermissionDenied('Staff profile required')
+        
+        data = request.data
+        section_id = data.get('section_id')
+        from_date_str = data.get('from_date')
+        to_date_str = data.get('to_date')
+        from_period_id = data.get('from_period_id')
+        to_period_id = data.get('to_period_id')
+        reason = data.get('reason', '')
+        
+        if not all([section_id, from_date_str, to_date_str, from_period_id, to_period_id]):
+            return Response({
+                'error': 'section_id, from_date, to_date, from_period_id, and to_period_id are required'
+            }, status=400)
+        
+        try:
+            section = Section.objects.get(pk=int(section_id))
+            from_date = datetime.date.fromisoformat(from_date_str)
+            to_date = datetime.date.fromisoformat(to_date_str)
+            from_period = TimetableSlot.objects.get(pk=int(from_period_id))
+            to_period = TimetableSlot.objects.get(pk=int(to_period_id))
+        except Exception as e:
+            return Response({'error': f'Invalid data: {str(e)}'}, status=400)
+        
+        # Get assignments to determine the other staff
+        from_day_of_week = from_date.isoweekday()
+        to_day_of_week = to_date.isoweekday()
+        
+        # Try multiple query approaches to find assignments
+        from_assigns = TimetableAssignment.objects.filter(
+            section=section, period=from_period, day=from_day_of_week
+        ).select_related('staff', 'staff__user', 'curriculum_row', 'subject_batch', 'subject_batch__staff', 'subject_batch__staff__user').first()
+        
+        to_assigns = TimetableAssignment.objects.filter(
+            section=section, period=to_period, day=to_day_of_week
+        ).select_related('staff', 'staff__user', 'curriculum_row', 'subject_batch', 'subject_batch__staff', 'subject_batch__staff__user').first()
+        
+        # If exact period lookup fails, fall back to matching by period index
+        if not from_assigns:
+            try:
+                from_slot_index = from_period.index
+                if from_slot_index is not None:
+                    from_assigns = TimetableAssignment.objects.filter(
+                        section=section, period__index=from_slot_index, day=from_day_of_week
+                    ).select_related('staff', 'staff__user', 'curriculum_row', 'subject_batch', 'subject_batch__staff', 'subject_batch__staff__user').first()
+            except Exception:
+                pass
+        
+        if not to_assigns:
+            try:
+                to_slot_index = to_period.index
+                if to_slot_index is not None:
+                    to_assigns = TimetableAssignment.objects.filter(
+                        section=section, period__index=to_slot_index, day=to_day_of_week
+                    ).select_related('staff', 'staff__user', 'curriculum_row', 'subject_batch', 'subject_batch__staff', 'subject_batch__staff__user').first()
+            except Exception:
+                pass
+        
+        if not from_assigns or not to_assigns:
+            return Response({'error': 'No assignments found for the selected periods'}, status=400)
+        
+        # Check for electives and custom subjects
+        from_cr = from_assigns.curriculum_row
+        to_cr = to_assigns.curriculum_row
+        
+        if from_cr and getattr(from_cr, 'is_elective', False):
+            return Response({'error': 'Cannot swap elective periods'}, status=400)
+        if to_cr and getattr(to_cr, 'is_elective', False):
+            return Response({'error': 'Cannot swap elective periods'}, status=400)
+        
+        from_text = (from_assigns.subject_text or '').strip()
+        to_text = (to_assigns.subject_text or '').strip()
+        
+        if not from_cr and from_text:
+            return Response({'error': 'Cannot swap custom subject periods'}, status=400)
+        if not to_cr and to_text:
+            return Response({'error': 'Cannot swap custom subject periods'}, status=400)
+        
+        # RULE 1: Block swaps if subject has batches
+        if from_assigns.subject_batch_id:
+            from_subject_code = getattr(from_cr, 'course_code', None) or from_text or ''
+            return Response({'error': f'Cannot swap batched subject ({from_subject_code}). Only common subjects can be swapped.'}, status=400)
+        if to_assigns.subject_batch_id:
+            to_subject_code = getattr(to_cr, 'course_code', None) or to_text or ''
+            return Response({'error': f'Cannot swap batched subject ({to_subject_code}). Only common subjects can be swapped.'}, status=400)
+        
+        # RULE 2: Block advisor subjects (check if this is an advisor-specific assignment)
+        # Advisor subjects are typically identified by the section's advisor teaching it
+        try:
+            from academics.models import SectionAdvisor
+            section_advisor = SectionAdvisor.objects.filter(
+                section=section, is_active=True, academic_year__is_active=True
+            ).first()
+            
+            if section_advisor:
+                advisor_staff = section_advisor.advisor
+                # If assignment has direct staff and it's the advisor, block it
+                if from_assigns.staff and from_assigns.staff.id == advisor_staff.id:
+                    from_subject_code = getattr(from_cr, 'course_code', None) or from_text or ''
+                    return Response({'error': f'Cannot swap advisor subject ({from_subject_code})'}, status=400)
+                if to_assigns.staff and to_assigns.staff.id == advisor_staff.id:
+                    to_subject_code = getattr(to_cr, 'course_code', None) or to_text or ''
+                    return Response({'error': f'Cannot swap advisor subject ({to_subject_code})'}, status=400)
+        except Exception:
+            pass
+        
+        # Get staff from TeachingAssignment mapping for common subjects
+        from_staff = None
+        to_staff = None
+        
+        def get_staff_for_assignment(assigns, curriculum_row):
+            """Get staff from assignment, or lookup via TeachingAssignment"""
+            # First check direct assignment
+            if assigns.staff:
+                return assigns.staff
+            
+            # If no direct staff, lookup via TeachingAssignment
+            if curriculum_row:
+                try:
+                    from academics.models import TeachingAssignment
+                    ta = TeachingAssignment.objects.filter(
+                        section=section,
+                        curriculum_row=curriculum_row,
+                        is_active=True
+                    ).select_related('staff').first()
+                    
+                    if ta and ta.staff:
+                        return ta.staff
+                except Exception:
+                    pass
+            
+            return None
+        
+        from_staff = get_staff_for_assignment(from_assigns, from_cr)
+        to_staff = get_staff_for_assignment(to_assigns, to_cr)
+        
+        from_subject = getattr(from_cr, 'course_code', None) or from_text or ''
+        to_subject = getattr(to_cr, 'course_code', None) or to_text or ''
+        
+        if not from_staff or not to_staff:
+            error_detail = []
+            if not from_staff:
+                error_detail.append(f'From period ({from_subject}) has no staff assigned')
+            if not to_staff:
+                error_detail.append(f'To period ({to_subject}) has no staff assigned')
+            return Response({'error': '; '.join(error_detail)}, status=400)
+        
+        if from_staff.id == to_staff.id:
+            return Response({'error': 'Cannot swap periods that are taught by the same staff member'}, status=400)
+        
+        # Determine who to notify based on who the requester is
+        # If requester is teaching one of the periods, notify the other staff
+        # If requester is not teaching either period, notify the to_period staff by default
+        if from_staff.id == staff_profile.id:
+            # Requester is teaching from_period, notify to_period staff
+            requested_to = to_staff
+        elif to_staff.id == staff_profile.id:
+            # Requester is teaching to_period, notify from_period staff
+            requested_to = from_staff
+        else:
+            # Requester is not teaching either period (coordinator/HOD initiating swap)
+            # Notify the to_period staff by default
+            requested_to = to_staff
+        
+        # Check for existing pending request for the same swap
+        existing = PeriodSwapRequest.objects.filter(
+            section=section,
+            from_date=from_date,
+            from_period=from_period,
+            to_date=to_date,
+            to_period=to_period,
+            status='PENDING'
+        ).exists()
+        
+        if existing:
+            return Response({'error': 'A pending swap request already exists for these periods'}, status=400)
+        
+        # Create the swap request
+        swap_request = PeriodSwapRequest.objects.create(
+            section=section,
+            requested_by=staff_profile,
+            requested_to=requested_to,
+            from_date=from_date,
+            from_period=from_period,
+            from_subject_text=from_subject,
+            to_date=to_date,
+            to_period=to_period,
+            to_subject_text=to_subject,
+            reason=reason,
+            status='PENDING'
+        )
+        
+        serializer = PeriodSwapRequestSerializer(swap_request)
+        return Response({
+            'success': True,
+            'message': f'Swap request sent to {requested_to.user.get_full_name() if requested_to.user else requested_to.staff_id}',
+            'request': serializer.data
+        }, status=201)
+    
+    def get(self, request):
+        """List swap requests for the current staff."""
+        user = request.user
+        staff_profile = getattr(user, 'staff_profile', None)
+        if not staff_profile:
+            raise PermissionDenied('Staff profile required')
+        
+        status_filter = request.query_params.get('status', '')
+        
+        base_qs = PeriodSwapRequest.objects.select_related(
+            'section', 'requested_by', 'requested_to',
+            'requested_by__user', 'requested_to__user',
+            'from_period', 'to_period'
+        ).order_by('-created_at')
+        
+        received_qs = base_qs.filter(requested_to=staff_profile)
+        sent_qs = base_qs.filter(requested_by=staff_profile)
+        
+        if status_filter:
+            received_qs = received_qs.filter(status=status_filter)
+            sent_qs = sent_qs.filter(status=status_filter)
+        
+        return Response({
+            'success': True,
+            'received': PeriodSwapRequestSerializer(received_qs, many=True).data,
+            'sent': PeriodSwapRequestSerializer(sent_qs, many=True).data,
+        })
+
+
+class PeriodSwapRequestActionView(APIView):
+    """Handle approval/rejection of period swap requests.
+    
+    POST /api/timetable/swap-requests/<id>/approve/
+        Approve a swap request and execute the swap
+    
+    POST /api/timetable/swap-requests/<id>/reject/
+        Reject a swap request
+        
+    POST /api/timetable/swap-requests/<id>/cancel/
+        Cancel a swap request (only by requester)
+    """
+    permission_classes = (IsAuthenticated,)
+    
+    def post(self, request, request_id, action):
+        """Approve, reject, or cancel a swap request."""
+        from django.utils import timezone
+        
+        user = request.user
+        staff_profile = getattr(user, 'staff_profile', None)
+        if not staff_profile:
+            raise PermissionDenied('Staff profile required')
+        
+        try:
+            swap_request = PeriodSwapRequest.objects.select_related(
+                'section', 'requested_by', 'requested_to', 'from_period', 'to_period'
+            ).get(pk=request_id)
+        except PeriodSwapRequest.DoesNotExist:
+            return Response({'error': 'Swap request not found'}, status=404)
+        
+        if swap_request.status != 'PENDING':
+            return Response({
+                'error': f'This request has already been {swap_request.status.lower()}'
+            }, status=400)
+        
+        response_message = request.data.get('message', '')
+        
+        if action == 'approve':
+            # Only the requested_to staff can approve
+            if swap_request.requested_to.id != staff_profile.id:
+                raise PermissionDenied('Only the requested staff can approve this swap')
+            
+            # Execute the swap by creating SpecialTimetableEntry records
+            try:
+                from_assigns = TimetableAssignment.objects.filter(
+                    section=swap_request.section,
+                    period=swap_request.from_period,
+                    day=swap_request.from_date.isoweekday()
+                ).select_related('staff', 'curriculum_row', 'subject_batch').first()
+                
+                to_assigns = TimetableAssignment.objects.filter(
+                    section=swap_request.section,
+                    period=swap_request.to_period,
+                    day=swap_request.to_date.isoweekday()
+                ).select_related('staff', 'curriculum_row', 'subject_batch').first()
+                
+                if not from_assigns or not to_assigns:
+                    return Response({'error': 'Assignments not found for swap'}, status=400)
+                
+                # Create special timetable entries for the swap
+                swap_name_from = f'[SWAP] {swap_request.from_date.isoformat()}'
+                swap_name_to = f'[SWAP] {swap_request.to_date.isoformat()}'
+                
+                st_from, _ = SpecialTimetable.objects.get_or_create(
+                    section=swap_request.section,
+                    name=swap_name_from,
+                    defaults={'created_by': staff_profile, 'is_active': True}
+                )
+                
+                if swap_request.from_date == swap_request.to_date:
+                    st_to = st_from
+                else:
+                    st_to, _ = SpecialTimetable.objects.get_or_create(
+                        section=swap_request.section,
+                        name=swap_name_to,
+                        defaults={'created_by': staff_profile, 'is_active': True}
+                    )
+                
+                # Delete existing entries if any
+                SpecialTimetableEntry.objects.filter(
+                    timetable=st_from,
+                    date=swap_request.from_date,
+                    period=swap_request.from_period
+                ).delete()
+                
+                SpecialTimetableEntry.objects.filter(
+                    timetable=st_to,
+                    date=swap_request.to_date,
+                    period=swap_request.to_period
+                ).delete()
+                
+                # Create the swap entries
+                SpecialTimetableEntry.objects.create(
+                    timetable=st_from,
+                    date=swap_request.from_date,
+                    period=swap_request.from_period,
+                    staff=to_assigns.staff,
+                    curriculum_row=to_assigns.curriculum_row,
+                    subject_batch=to_assigns.subject_batch,
+                    subject_text=swap_request.from_subject_text,
+                    is_active=True
+                )
+                
+                SpecialTimetableEntry.objects.create(
+                    timetable=st_to,
+                    date=swap_request.to_date,
+                    period=swap_request.to_period,
+                    staff=from_assigns.staff,
+                    curriculum_row=from_assigns.curriculum_row,
+                    subject_batch=from_assigns.subject_batch,
+                    subject_text=swap_request.to_subject_text,
+                    is_active=True
+                )
+                
+                swap_request.status = 'APPROVED'
+                swap_request.response_message = response_message
+                swap_request.responded_at = timezone.now()
+                swap_request.save()
+                
+                return Response({
+                    'success': True,
+                    'message': 'Swap request approved and periods swapped successfully'
+                })
+                
+            except Exception as e:
+                return Response({'error': f'Failed to execute swap: {str(e)}'}, status=500)
+        
+        elif action == 'reject':
+            # Only the requested_to staff can reject
+            if swap_request.requested_to.id != staff_profile.id:
+                raise PermissionDenied('Only the requested staff can reject this swap')
+            
+            swap_request.status = 'REJECTED'
+            swap_request.response_message = response_message
+            swap_request.responded_at = timezone.now()
+            swap_request.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Swap request rejected'
+            })
+        
+        elif action == 'cancel':
+            # Only the requester can cancel
+            if swap_request.requested_by.id != staff_profile.id:
+                raise PermissionDenied('Only the requester can cancel this swap')
+            
+            swap_request.status = 'CANCELLED'
+            swap_request.response_message = response_message
+            swap_request.responded_at = timezone.now()
+            swap_request.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Swap request cancelled'
+            })
+        
+        else:
+            return Response({'error': 'Invalid action'}, status=400)

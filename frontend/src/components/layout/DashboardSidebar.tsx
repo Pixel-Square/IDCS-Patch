@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-
-
+import fetchWithAuth from '../../services/fetchAuth';
 
 import useDashboard from '../../hooks/useDashboard';
 import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2, PartyPopper } from 'lucide-react';
@@ -53,10 +52,12 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
 
   const { collapsed, toggle } = useSidebar();
   const [pendingObeReqCount, setPendingObeReqCount] = useState<number>(0);
+  const [pendingSwapReqCount, setPendingSwapReqCount] = useState<number>(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const perms = (data?.permissions || []).map((p) => String(p || '').toLowerCase());
   const canObeMaster = perms.includes('obe.master.manage');
+  const isStaff = data?.flags?.is_staff || false;
 
   useEffect(() => {
     let mounted = true;
@@ -92,6 +93,39 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
       window.clearInterval(interval);
     };
   }, [canObeMaster]);
+
+  // Fetch pending swap request count for staff
+  useEffect(() => {
+    let mounted = true;
+    
+    const fetchSwapRequestCount = async () => {
+      if (!isStaff) {
+        setPendingSwapReqCount(0);
+        return;
+      }
+      
+      try {
+        const response = await fetchWithAuth('/api/timetable/swap-requests/?status=PENDING');
+        if (!mounted) return;
+        if (response.ok) {
+          const respData = await response.json();
+          const receivedCount = (respData.received || []).length;
+          setPendingSwapReqCount(receivedCount);
+        }
+      } catch {
+        // badge is best-effort
+      }
+    };
+
+    // Fetch immediately and then every 30 seconds
+    fetchSwapRequestCount();
+    const interval = window.setInterval(fetchSwapRequestCount, 30_000);
+    
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, [isStaff]);
 
   // auto-expand Academic when on /academic routes
   useEffect(() => {
@@ -297,6 +331,9 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
                       {i.label}
                       {i.key === 'obe_requests' && pendingObeReqCount > 0 ? (
                         <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-full bg-red-600 text-white">{pendingObeReqCount}</span>
+                      ) : null}
+                      {i.key === 'staff_timetable' && pendingSwapReqCount > 0 ? (
+                        <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-full bg-orange-600 text-white">{pendingSwapReqCount}</span>
                       ) : null}
                     </span>
                   </Link>

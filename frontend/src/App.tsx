@@ -39,6 +39,7 @@ import StaffTimetable from './pages/staff/TimetableView';
 import AssignedSubjectsPage from './pages/staff/AssignedSubjects';
 import PeriodAttendance from './pages/staff/PeriodAttendance';
 import AttendanceAnalytics from './pages/staff/AttendanceAnalytics';
+// SwapRequestsPage removed — swap requests handled via modal
 import StudentAttendancePage from './pages/student/Attendance';
 import StudentAcademics from './pages/student/Academics';
 import MentorAssign from './pages/advisor/MentorAssign';
@@ -322,6 +323,8 @@ export default function App() {
                   path="/staff/period-attendance"
                   element={<ProtectedRoute user={user} requiredProfile={'STAFF'} requiredPermissions={['academics.mark_attendance']} element={<PeriodAttendance />} />}
                 />
+
+
 
                 <Route
                   path="/staff/analytics"
