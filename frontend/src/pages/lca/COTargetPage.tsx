@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fetchCdapRevision, fetchArticulationMatrix } from '../../services/cdapDb';
-import { fetchMyTeachingAssignments } from '../../services/obe';
+import { createEditRequest, fetchMarkTableLockStatus, fetchMyTeachingAssignments, formatEditRequestSentMessage, MarkTableLockStatusResponse } from '../../services/obe';
 import { fetchDeptRows } from '../../services/curriculum';
+import { fetchCoTargetRevision, saveCoTargetRevision } from '../../services/lcaDb';
 
 const styles: { [k: string]: React.CSSProperties } = {
   page: { padding: '20px 24px', width: '100%', boxSizing: 'border-box', minHeight: '100vh', fontFamily: "Inter, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial", color: '#1f3947' },
-  card: { background: '#fff', borderRadius: 12, padding: 18, border: '1px solid #e6eef8', boxShadow: '0 6px 20px rgba(13,60,100,0.04)' },
+  card: { background: '#fff', borderRadius: 12, padding: 18, border: '1px solid #e6eef8', boxShadow: '0 6px 20px rgba(13,60,100,0.04)', overflowX: 'auto' as React.CSSProperties['overflowX'] },
   headerRow: { display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 },
   label: { color: '#557085', fontSize: 12, fontWeight: 700 },
   codeBox: { background: '#fbfdff', border: '1px solid #e6eef8', padding: '10px 14px', borderRadius: 8, fontWeight: 800, color: '#0b4a6f', fontSize: 18 },
@@ -35,6 +36,14 @@ export default function COTargetPage({
 }): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
+
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+  const [editRequestOpen, setEditRequestOpen] = useState(false);
+  const [editReason, setEditReason] = useState('');
+  const [markLock, setMarkLock] = useState<MarkTableLockStatusResponse | null>(null);
+  const [revStatus, setRevStatus] = useState<string>('draft');
+  const [validationErrors, setValidationErrors] = useState<Set<string>>(new Set());
 
   const containerStyle = embedded ? { padding: 12, width: '100%', margin: 0 } as React.CSSProperties : styles.page;
 
@@ -77,6 +86,149 @@ export default function COTargetPage({
   const [manuals, setManuals] = useState<Array<{ aco?: number | null; api?: number | null; iic?: number | null }>>(
     Array.from({ length: 5 }, () => ({ aco: null, api: null, iic: null }))
   );
+
+  // API batch summary inputs
+  const [apiSummary, setApiSummary] = useState<{ batchCay: string; noOfSuccessful: string; meanCgpa: string }>(
+    { batchCay: '', noOfSuccessful: '', meanCgpa: '' }
+  );
+
+  // Load previously saved CO Target inputs
+  useEffect(() => {
+    let mounted = true;
+    const subjectId = String(courseCode || '').trim();
+    if (!subjectId) return;
+    (async () => {
+      try {
+        const res = await fetchCoTargetRevision(subjectId);
+        setRevStatus(String((res as any)?.status || 'draft'));
+        const d = (res as any)?.data || {};
+        if (!mounted) return;
+        if (Array.isArray(d.btlSelection) && d.btlSelection.length === 5) {
+          setBtlSelection(d.btlSelection);
+        }
+        if (d.weights && typeof d.weights === 'object') {
+          setWeights((p) => ({
+            ...p,
+            ico: Number((d.weights as any).ico ?? p.ico),
+            bco: Number((d.weights as any).bco ?? p.bco),
+            aco: Number((d.weights as any).aco ?? p.aco),
+            api: Number((d.weights as any).api ?? p.api),
+            iic: Number((d.weights as any).iic ?? p.iic),
+          }));
+        }
+        if (Array.isArray(d.manuals) && d.manuals.length === 5) {
+          setManuals(d.manuals);
+        }
+        if (d.apiSummary && typeof d.apiSummary === 'object') {
+          setApiSummary((p) => ({
+            batchCay: String((d.apiSummary as any).batchCay ?? p.batchCay),
+            noOfSuccessful: String((d.apiSummary as any).noOfSuccessful ?? p.noOfSuccessful),
+            meanCgpa: String((d.apiSummary as any).meanCgpa ?? p.meanCgpa),
+          }));
+        }
+        setSaveNote('Loaded');
+      } catch {
+        // ignore load failures
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [courseCode]);
+
+  // Fetch publish/lock state for read-only behavior
+  useEffect(() => {
+    let mounted = true;
+    const subjectId = String(courseCode || '').trim();
+    if (!subjectId) return;
+    (async () => {
+      try {
+        const lock = await fetchMarkTableLockStatus('lca' as any, subjectId);
+        if (!mounted) return;
+        setMarkLock(lock);
+      } catch {
+        // best-effort only
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [courseCode]);
+
+  const isPublished = Boolean((markLock?.exists && markLock.is_published) || String(revStatus || '').toLowerCase() === 'published');
+  const entryOpen = !isPublished ? true : Boolean(markLock?.entry_open);
+  const readOnly = Boolean(isPublished && !entryOpen);
+
+  const handlePublish = async () => {
+    const missingBtl = btlSelection.map((v, i) => v === null ? i : -1).filter((i) => i >= 0);
+    if (missingBtl.length > 0) {
+      setValidationErrors(new Set(['btl']));
+      setSaveNote(`Please select a BTL level for: ${missingBtl.map((i) => `CO${i + 1}`).join(', ')}`);
+      return;
+    }
+    setValidationErrors(new Set());
+    const subjectId = String(courseCode || '').trim();
+    if (!subjectId) {
+      setSaveNote('Missing course code');
+      return;
+    }
+    setSaveBusy(true);
+    setSaveNote(null);
+    setEditRequestOpen(false);
+    try {
+      await saveCoTargetRevision(
+        subjectId,
+        {
+          btlSelection,
+          weights,
+          manuals,
+          apiSummary,
+        },
+        'published',
+      );
+      setRevStatus('published');
+      setSaveNote('Published');
+      try {
+        const lock = await fetchMarkTableLockStatus('lca' as any, subjectId);
+        setMarkLock(lock);
+      } catch {
+        // ignore
+      }
+    } catch (e: any) {
+      setSaveNote(String(e?.message || 'Publish failed'));
+    } finally {
+      setSaveBusy(false);
+    }
+  };
+
+  const handleSendEditRequest = async () => {
+    const subjectId = String(courseCode || '').trim();
+    if (!subjectId) {
+      setSaveNote('Missing course code');
+      return;
+    }
+    const reason = String(editReason || '').trim();
+    if (!reason) {
+      setSaveNote('Please enter a reason');
+      return;
+    }
+    setSaveBusy(true);
+    setSaveNote(null);
+    try {
+      const created = await createEditRequest({
+        assessment: 'lca' as any,
+        subject_code: subjectId,
+        scope: 'MARK_MANAGER',
+        reason,
+      });
+      setSaveNote(formatEditRequestSentMessage(created));
+      setEditRequestOpen(false);
+    } catch (e: any) {
+      setSaveNote(String(e?.message || 'Request failed'));
+    } finally {
+      setSaveBusy(false);
+    }
+  };
 
   // helper: round half up to given decimals
   function roundHalfUp(value: number, decimals: number) {
@@ -306,23 +458,88 @@ export default function COTargetPage({
 
           <div>
             {!embedded ? (
-              <button
-                onClick={() => navigate(-1)}
-                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e6eef8', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
-              >
-                ← Back
-              </button>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={!readOnly ? handlePublish : () => setEditRequestOpen(true)}
+                  disabled={saveBusy}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #e6eef8',
+                    background: '#fbfdff',
+                    cursor: saveBusy ? 'not-allowed' : 'pointer',
+                    fontWeight: 800,
+                    color: '#0b4a6f',
+                    opacity: saveBusy ? 0.7 : 1,
+                  }}
+                >
+                  {saveBusy ? 'Please wait…' : !readOnly ? 'Publish' : 'Request Edit'}
+                </button>
+                <button
+                  onClick={() => navigate(-1)}
+                  style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e6eef8', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
+                >
+                  ← Back
+                </button>
+              </div>
             ) : onClose ? (
-              <button
-                onClick={onClose}
-                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e6eef8', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
-              >
-                Close
-              </button>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={!readOnly ? handlePublish : () => setEditRequestOpen(true)}
+                  disabled={saveBusy}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #e6eef8',
+                    background: '#fbfdff',
+                    cursor: saveBusy ? 'not-allowed' : 'pointer',
+                    fontWeight: 800,
+                    color: '#0b4a6f',
+                    opacity: saveBusy ? 0.7 : 1,
+                  }}
+                >
+                  {saveBusy ? 'Please wait…' : !readOnly ? 'Publish' : 'Request Edit'}
+                </button>
+                <button
+                  onClick={onClose}
+                  style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e6eef8', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
+                >
+                  Close
+                </button>
+              </div>
             ) : null}
           </div>
         </div>
 
+        {editRequestOpen && readOnly && (
+          <div style={{ marginTop: -6, marginBottom: 10, background: '#fff7ed', border: '1px solid #fed7aa', color: '#7c2d12', padding: 12, borderRadius: 12 }}>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>Request edit approval (IQAC)</div>
+            <textarea
+              value={editReason}
+              onChange={(e) => setEditReason(e.target.value)}
+              placeholder="Reason for requesting edits"
+              style={{ width: '100%', minHeight: 72, borderRadius: 10, border: '1px solid #fdba74', padding: 10, outline: 'none' }}
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
+              <button type="button" className="obe-btn obe-btn-secondary" onClick={() => setEditRequestOpen(false)} disabled={saveBusy}>
+                Cancel
+              </button>
+              <button type="button" className="obe-btn obe-btn-primary" onClick={handleSendEditRequest} disabled={saveBusy}>
+                {saveBusy ? 'Sending…' : 'Send Request'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {saveNote && (
+          <div style={{ marginTop: -6, marginBottom: 10, color: saveNote === 'Published' ? '#067647' : (validationErrors.size > 0 ? '#b42318' : '#557085'), fontWeight: 700, whiteSpace: 'pre-line', ...(validationErrors.size > 0 ? { background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px' } : {}) }}>
+            {saveNote}
+          </div>
+        )}
+
+        <div style={{ pointerEvents: readOnly ? 'none' : 'auto', opacity: readOnly ? 0.94 : 1 }}>
         <div style={{ ...styles.card, padding: 14, marginTop: 0 }}>
           <div style={styles.sectionTitle}>Course Outcome Attainment — Targets</div>
           {/* removed automatic generation note per request */}
@@ -378,8 +595,8 @@ export default function COTargetPage({
                 </thead>
                 <tbody>
                   {['CO1','CO2','CO3','CO4','CO5'].map((co, idx) => (
-                    <tr key={co}>
-                      <td style={styles.tdLeft}>{co}</td>
+                    <tr key={co} style={validationErrors.has('btl') && btlSelection[idx] === null ? { background: '#fef2f2' } : {}}>
+                      <td style={{ ...styles.tdLeft, ...(validationErrors.has('btl') && btlSelection[idx] === null ? { borderLeft: '3px solid #ef4444' } : {}) }}>{co}</td>
                       {Array.from({ length: 6 }, (_, levelIdx) => {
                         const level = levelIdx + 1;
                         const selected = btlSelection[idx] === level;
@@ -397,6 +614,7 @@ export default function COTargetPage({
                                   else copy[idx] = level; // select this, others auto-disabled via checked logic
                                   return copy;
                                 });
+                                if (validationErrors.size > 0) setValidationErrors(new Set());
                               }}
                               disabled={btlSelection[idx] != null && btlSelection[idx] !== level}
                               title={btlSelection[idx] != null && btlSelection[idx] !== level ? 'Disabled while another BTL is selected' : `Select BTL-${level}`}
@@ -433,33 +651,76 @@ export default function COTargetPage({
             </div>
 
             {/* 4. Average Performance Index (API) - spreadsheet style */}
-            <div style={{ ...styles.card, padding: 16, minHeight: 120 }}>
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>4. Average Performance Index (API)</div>
+            <div style={{ ...styles.card, padding: 16 }}>
+              <div style={{ fontWeight: 700, marginBottom: 12, color: '#0b3b57', fontSize: 15 }}>4. Average Performance Index (API)</div>
 
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                {/* Left: small table with yellow values (values cleared) - expanded */}
-                <div style={{ border: '1px solid #94a3b8', borderRadius: 4, overflow: 'hidden', flex: 1 }}>
-                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                {/* Left: batch summary inputs */}
+                <div style={{ flex: '1 1 260px', minWidth: 220 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 8, color: '#334e68', fontSize: 13 }}>Batch Summary</div>
+                  <table style={{ borderCollapse: 'collapse', width: '100%', border: '1px solid #94a3b8', borderRadius: 6, overflow: 'hidden' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '10px 12px', background: '#f3f8ff', color: '#0b4a6f', fontWeight: 700, fontSize: 13, textAlign: 'left', borderBottom: '1px solid #94a3b8', borderRight: '1px solid #94a3b8' }}>FIELD</th>
+                        <th style={{ padding: '10px 12px', background: '#f3f8ff', color: '#0b4a6f', fontWeight: 700, fontSize: 13, textAlign: 'center', borderBottom: '1px solid #94a3b8' }}>VALUE</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       <tr>
-                        <td style={{ padding: 8, minWidth: 220, background: '#fff', fontWeight: 700, borderRight: '1px solid #94a3b8' }}>BATCH (CAY)</td>
-                        <td style={{ padding: 8, background: '#fde68a', fontWeight: 800, textAlign: 'center' }}></td>
+                        <td style={{ padding: '10px 12px', background: '#fff', fontWeight: 700, fontSize: 13, borderRight: '1px solid #94a3b8', borderBottom: '1px solid #e2e8f0', minWidth: 160 }}>BATCH (CAY)</td>
+                        <td style={{ padding: '6px 10px', background: '#fef9c3', borderBottom: '1px solid #e2e8f0' }}>
+                          <input
+                            type="text"
+                            value={apiSummary.batchCay}
+                            onChange={(e) => setApiSummary((p) => ({ ...p, batchCay: e.target.value }))}
+                            placeholder="e.g. 2024-25"
+                            style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 14, outline: 'none', fontWeight: 700, boxSizing: 'border-box' }}
+                          />
+                        </td>
                       </tr>
                       <tr>
-                        <td style={{ padding: 8, background: '#fff', borderTop: '1px solid #94a3b8', borderRight: '1px solid #94a3b8' }}>NO OF SUCCESSFUL</td>
-                        <td style={{ padding: 8, background: '#fde68a', fontWeight: 800, textAlign: 'center' }}></td>
+                        <td style={{ padding: '10px 12px', background: '#fff', fontWeight: 700, fontSize: 13, borderRight: '1px solid #94a3b8', borderBottom: '1px solid #e2e8f0' }}>NO OF SUCCESSFUL</td>
+                        <td style={{ padding: '6px 10px', background: '#fef9c3', borderBottom: '1px solid #e2e8f0' }}>
+                          <input
+                            type="number"
+                            min={0}
+                            value={apiSummary.noOfSuccessful}
+                            onChange={(e) => setApiSummary((p) => ({ ...p, noOfSuccessful: e.target.value }))}
+                            placeholder="0"
+                            style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 14, outline: 'none', fontWeight: 700, boxSizing: 'border-box' }}
+                          />
+                        </td>
                       </tr>
                       <tr>
-                        <td style={{ padding: 8, background: '#fff', borderTop: '1px solid #94a3b8', borderRight: '1px solid #94a3b8' }}>MEAN CGPA</td>
-                        <td style={{ padding: 8, background: '#fde68a', fontWeight: 800, textAlign: 'center' }}></td>
+                        <td style={{ padding: '10px 12px', background: '#fff', fontWeight: 700, fontSize: 13, borderRight: '1px solid #94a3b8' }}>MEAN CGPA</td>
+                        <td style={{ padding: '6px 10px', background: '#fef9c3' }}>
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            value={apiSummary.meanCgpa}
+                            onChange={(e) => setApiSummary((p) => ({ ...p, meanCgpa: e.target.value }))}
+                            placeholder="0.00"
+                            style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 14, outline: 'none', fontWeight: 700, boxSizing: 'border-box' }}
+                          />
+                        </td>
                       </tr>
                     </tbody>
                   </table>
+
+                  {/* API summary line */}
+                  <div style={{ marginTop: 12, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ color: '#0b4a6f', fontWeight: 700, fontSize: 13 }}>API (GPA) =</span>
+                    <span style={{ background: '#fff', border: '2px solid #0b4a6f', padding: '4px 14px', borderRadius: 6, fontWeight: 900, fontSize: 15, minWidth: 60, textAlign: 'center' }}>
+                      {apiSummary.meanCgpa || '—'}
+                    </span>
+                    <span style={{ color: '#557085', fontSize: 13 }}>/100</span>
+                  </div>
                 </div>
 
-                {/* Per-CO API manual inputs (sync to big table manuals[idx].api) */}
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>Per-CO API (manual)</div>
+                {/* Right: Per-CO API manual inputs */}
+                <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 8, color: '#334e68', fontSize: 13 }}>Per-CO API Value</div>
                   <table style={styles.table}>
                     <thead>
                       <tr>
@@ -471,19 +732,12 @@ export default function COTargetPage({
                       {['CO1','CO2','CO3','CO4','CO5'].map((co, idx) => (
                         <tr key={co}>
                           <td style={styles.tdLeft}>{co}</td>
-                              <td style={styles.td}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.api ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v }; return copy; }); }} /></td>
+                          <td style={styles.td}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.api ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v }; return copy; }); }} /></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              </div>
-
-              {/* Centered API summary line */}
-              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <div style={{ color: '#234451', fontWeight: 700 }}>Average Performance Index of the student's batch (API) - GPA =</div>
-                <div style={{ border: '2px solid #0b4a6f', padding: '6px 10px', fontWeight: 900 }}></div>
-                <div>/100</div>
               </div>
             </div>
 
@@ -566,6 +820,7 @@ export default function COTargetPage({
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>

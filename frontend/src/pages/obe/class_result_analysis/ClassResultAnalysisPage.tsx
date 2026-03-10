@@ -14,6 +14,7 @@ import {
   fetchCiaMarks,
   fetchMyTeachingAssignments,
   fetchPublishedFormative,
+  fetchPublishedLabSheet,
   fetchPublishedModelSheet,
   fetchPublishedReview1,
   fetchPublishedReview2,
@@ -38,6 +39,7 @@ type ObeProgressTA = {
   id: number | null;
   subject_code: string | null;
   subject_name: string | null;
+  class_type?: string | null;
   enabled_assessments: string[];
   exam_progress: ObeProgressExam[];
 };
@@ -80,6 +82,7 @@ type TaSlot = {
   subjectName: string;
   sectionName: string;
   sectionId: number;
+  classType: string;
   enabledAssessments: string[];
 };
 
@@ -128,11 +131,34 @@ function apiBase(): string {
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(n, hi));
 const toNum  = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
-function inferCycleType(enabledAssessments: string[]): 'THEORY' | 'TCPR' | 'LAB' {
+function inferCycleType(classType: string, enabledAssessments: string[]): 'THEORY' | 'TCPL' | 'TCPR' | 'LAB' {
+  const ct = String(classType || '').trim().toUpperCase();
+  if (ct === 'TCPL') return 'TCPL';
   const ea = new Set((enabledAssessments || []).map((s) => String(s).trim().toLowerCase()));
   if (ea.has('formative1') || ea.has('formative2')) return 'THEORY';
   if (ea.has('review1') || ea.has('review2')) return 'TCPR';
   return 'LAB';
+}
+
+function extractLabSheetTotals(data: any): Record<string, number | null> {
+  const clampFn = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(n, hi));
+  const out: Record<string, number | null> = {};
+  const rows = data?.sheet?.rowsByStudentId ?? {};
+  for (const [sid, row] of Object.entries(rows)) {
+    const r = row as any;
+    if (r == null) { out[sid] = null; continue; }
+    // ciaExam is the scalar total for TCPL (theory component in lab hybrid)
+    const ciaExam = Number(r.ciaExam);
+    if (Number.isFinite(ciaExam)) { out[sid] = clampFn(ciaExam, 0, 100); continue; }
+    // Fallback: sum all available marks
+    let total = 0;
+    const sumArr = (arr: any) => { if (Array.isArray(arr)) { for (const v of arr) total += Number(v) || 0; } };
+    const sumObj = (obj: any) => { if (obj && typeof obj === 'object') { for (const v of Object.values(obj)) total += Number(v) || 0; } };
+    sumArr(r.marksA); sumArr(r.marksB); sumObj(r.marksByCo);
+    sumObj(r.caaExamByCo); sumObj(r.ciaExamByCo);
+    out[sid] = clampFn(total, 0, 100);
+  }
+  return out;
 }
 
 /**
@@ -142,6 +168,7 @@ async function computeTaTotal(
   taId: number,
   cycle: CycleKey,
   subjectCode: string,
+  classType: string,
   enabledAssessments: string[],
   weights: Record<string, ClassTypeWeightsItem>,
 ): Promise<{ roster: Student[]; totals: Map<number, number | null> }> {
@@ -161,7 +188,7 @@ async function computeTaTotal(
   const totalsMap = new Map<number, number | null>();
   if (roster.length === 0) return { roster, totals: totalsMap };
 
-  const cType = inferCycleType(enabledAssessments);
+  const cType = inferCycleType(classType, enabledAssessments);
   const wtItem: ClassTypeWeightsItem | undefined = weights[cType] || weights['THEORY'];
   const wCia = Number(wtItem?.cia_weight ?? 6);
   const wSsa = Number(wtItem?.ssa_weight ?? 2);
@@ -189,12 +216,42 @@ async function computeTaTotal(
 
   // Cycle 1 or 2
   const sfx = cycle === 'cycle1' ? '1' : '2';
+  const formativeKey = cycle === 'cycle1' ? 'formative1' : 'formative2';
+
+  // TCPL: CIA (theory-style) + Lab marks (stored in LabPublishedSheet)
+  if (cType === 'TCPL') {
+    const [ciaResp, labResp] = await Promise.allSettled([
+      fetchCiaMarks(`cia${sfx}` as any, subjectCode, taId),
+      fetchPublishedLabSheet(formativeKey, subjectCode, taId),
+    ]);
+    const ciaRaw: Record<string, any> = ciaResp.status === 'fulfilled' ? ((ciaResp.value as any)?.marks || {}) : {};
+    const labRaw: Record<string, number | null> = labResp.status === 'fulfilled'
+      ? extractLabSheetTotals((labResp.value as any)?.data)
+      : {};
+    const ciaMax = 25;
+    const labMax = 25;
+    for (const s of roster) {
+      const sid = String(s.id);
+      const ciaV = toNum(ciaRaw[sid] ?? null);
+      const labV = labRaw[sid] != null ? labRaw[sid] : null;
+      const weights_arr = [
+        ...(ciaV != null ? [{ val: ciaV, max: ciaMax, w: wCia }] : []),
+        ...(labV != null ? [{ val: labV, max: labMax, w: wFa  }] : []),
+      ];
+      if (weights_arr.length === 0) { totalsMap.set(s.id, null); continue; }
+      const wSum   = weights_arr.reduce((acc, x) => acc + x.w, 0);
+      const wScore = weights_arr.reduce((acc, x) => acc + (x.val! / x.max) * x.w, 0);
+      totalsMap.set(s.id, clamp(Math.round((wScore / wSum) * 100), 0, 100));
+    }
+    return { roster, totals: totalsMap };
+  }
+
   const [ciaResp, ssaResp, faResp] = await Promise.allSettled([
     fetchCiaMarks(`cia${sfx}` as any, subjectCode, taId),
     cycle === 'cycle1' ? fetchPublishedSsa1(subjectCode, taId) : fetchPublishedSsa2(subjectCode, taId),
     cType === 'TCPR'
       ? (cycle === 'cycle1' ? fetchPublishedReview1(subjectCode) : fetchPublishedReview2(subjectCode))
-      : fetchPublishedFormative(cycle === 'cycle1' ? 'formative1' : 'formative2', subjectCode, taId),
+      : fetchPublishedFormative(formativeKey, subjectCode, taId),
   ]);
 
   const ciaRaw: Record<string, any> = ciaResp.status === 'fulfilled' ? ((ciaResp.value as any)?.marks || {}) : {};
@@ -339,6 +396,7 @@ export default function ClassResultAnalysisPage({ canViewProgress }: Props): JSX
             subjectName: ta.subject_name ?? ta.subject_code,
             sectionName: secName,
             sectionId: secId,
+            classType: String(ta.class_type || '').trim().toUpperCase() || 'THEORY',
             enabledAssessments: ta.enabled_assessments || [],
           });
         }
@@ -360,7 +418,7 @@ export default function ClassResultAnalysisPage({ canViewProgress }: Props): JSX
     setMarksLoading(true);
     Promise.all(
       missing.map((slot) =>
-        computeTaTotal(slot.taId, activeCycle, slot.subjectCode, slot.enabledAssessments, weights)
+        computeTaTotal(slot.taId, activeCycle, slot.subjectCode, slot.classType, slot.enabledAssessments, weights)
           .then((entry) => ({ key: `${slot.taId}_${activeCycle}`, entry })),
       ),
     ).then((results) => {

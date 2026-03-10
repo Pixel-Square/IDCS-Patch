@@ -4257,6 +4257,7 @@ def obe_progress_overview(request):
                     'id': getattr(ta, 'id', None),
                     'subject_code': subject_code,
                     'subject_name': subject_name,
+                    'class_type': class_type,
                     # Kept for UI/debug: for SPECIAL this is the enabled list; for others it's the computed visible keys
                     'enabled_assessments': assessment_keys,
                     'exam_progress': exam_progress,
@@ -5312,17 +5313,98 @@ def lca_revision(request, subject_id):
         obj = LcaRevision(subject_id=subject_id, created_by=getattr(request.user, 'id', None), **defaults)
         obj.save()
 
-    # Lock after save.
+    # Lock only on publish (draft saves must remain editable).
     try:
-        _touch_lock_after_publish(
+        incoming_status = str(defaults.get('status') or '').strip().lower()
+    except Exception:
+        incoming_status = 'draft'
+    if incoming_status == 'published':
+        try:
+            _touch_lock_after_publish(
+                request,
+                subject_code=str(subject_id),
+                subject_name=str(subject_id),
+                assessment='lca',
+                teaching_assignment_id=_get_teaching_assignment_id_from_request(request, body),
+            )
+        except Exception:
+            pass
+
+    return Response({'subject_id': str(obj.subject_id), 'status': obj.status, 'data': obj.data})
+
+
+@api_view(['GET', 'PUT'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def co_target_revision(request, subject_id):
+    """Save/load CO Target page entries.
+
+    Stored as a JSON blob keyed by subject_id.
+    """
+    from .models import CoTargetRevision
+
+    required = {'obe.view'} if request.method == 'GET' else {'obe.cdap.upload'}
+    auth = _require_permissions(request, required)
+    if auth:
+        return auth
+
+    if request.method == 'GET':
+        rev = CoTargetRevision.objects.filter(subject_id=subject_id).first()
+        if not rev:
+            return Response({'subject_id': str(subject_id), 'status': 'draft', 'data': {}})
+        return Response({'subject_id': str(rev.subject_id), 'status': rev.status, 'data': rev.data})
+
+    body = request.data or {}
+    if body is None:
+        return Response({'detail': 'Invalid JSON'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Enforce lock unless an edit approval window exists.
+    # Reuse the existing 'lca' assessment key to avoid expanding the lock system.
+    try:
+        subject = _get_subject(subject_id, request)
+        gate = _enforce_mark_entry_not_blocked(
             request,
             subject_code=str(subject_id),
-            subject_name=str(subject_id),
+            subject_name=getattr(subject, 'name', '') or str(subject_id),
             assessment='lca',
             teaching_assignment_id=_get_teaching_assignment_id_from_request(request, body),
         )
+        if gate is not None:
+            return gate
     except Exception:
         pass
+
+    defaults = {
+        'data': body.get('data', {}),
+        'status': body.get('status', 'draft'),
+        'updated_by': getattr(request.user, 'id', None),
+    }
+
+    obj = CoTargetRevision.objects.filter(subject_id=subject_id).first()
+    if obj:
+        for k, v in defaults.items():
+            setattr(obj, k, v)
+        obj.save(update_fields=list(defaults.keys()) + ['updated_at'])
+    else:
+        obj = CoTargetRevision(subject_id=subject_id, created_by=getattr(request.user, 'id', None), **defaults)
+        obj.save()
+
+    # Lock only on publish (draft saves must remain editable).
+    try:
+        incoming_status = str(defaults.get('status') or '').strip().lower()
+    except Exception:
+        incoming_status = 'draft'
+    if incoming_status == 'published':
+        try:
+            _touch_lock_after_publish(
+                request,
+                subject_code=str(subject_id),
+                subject_name=str(subject_id),
+                assessment='lca',
+                teaching_assignment_id=_get_teaching_assignment_id_from_request(request, body),
+            )
+        except Exception:
+            pass
 
     return Response({'subject_id': str(obj.subject_id), 'status': obj.status, 'data': obj.data})
 
@@ -7244,6 +7326,20 @@ def edit_request_create(request):
             or str(getattr(dept, 'code', '') or '').strip()
             or 'your department'
         )
+
+        # LCA-related requests must go to HOD first.
+        if assessment == 'lca':
+            return Response(
+                {
+                    'detail': f'No active HOD configured for {dept_name}. This request must be routed to HOD first.',
+                    'how_to_fix': [
+                        'Configure an active HOD for this department in Academics (DepartmentRole / RoleAssignment).',
+                        'Then re-submit the request.',
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         routing_warning = f'No active HOD configured for {dept_name}. Request will be sent directly to IQAC.'
 
     if hod_user is None and dept is not None:

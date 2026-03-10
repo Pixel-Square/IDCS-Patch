@@ -8,6 +8,7 @@ urlpatterns = [
     path('list-uploads', views.list_uploads),
     path('cdap-revision/<str:subject_id>', views.cdap_revision),
     path('lca-revision/<str:subject_id>', views.lca_revision),
+    path('co-target-revision/<str:subject_id>', views.co_target_revision),
     path('articulation-matrix/<str:subject_id>', views.articulation_matrix),
     path('active-learning-mapping', views.active_learning_mapping),
     path('assessment-master-config', views.assessment_master_config),

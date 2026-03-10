@@ -1,7 +1,8 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import idcsLogoDataUrl from '../assets/idcs-logo.png?inline';
-import collegeBannerDataUrl from '../assets/banner.png?inline';
+import newBannerSrc from '../assets/new_banner.png';
+import krLogoSrc from '../assets/krlogo.png';
+import idcsLogoSrc from '../assets/idcs-logo.png';
 
 export type CqiPdfStudentRow = {
   regNo?: string;
@@ -11,201 +12,32 @@ export type CqiPdfStudentRow = {
   total?: string | number | null;
 };
 
+async function toBase64(src: string): Promise<string> {
+  const res = await fetch(src);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function imgSize(b64: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve({ w: 1, h: 1 });
+    img.src = b64;
+  });
+}
+
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
 function safeText(v: any): string {
   return String(v ?? '').replace(/\s+/g, ' ').trim();
-}
-
-function drawCqiHeader(doc: jsPDF, marginX: number): number {
-  const pageW = doc.internal.pageSize.getWidth();
-  const y = 4;
-  const maxW = pageW - marginX * 2;
-  const gap = 6;
-
-  // Layout: college banner full-width; IDCS logo below at right.
-  const bannerMaxH = 200;
-  const idcsMaxH = 38;
-  const idcsMaxW = 110;
-
-  let bottomY = y;
-
-  // Draw college banner (full-width)
-  try {
-    const props: any = (doc as any).getImageProperties ? (doc as any).getImageProperties(collegeBannerDataUrl) : null;
-    const iw = Number(props?.width) || 1;
-    const ih = Number(props?.height) || 1;
-    const aspect = iw / ih;
-
-    // Prefer spanning the full page width. The source banner is very wide, so height stays reasonable.
-    const drawW = pageW;
-    const drawH = Math.min(drawW / aspect, bannerMaxH);
-    doc.addImage(collegeBannerDataUrl, 'PNG', 0, y, drawW, drawH);
-    bottomY = y + drawH;
-  } catch {
-    bottomY = y;
-  }
-
-  // Draw IDCS logo (below banner, right aligned)
-  try {
-    const props: any = (doc as any).getImageProperties ? (doc as any).getImageProperties(idcsLogoDataUrl) : null;
-    const iw = Number(props?.width) || 1;
-    const ih = Number(props?.height) || 1;
-    const aspect = iw / ih;
-
-    let drawW = Math.min(idcsMaxW, maxW);
-    let drawH = drawW / aspect;
-    if (drawH > idcsMaxH) {
-      drawH = idcsMaxH;
-      drawW = drawH * aspect;
-    }
-
-    const lx = pageW - marginX - drawW;
-    const ly = bottomY + gap;
-    doc.addImage(idcsLogoDataUrl, 'PNG', lx, ly, drawW, drawH);
-    bottomY = ly + drawH;
-  } catch {
-    // ignore
-  }
-
-  return bottomY + 18;
-}
-
-function drawPillButton(doc: jsPDF, args: { x: number; y: number; w: number; h: number; label: string; tone: 'neutral' | 'danger'; pageNumber?: number | null }) {
-  const { x, y, w, h, label, tone, pageNumber } = args;
-  const fill = tone === 'danger' ? [254, 226, 226] : [224, 242, 254];
-  const border = tone === 'danger' ? [248, 113, 113] : [56, 189, 248];
-  const text = tone === 'danger' ? [153, 27, 27] : [11, 74, 111];
-
-  doc.setDrawColor(border[0], border[1], border[2]);
-  doc.setFillColor(fill[0], fill[1], fill[2]);
-  (doc as any).roundedRect(x, y, w, h, h / 2, h / 2, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(text[0], text[1], text[2]);
-  doc.text(label, x + 10, y + h / 2 + 3);
-  if (typeof pageNumber === 'number' && Number.isFinite(pageNumber) && pageNumber >= 1) {
-    (doc as any).link(x, y, w, h, { pageNumber });
-  }
-}
-
-function addTablePage(doc: jsPDF, args: {
-  title: string;
-  subjectLine: string;
-  rows: CqiPdfStudentRow[];
-  marginX: number;
-  includeTotal: boolean;
-  summaryPageNumber?: number;
-  cosMask?: string[] | null;
-}) {
-  const pageW = doc.internal.pageSize.getWidth();
-  let y = 40;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(15, 23, 42);
-  doc.text(args.title, args.marginX, y);
-
-  if (typeof args.summaryPageNumber === 'number' && Number.isFinite(args.summaryPageNumber)) {
-    const label = 'Back to Summary';
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(11, 116, 184);
-    const tw = doc.getTextWidth(label);
-    const x = pageW - args.marginX - tw;
-    const linkY = y - 10;
-    doc.text(label, x, y);
-    (doc as any).link(x, linkY, tw, 14, { pageNumber: args.summaryPageNumber });
-  }
-
-  y += 16;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(51, 65, 85);
-  doc.text(args.subjectLine, args.marginX, y);
-  y += 14;
-  doc.text(`Generated: ${new Date().toLocaleString()}`, args.marginX, y);
-  y += 12;
-
-  const head = args.includeTotal
-    ? [['S.No', 'Sec', 'Reg No', 'Student Name', "CO's", '100']]
-    : [['S.No', 'Sec', 'Reg No', 'Student Name', "CO's"]];
-
-  const body = args.rows.map((r, idx) => {
-    const shownCos = Array.isArray(args.cosMask) && args.cosMask.length
-      ? (r.flaggedCos || []).filter((c) => args.cosMask!.includes(c))
-      : (r.flaggedCos || []);
-    const base = [
-      String(idx + 1),
-      safeText(r.section || ''),
-      safeText(r.regNo || ''),
-      safeText(r.name || ''),
-      safeText(shownCos.join(', ')),
-    ];
-    if (!args.includeTotal) return base;
-    const t = r.total;
-    base.push(t == null ? '' : safeText(typeof t === 'number' ? round1(t) : t));
-    return base;
-  });
-
-  autoTable(doc, {
-    startY: y,
-    head,
-    body,
-    styles: {
-      fontSize: 9,
-      cellPadding: 4,
-      overflow: 'linebreak',
-      valign: 'middle',
-      textColor: [15, 23, 42],
-    },
-    headStyles: {
-      fillColor: [234, 246, 255],
-      textColor: [15, 23, 42],
-      fontStyle: 'bold',
-      lineColor: [226, 232, 240],
-      lineWidth: 0.5,
-    },
-    alternateRowStyles: {
-      fillColor: [248, 250, 252],
-    },
-    margin: { left: args.marginX, right: args.marginX },
-    tableWidth: pageW - args.marginX * 2,
-    columnStyles: args.includeTotal
-      ? {
-          0: { cellWidth: 34 },
-          1: { cellWidth: 38 },
-          2: { cellWidth: 98 },
-          3: { cellWidth: 190 },
-          4: { cellWidth: 'auto' },
-          5: { cellWidth: 44, halign: 'center' },
-        }
-      : {
-          0: { cellWidth: 34 },
-          1: { cellWidth: 38 },
-          2: { cellWidth: 98 },
-          3: { cellWidth: 220 },
-          4: { cellWidth: 'auto' },
-        },
-    didParseCell: (data: any) => {
-      if (data.section !== 'body') return;
-      const row = args.rows[data.row.index];
-      const flagged = Array.isArray(row?.flaggedCos) && row.flaggedCos.length > 0;
-      if (!flagged) return;
-
-      // Highlight flagged students like the UI screenshot
-      data.cell.styles.fillColor = [254, 242, 242];
-      if (data.column.index === (args.includeTotal ? 4 : 4)) {
-        data.cell.styles.textColor = [153, 27, 27];
-        data.cell.styles.fontStyle = 'bold';
-      }
-      if (args.includeTotal && data.column.index === 5) {
-        data.cell.styles.textColor = [153, 27, 27];
-        data.cell.styles.fontStyle = 'bold';
-      }
-    },
-  });
 }
 
 export function exportCqiPdf(args: {
@@ -217,10 +49,36 @@ export function exportCqiPdf(args: {
   filename?: string;
   includeAllStudentsPage?: boolean;
   instructorName?: string | null;
+  sectionName?: string | null;
+  studentCount?: number | null;
+  semester?: number | string | null;
+  academicYear?: string | null;
+  department?: string | null;
 }): void {
+  // Run async in background and save when done
+  _exportCqiPdfAsync(args).catch((e) => {
+    console.error('CQI PDF export failed:', e);
+    alert('PDF export failed: ' + (e?.message || e));
+  });
+}
+
+async function _exportCqiPdfAsync(args: {
+  subjectCode: string;
+  subjectName?: string | null;
+  coNumbers: number[];
+  rows: CqiPdfStudentRow[];
+  title?: string;
+  filename?: string;
+  includeAllStudentsPage?: boolean;
+  instructorName?: string | null;
+  sectionName?: string | null;
+  studentCount?: number | null;
+  semester?: number | string | null;
+  academicYear?: string | null;
+  department?: string | null;
+}): Promise<void> {
   const subjectCode = safeText(args.subjectCode || '') || '—';
   const subjectName = safeText(args.subjectName || '');
-  const subjectLine = `Subject: ${subjectCode}${subjectName ? ` — ${subjectName}` : ''}`;
   const instructorName = safeText(args.instructorName || '');
   const coNumbers = (Array.isArray(args.coNumbers) ? args.coNumbers : [])
     .map((n) => Number(n))
@@ -237,276 +95,263 @@ export function exportCqiPdf(args: {
   const includeTotal = rowsAll.some((r) => r.total != null && safeText(r.total) !== '');
   const rowsFlagged = rowsAll.filter((r) => r.flaggedCos.length > 0);
 
-  const includeAllStudentsPage = Boolean(args.includeAllStudentsPage);
+  /* ── Load images ─────────────────────────────── */
+  const [b64Banner, b64Kr, b64Idcs] = await Promise.all([
+    toBase64(newBannerSrc).catch(() => ''),
+    toBase64(krLogoSrc).catch(() => ''),
+    toBase64(idcsLogoSrc).catch(() => ''),
+  ]);
 
-  // Prefer CO1+CO2 split pills/pages when available.
-  const hasCo1 = coNumbers.includes(1);
-  const hasCo2 = coNumbers.includes(2);
-  const pair = hasCo1 && hasCo2 ? [1, 2] : coNumbers.slice(0, 2);
-  const coA = pair.length >= 1 ? pair[0] : null;
-  const coB = pair.length >= 2 ? pair[1] : null;
-  const coAKey = coA != null ? `CO${coA}` : null;
-  const coBKey = coB != null ? `CO${coB}` : null;
+  /* Portrait A4 in mm */
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const PW = 210;
+  const PH = 297;
+  const ML = 10;
+  const MR = 10;
+  const UW = PW - ML - MR; // 190 mm
 
-  const pairLists = (() => {
-    if (!coAKey || !coBKey) return null;
-    const both = rowsFlagged.filter((r) => r.flaggedCos.includes(coAKey) && r.flaggedCos.includes(coBKey));
-    const onlyA = rowsFlagged.filter((r) => r.flaggedCos.includes(coAKey) && !r.flaggedCos.includes(coBKey));
-    const onlyB = rowsFlagged.filter((r) => !r.flaggedCos.includes(coAKey) && r.flaggedCos.includes(coBKey));
-    return { both, onlyA, onlyB };
-  })();
+  let curY = 10;
+  const HEADER_H = 26;
 
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const marginX = 36;
-  const title = safeText(args.title || 'CQI Export') || 'CQI Export';
+  /* ── Draw watermark ── */
+  const drawWatermark = async () => {
+    if (!b64Kr) return;
+    const { w: kw, h: kh } = await imgSize(b64Kr);
+    const wmW = 100;
+    const wmH = (kh / kw) * wmW;
+    const wmX = (PW - wmW) / 2;
+    const wmY = (PH - wmH) / 2;
+    doc.setGState(new (doc as any).GState({ opacity: 0.12 }));
+    doc.addImage(b64Kr, 'PNG', wmX, wmY, wmW, wmH);
+    doc.setGState(new (doc as any).GState({ opacity: 1 }));
+  };
 
-  // Page 1: Summary header (IDCS banner + details)
-  const headerBottomY = drawCqiHeader(doc, marginX);
-  let headerY = headerBottomY;
+  /* ── Draw page banner ── */
+  const drawPageBanner = async () => {
+    if (b64Banner) {
+      const { w: bw, h: bh } = await imgSize(b64Banner);
+      const bannerDrawH = HEADER_H;
+      const bannerDrawW = Math.min(UW * 0.90, (bw / bh) * bannerDrawH);
+      doc.addImage(b64Banner, 'PNG', ML, curY, bannerDrawW, bannerDrawH);
+    }
+    const logoH = 18;
+    const logoW = 22;
+    const logoGap = 4;
+    const logosX = PW - MR - logoW * 2 - logoGap;
+    if (b64Kr) {
+      const { w: kw, h: kh } = await imgSize(b64Kr);
+      const kH = Math.min(logoH, (kh / kw) * logoW);
+      doc.addImage(b64Kr, 'PNG', logosX, curY + (HEADER_H - kH) / 2, logoW, kH);
+    }
+    if (b64Idcs) {
+      const { w: iw, h: ih } = await imgSize(b64Idcs);
+      const iH = Math.min(logoH, (ih / iw) * logoW);
+      doc.addImage(b64Idcs, 'PNG', logosX + logoW + logoGap, curY + (HEADER_H - iH) / 2, logoW, iH);
+    }
+    curY += HEADER_H + 2;
+    doc.setDrawColor(30, 58, 95);
+    doc.setLineWidth(0.6);
+    doc.line(ML, curY, PW - MR, curY);
+    curY += 5;
+  };
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.setTextColor(11, 74, 111);
-  doc.text(title, marginX, headerY);
+  await drawWatermark();
+  await drawPageBanner();
 
-  headerY += 18;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(51, 65, 85);
-  doc.text(subjectLine, marginX, headerY);
-  headerY += 14;
-  if (instructorName) {
-    doc.text(`Course Instructor: ${instructorName}`, marginX, headerY);
-    headerY += 14;
-  }
+  /* ── CQI Report heading ── */
   const totalStudents = rowsAll.length;
   const flaggedStudents = rowsFlagged.length;
   const clearedStudents = totalStudents - flaggedStudents;
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(15, 23, 42);
-  doc.text(`Total Students: ${totalStudents}    |    Cleared: ${clearedStudents}    |    Flagged: ${flaggedStudents}`, marginX, headerY);
-  headerY += 14;
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(51, 65, 85);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, marginX, headerY);
+  doc.setFontSize(13);
+  doc.setTextColor(11, 74, 111);
+  const reportTitle = safeText(args.title || 'CQI Report') || 'CQI Report';
+  doc.text(reportTitle, ML, curY);
+  curY += 7;
 
-  // Cleared students (not flagged on any CO)
-  const rowsCleared = rowsAll.filter((r) => r.flaggedCos.length === 0);
+  /* ── Info box (3-column grid, same style as Result Analysis PDF) ── */
+  const semLabel = args.semester != null ? `Semester ${args.semester}` : '';
+  const infoCells: [string, string][] = [
+    ['Course Code', subjectCode],
+    ['Course Name', subjectName || '—'],
+    ['Section',     safeText(args.sectionName || '') || '—'],
+    ['Staff',       instructorName || '—'],
+    ['Students',    args.studentCount != null ? String(args.studentCount) : String(totalStudents)],
+    ['Flagged',     String(flaggedStudents)],
+    ...(semLabel ? [['Semester', semLabel] as [string, string]] : []),
+    ...(args.academicYear ? [['Acad. Year', safeText(args.academicYear)] as [string, string]] : []),
+    ...(args.department ? [['Department', safeText(args.department)] as [string, string]] : []),
+  ];
+  while (infoCells.length % 3 !== 0) infoCells.push(['', '']);
 
-  // Build sections first so autoTable pagination doesn't break link targets
-  const pageStart: {
-    all?: number;
-    cleared?: number;
-    onlyA?: number;
-    onlyB?: number;
-    bothAB?: number;
-  } = {};
+  const colW3 = UW / 3;
+  const labelW3 = 26;
+  const valMaxW = colW3 - labelW3 - 7;
+  const numInfoRows = infoCells.length / 3;
 
-  // Page 2: All students (flagged highlighted)
-  if (includeAllStudentsPage) {
-    doc.addPage();
-    pageStart.all = doc.getNumberOfPages();
-    addTablePage(doc, {
-      title: 'All Students (flagged highlighted)',
-      subjectLine,
-      rows: rowsAll,
-      marginX,
-      includeTotal,
-      summaryPageNumber: 1,
-      cosMask: null,
-    });
+  // Pre-compute wrapped lines per visual row for dynamic row heights
+  doc.setFontSize(8);
+  const infoGrid: Array<{ cells: Array<{ lbl: string; lines: string[] }>; rH: number }> = [];
+  for (let ri = 0; ri < numInfoRows; ri++) {
+    const cells: Array<{ lbl: string; lines: string[] }> = [];
+    let maxLines = 1;
+    for (let ci = 0; ci < 3; ci++) {
+      const [lbl, val] = infoCells[ri * 3 + ci];
+      const lines = val ? (doc.splitTextToSize(val, valMaxW) as string[]) : [];
+      cells.push({ lbl, lines });
+      maxLines = Math.max(maxLines, lines.length);
+    }
+    infoGrid.push({ cells, rH: 4.5 + (maxLines - 1) * 3.8 + 2.0 });
   }
+  const gridH = infoGrid.reduce((s, r) => s + r.rH, 0);
 
-  // Cleared students page
-  doc.addPage();
-  pageStart.cleared = doc.getNumberOfPages();
-  addTablePage(doc, {
-    title: 'Students Cleared (All COs Above Threshold)',
-    subjectLine,
-    rows: rowsCleared,
-    marginX,
-    includeTotal,
-    summaryPageNumber: 1,
-    cosMask: null,
+  doc.setFillColor(248, 250, 253);
+  doc.roundedRect(ML, curY, UW, gridH, 1.5, 1.5, 'F');
+  doc.setDrawColor(200, 210, 225);
+  doc.setLineWidth(0.35);
+  doc.roundedRect(ML, curY, UW, gridH, 1.5, 1.5, 'S');
+
+  let sepY = curY;
+  for (let i = 0; i < infoGrid.length - 1; i++) {
+    sepY += infoGrid[i].rH;
+    doc.setDrawColor(220, 228, 238);
+    doc.setLineWidth(0.2);
+    doc.line(ML + 1, sepY, PW - MR - 1, sepY);
+  }
+  doc.setDrawColor(200, 210, 225);
+  doc.setLineWidth(0.3);
+  doc.line(ML + colW3,     curY + 1, ML + colW3,     curY + gridH - 1);
+  doc.line(ML + colW3 * 2, curY + 1, ML + colW3 * 2, curY + gridH - 1);
+
+  let cellRowY = curY;
+  for (const { cells, rH } of infoGrid) {
+    for (let ci = 0; ci < 3; ci++) {
+      const { lbl, lines } = cells[ci];
+      const cellX = ML + ci * colW3;
+      if (lbl) {
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 58, 95);
+        doc.text(`${lbl}:`, cellX + 3, cellRowY + 4.5);
+      }
+      for (let li = 0; li < lines.length; li++) {
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(55, 65, 81);
+        doc.text(lines[li], cellX + 3 + labelW3, cellRowY + 4.5 + li * 3.8);
+      }
+    }
+    cellRowY += rH;
+  }
+  curY += gridH + 5;
+
+  /* thin divider */
+  doc.setDrawColor(210, 215, 220);
+  doc.setLineWidth(0.4);
+  doc.line(ML, curY, PW - MR, curY);
+  curY += 4;
+
+  /* ── CQI Table — split into two side-by-side halves for single-page fit ── */
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(30, 58, 95);
+  doc.text('CQI Student Report', ML, curY);
+  curY += 5;
+
+  // Columns: S.No | Reg No. | Student Name | Flagged COs | Total
+  const tableHead = [
+    ['S.No', 'Reg No.', 'Student Name', 'Flagged COs', ...(includeTotal ? ['Total'] : [])],
+  ];
+
+  const mkBody = (subset: typeof rowsAll, startIdx: number) =>
+    subset.map((r, i) => {
+      const flaggedStr = r.flaggedCos.length > 0 ? r.flaggedCos.join(', ') : '—';
+      const base = [String(startIdx + i + 1), r.regNo, r.name, flaggedStr];
+      if (includeTotal) {
+        const t = r.total;
+        base.push(t == null ? '—' : (typeof t === 'number' ? String(round1(t)) : safeText(t)));
+      }
+      return base;
+    });
+
+  const halfGap   = 4;
+  const halfW     = (UW - halfGap) / 2;          // ~93 mm per half
+  const half1     = Math.ceil(rowsAll.length / 2);
+  const leftRows  = rowsAll.slice(0, half1);
+  const rightRows = rowsAll.slice(half1);
+
+  const tSnoW  = 6;
+  const tRegW  = 25;
+  const tFlagW = 28;
+  const tTotW  = includeTotal ? 13 : 0;
+  const tNameW = Math.max(14, halfW - tSnoW - tRegW - tFlagW - tTotW);
+  const flaggedColIdx = 3;
+  const totalColIdx   = 4;
+
+  const makeDidParseCell = (rowSubset: typeof rowsAll) => (data: any) => {
+    if (data.section !== 'body') return;
+    const row = rowSubset[data.row.index];
+    if (!row) return;
+    if (row.flaggedCos.length > 0) {
+      data.cell.styles.fillColor = [254, 242, 242];
+      if (data.column.index === flaggedColIdx) {
+        data.cell.styles.textColor = [185, 28, 28];
+        data.cell.styles.fontStyle = 'bold';
+      }
+    }
+    if (includeTotal && data.column.index === totalColIdx) {
+      const val = Number(data.cell.raw);
+      if (!isNaN(val)) {
+        if      (val >= 75) data.cell.styles.textColor = [5, 150, 105];
+        else if (val >= 50) data.cell.styles.textColor = [30, 58, 95];
+        else                data.cell.styles.textColor = [185, 28, 28];
+      }
+    }
+  };
+
+  const halfTableStyles = {
+    theme: 'grid' as const,
+    headStyles: {
+      fillColor:  [30, 58, 95]   as [number, number, number],
+      textColor:  [255, 255, 255] as [number, number, number],
+      fontStyle:  'bold' as const,
+      fontSize:   6.5,
+      halign:     'center' as const,
+      cellPadding: 1.5,
+    },
+    bodyStyles:  { fontSize: 6, cellPadding: 1.2 },
+    columnStyles: {
+      0: { halign: 'center' as const, cellWidth: tSnoW },
+      1: { halign: 'center' as const, cellWidth: tRegW },
+      2: { halign: 'left'   as const, cellWidth: tNameW },
+      3: { halign: 'center' as const, cellWidth: tFlagW },
+      ...(includeTotal ? { 4: { halign: 'center' as const, cellWidth: tTotW, fontStyle: 'bold' as const } } : {}),
+    },
+    alternateRowStyles: { fillColor: [248, 250, 252] as [number, number, number] },
+  };
+
+  const tableStartY = curY;
+  autoTable(doc, {
+    startY: tableStartY,
+    head: tableHead,
+    body: mkBody(leftRows, 0),
+    margin: { left: ML, right: PW - ML - halfW },
+    tableWidth: halfW,
+    ...halfTableStyles,
+    didParseCell: makeDidParseCell(leftRows),
   });
+  const afterLeft = (doc as any).lastAutoTable?.finalY ?? tableStartY + 30;
 
-  // Pair combo pages (for first two selected COs)
-  if (pairLists && coA != null && coB != null) {
-    doc.addPage();
-    pageStart.onlyA = doc.getNumberOfPages();
-    addTablePage(doc, {
-      title: `Students Below Threshold — CO${coA} only (not CO${coB})`,
-      subjectLine,
-      rows: pairLists.onlyA,
-      marginX,
-      includeTotal,
-      summaryPageNumber: 1,
-      cosMask: coAKey ? [coAKey] : null,
-    });
-
-    doc.addPage();
-    pageStart.onlyB = doc.getNumberOfPages();
-    addTablePage(doc, {
-      title: `Students Below Threshold — CO${coB} only (not CO${coA})`,
-      subjectLine,
-      rows: pairLists.onlyB,
-      marginX,
-      includeTotal,
-      summaryPageNumber: 1,
-      cosMask: coBKey ? [coBKey] : null,
-    });
-
-    doc.addPage();
-    pageStart.bothAB = doc.getNumberOfPages();
-    addTablePage(doc, {
-      title: `Students Below Threshold — CO${coA} and CO${coB}`,
-      subjectLine,
-      rows: pairLists.both,
-      marginX,
-      includeTotal,
-      summaryPageNumber: 1,
-      cosMask: [coAKey as string, coBKey as string].filter(Boolean),
+  if (rightRows.length > 0) {
+    autoTable(doc, {
+      startY: tableStartY,
+      head: tableHead,
+      body: mkBody(rightRows, half1),
+      margin: { left: ML + halfW + halfGap, right: MR },
+      tableWidth: halfW,
+      ...halfTableStyles,
+      didParseCell: makeDidParseCell(rightRows),
     });
   }
-
-  // Now draw buttons on page 1 using the real start pages
-  doc.setPage(1);
-  const pageW = doc.internal.pageSize.getWidth();
-  const usableW = pageW - marginX * 2;
-  let y = headerY + 24;
-  const h = 22;
-  const pillGap = 12;
-
-  // Row 1: Cleared pill (centered)
-  const clearedW = 170;
-  const clearedX = (pageW - clearedW) / 2;
-  drawPillButton(doc, {
-    x: clearedX,
-    y,
-    w: clearedW,
-    h,
-    label: `Cleared: ${clearedStudents}`,
-    tone: 'neutral',
-    pageNumber: pageStart.cleared ?? null,
-  });
-
-  // Row 2: CO split pills (evenly distributed)
-  if (pairLists && coA != null && coB != null) {
-    y += h + 14;
-    const pillCount = 3;
-    const pillW = Math.floor((usableW - pillGap * (pillCount - 1)) / pillCount);
-    let px = marginX;
-
-    drawPillButton(doc, {
-      x: px,
-      y,
-      w: pillW,
-      h,
-      label: `CO${coA} only: ${pairLists.onlyA.length}`,
-      tone: pairLists.onlyA.length ? 'danger' : 'neutral',
-      pageNumber: pageStart.onlyA ?? null,
-    });
-    px += pillW + pillGap;
-    drawPillButton(doc, {
-      x: px,
-      y,
-      w: pillW,
-      h,
-      label: `CO${coB} only: ${pairLists.onlyB.length}`,
-      tone: pairLists.onlyB.length ? 'danger' : 'neutral',
-      pageNumber: pageStart.onlyB ?? null,
-    });
-    px += pillW + pillGap;
-    drawPillButton(doc, {
-      x: px,
-      y,
-      w: pillW,
-      h,
-      label: `CO${coA} + CO${coB}: ${pairLists.both.length}`,
-      tone: pairLists.both.length ? 'danger' : 'neutral',
-      pageNumber: pageStart.bothAB ?? null,
-    });
-  }
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(51, 65, 85);
-  doc.text('Tip: Click the pills above to jump to filtered lists.', marginX, y + 38);
-
-  const filename = safeText(args.filename || `CQI_${subjectCode}.pdf`) || 'CQI.pdf';
-  doc.save(filename);
-}
-
-export type CqiPdfFilter =
-  | { kind: 'flagged' }
-  | { kind: 'co'; coNum: number }
-  | { kind: 'only'; coNum: number; notCoNum: number }
-  | { kind: 'both'; coA: number; coB: number };
-
-export function exportCqiPdfFiltered(args: {
-  subjectCode: string;
-  subjectName?: string | null;
-  rows: CqiPdfStudentRow[];
-  filter: CqiPdfFilter;
-  title?: string;
-  filename?: string;
-}): void {
-  const subjectCode = safeText(args.subjectCode || '') || '—';
-  const subjectName = safeText(args.subjectName || '');
-  const subjectLine = `Subject: ${subjectCode}${subjectName ? ` — ${subjectName}` : ''}`;
-  const title = safeText(args.title || 'CQI Export') || 'CQI Export';
-
-  const rowsAll = (Array.isArray(args.rows) ? args.rows : []).map((r) => ({
-    regNo: safeText(r.regNo || ''),
-    name: safeText(r.name || ''),
-    section: r.section ?? null,
-    flaggedCos: Array.isArray(r.flaggedCos) ? r.flaggedCos.map((c) => safeText(c)).filter(Boolean) : [],
-    total: r.total ?? null,
-  }));
-
-  const includeTotal = rowsAll.some((r) => r.total != null && safeText(r.total) !== '');
-
-  const filter = args.filter;
-  const keyOf = (n: number) => `CO${n}`;
-
-  let filtered: CqiPdfStudentRow[] = [];
-  let cosMask: string[] | null = null;
-  let pageTitle = title;
-
-  if (filter.kind === 'flagged') {
-    filtered = rowsAll.filter((r) => r.flaggedCos.length > 0);
-    pageTitle = `${title} — Flagged Students`;
-    cosMask = null;
-  } else if (filter.kind === 'co') {
-    const k = keyOf(filter.coNum);
-    filtered = rowsAll.filter((r) => r.flaggedCos.includes(k));
-    pageTitle = `${title} — ${k} below`;
-    cosMask = [k];
-  } else if (filter.kind === 'only') {
-    const a = keyOf(filter.coNum);
-    const b = keyOf(filter.notCoNum);
-    filtered = rowsAll.filter((r) => r.flaggedCos.includes(a) && !r.flaggedCos.includes(b));
-    pageTitle = `${title} — ${a} only (not ${b})`;
-    cosMask = [a];
-  } else if (filter.kind === 'both') {
-    const a = keyOf(filter.coA);
-    const b = keyOf(filter.coB);
-    filtered = rowsAll.filter((r) => r.flaggedCos.includes(a) && r.flaggedCos.includes(b));
-    pageTitle = `${title} — ${a} + ${b}`;
-    cosMask = [a, b];
-  }
-
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  addTablePage(doc, {
-    title: pageTitle,
-    subjectLine,
-    rows: filtered,
-    marginX: 36,
-    includeTotal,
-    summaryPageNumber: undefined,
-    cosMask,
-  });
 
   const filename = safeText(args.filename || `CQI_${subjectCode}.pdf`) || 'CQI.pdf';
   doc.save(filename);
