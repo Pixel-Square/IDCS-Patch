@@ -5,17 +5,31 @@ const API_BASE = getApiBase();
 
 const ASSESSMENT_MASTER_CFG_CACHE_KEY = 'obe_assessment_master_config_cache';
 
-async function buildFriendlyError(res: Response, fallback: string) {
-  const contentType = res.headers.get('content-type') || '';
-  try {
-    if (contentType.includes('application/json')) {
-      const data = await res.json();
-      const detail = data?.detail || data?.message;
-      if (detail) return `${fallback}: ${detail}`;
-    }
-  } catch {
-    // ignore parse errors
+export class HttpError extends Error {
+  status: number;
+  data: any;
+  constructor(message: string, status: number, data: any) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+    this.data = data;
   }
+}
+
+async function readJsonBody(res: Response): Promise<any | null> {
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) return null;
+  try {
+    return await res.clone().json();
+  } catch {
+    return null;
+  }
+}
+
+async function buildFriendlyError(res: Response, fallback: string, body?: any | null) {
+  const data = body === undefined ? await readJsonBody(res) : body;
+  const detail = data?.detail || data?.message;
+  if (detail) return `${fallback}: ${detail}`;
 
   if (res.status === 401) return `${fallback}: Authentication required. Please login.`;
   if (res.status === 403) return `${fallback}: Permission required.`;
@@ -40,8 +54,9 @@ export async function fetchCdapRevision(subjectId: string, teachingAssignmentId?
   const res = await fetchWithAuth(url, { method: 'GET' });
 
   if (!res.ok) {
-    const message = await buildFriendlyError(res, 'CDAP revision fetch failed');
-    throw new Error(message);
+    const body = await readJsonBody(res);
+    const message = await buildFriendlyError(res, 'CDAP revision fetch failed', body);
+    throw new HttpError(message, res.status, body);
   }
   return res.json();
 }
@@ -52,8 +67,9 @@ export async function fetchArticulationMatrix(subjectId: string, teachingAssignm
   const res = await fetchWithAuth(url, { method: 'GET' });
 
   if (!res.ok) {
-    const message = await buildFriendlyError(res, 'Articulation Matrix fetch failed');
-    throw new Error(message);
+    const body = await readJsonBody(res);
+    const message = await buildFriendlyError(res, 'Articulation Matrix fetch failed', body);
+    throw new HttpError(message, res.status, body);
   }
   return res.json();
 }
@@ -67,8 +83,9 @@ export async function saveCdapRevision(payload: any) {
   const res = await fetchWithAuth(url, { method: 'PUT', body: JSON.stringify(payload) });
 
   if (!res.ok) {
-    const message = await buildFriendlyError(res, 'CDAP revision save failed');
-    throw new Error(message);
+    const body = await readJsonBody(res);
+    const message = await buildFriendlyError(res, 'CDAP revision save failed', body);
+    throw new HttpError(message, res.status, body);
   }
   return res.json();
 }
@@ -89,8 +106,9 @@ export async function fetchGlobalAnalysisMapping() {
       // ignore
     }
 
-    const message = await buildFriendlyError(res, 'Active learning mapping fetch failed');
-    throw new Error(message);
+    const body = await readJsonBody(res);
+    const message = await buildFriendlyError(res, 'Active learning mapping fetch failed', body);
+    throw new HttpError(message, res.status, body);
   }
   const data = await res.json();
   return data?.mapping || {};
@@ -101,8 +119,9 @@ export async function saveGlobalAnalysisMapping(mapping: Record<string, boolean[
   const res = await fetchWithAuth(url, { method: 'PUT', body: JSON.stringify({ mapping }) });
 
   if (!res.ok) {
-    const message = await buildFriendlyError(res, 'Active learning mapping save failed');
-    throw new Error(message);
+    const body = await readJsonBody(res);
+    const message = await buildFriendlyError(res, 'Active learning mapping save failed', body);
+    throw new HttpError(message, res.status, body);
   }
 
   const data = await res.json();
@@ -125,8 +144,9 @@ export async function fetchAssessmentMasterConfig() {
       // ignore
     }
 
-    const message = await buildFriendlyError(res, 'Assessment master config fetch failed');
-    throw new Error(message);
+    const body = await readJsonBody(res);
+    const message = await buildFriendlyError(res, 'Assessment master config fetch failed', body);
+    throw new HttpError(message, res.status, body);
   }
 
   const data = await res.json();
@@ -144,8 +164,9 @@ export async function saveAssessmentMasterConfig(config: any) {
   const res = await fetchWithAuth(url, { method: 'PUT', body: JSON.stringify({ config }) });
 
   if (!res.ok) {
-    const message = await buildFriendlyError(res, 'Assessment master config save failed');
-    throw new Error(message);
+    const body = await readJsonBody(res);
+    const message = await buildFriendlyError(res, 'Assessment master config save failed', body);
+    throw new HttpError(message, res.status, body);
   }
 
   const data = await res.json();
@@ -166,8 +187,9 @@ export async function uploadArticulationMatrixExcel(file: File) {
   const res = await fetchWithAuth(url, { method: 'POST', body: formData });
 
   if (!res.ok) {
-    const message = await buildFriendlyError(res, 'Articulation Matrix parse failed');
-    throw new Error(message);
+    const body = await readJsonBody(res);
+    const message = await buildFriendlyError(res, 'Articulation Matrix parse failed', body);
+    throw new HttpError(message, res.status, body);
   }
   return res.json();
 }

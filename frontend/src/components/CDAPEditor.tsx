@@ -8,6 +8,7 @@ import {
 } from '../services/cdapDb';
 import { createEditRequest, formatApiErrorMessage, formatEditRequestSentMessage } from '../services/obe';
 import { useEditWindow } from '../hooks/useEditWindow';
+import { useMarkTableLock } from '../hooks/useMarkTableLock';
 import { ZoomIn, ZoomOut } from 'lucide-react';
 
 type ColumnType = 'text' | 'checkbox';
@@ -160,9 +161,23 @@ export default function CDAPEditor({
     options: { poll: true },
   });
 
+  const { data: markLock } = useMarkTableLock({
+    assessment: 'cdap',
+    subjectCode: String(subjectId || ''),
+    teachingAssignmentId,
+    options: { poll: true },
+  });
+
   const isPublishedByServer = Boolean(isLockedAfterSave);
   const hasEditApproval = Boolean(editWindow?.allowed_by_approval);
   const isReadOnly = Boolean(isPublishedByServer && !hasEditApproval);
+
+  // If the authoritative lock table says CDAP is published, force the editor into the
+  // same read-only behavior used by other assessments (Request Edit required).
+  useEffect(() => {
+    if (!subjectId) return;
+    if (markLock?.is_published) setIsLockedAfterSave(true);
+  }, [subjectId, markLock?.is_published]);
 
   const [requestEditOpen, setRequestEditOpen] = useState(false);
   const [requestEditReason, setRequestEditReason] = useState('');
@@ -532,7 +547,20 @@ export default function CDAPEditor({
       setIsLockedAfterSave(true);
       alert('Published to cloud.');
     } catch (e: any) {
-      alert(e?.message || 'Failed to save to cloud');
+      const status = typeof e?.status === 'number' ? e.status : null;
+      const detail = String(e?.data?.detail || '').trim();
+      const msg = String(e?.message || '').trim();
+      const lockedByServer = status === 423 || /locked after publish/i.test(detail) || /locked after publish/i.test(msg);
+
+      if (lockedByServer) {
+        // Backend gate: treat CDAP like other assessments — read-only unless IQAC approves.
+        setIsLockedAfterSave(true);
+        setRequestEditOpen(true);
+        setRequestEditError(null);
+        alert(detail || 'Marks entry is locked after publish. Request IQAC approval to re-enter marks.');
+      } else {
+        alert(msg || 'Failed to save to cloud');
+      }
     } finally {
       setLoadingCloud(false);
       refreshEditWindow();
