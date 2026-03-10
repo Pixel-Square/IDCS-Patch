@@ -464,7 +464,8 @@ class SectionSubjectsStaffView(APIView):
         results = []
         try:
             # fetch curriculum rows for the section
-            from curriculum.models import CurriculumDepartment
+            from curriculum.models import CurriculumDepartment, ElectiveSubject
+            from django.db.models import Q
             dept = getattr(sec.batch.course, 'department', None)
             sem = getattr(sec.semester, 'number', None)
             if dept is None or sem is None:
@@ -473,29 +474,64 @@ class SectionSubjectsStaffView(APIView):
             # build a map from curriculum_row id -> staff (from TeachingAssignment)
             staff_map = {}
             from academics.models import TeachingAssignment
-            tas = TeachingAssignment.objects.filter(section=sec, is_active=True).select_related('staff', 'curriculum_row')
+            tas = TeachingAssignment.objects.filter(section=sec, is_active=True).select_related('staff__user', 'curriculum_row', 'elective_subject')
             for ta in tas:
                 if getattr(ta, 'curriculum_row', None) and getattr(ta, 'staff', None):
-                    staff_map[getattr(ta.curriculum_row, 'id')] = getattr(getattr(ta.staff, 'user', None), 'username', None)
+                    staff_map[ta.curriculum_row.id] = getattr(getattr(ta.staff, 'user', None), 'username', None)
 
             # also consider direct timetable assignments that may override
             from .models import TimetableAssignment
-            tassigns = TimetableAssignment.objects.filter(section=sec).select_related('curriculum_row', 'staff')
+            tassigns = TimetableAssignment.objects.filter(section=sec).select_related('curriculum_row', 'staff__user')
             for a in tassigns:
                 cr = getattr(a, 'curriculum_row', None)
                 if cr is not None:
                     if getattr(a, 'staff', None):
-                        staff_map[getattr(cr, 'id')] = getattr(getattr(a.staff, 'user', None), 'username', None)
+                        staff_map[cr.id] = getattr(getattr(a.staff, 'user', None), 'username', None)
 
             for c in qs:
                 results.append({
-                    'id': c.id, 
-                    'course_code': c.course_code, 
-                    'course_name': c.course_name, 
+                    'id': c.id,
+                    'course_code': c.course_code,
+                    'course_name': c.course_name,
                     'regulation': c.regulation,
                     'class_type': c.class_type,
                     'is_elective': c.is_elective,
                     'staff': staff_map.get(c.id)
+                })
+
+            # --- Elective subjects (ElectiveSubject rows, keyed by their own pk) ---
+            # Build a staff map for elective subjects: keyed by ElectiveSubject.pk
+            elective_staff_map = {}
+            # 1. From TeachingAssignment with elective_subject (section match or null section)
+            elective_tas = TeachingAssignment.objects.filter(
+                elective_subject__isnull=False,
+                elective_subject__semester__number=sem,
+                is_active=True,
+            ).filter(
+                Q(section=sec) | Q(section__isnull=True)
+            ).select_related('staff__user', 'elective_subject')
+            for ta in elective_tas:
+                if ta.elective_subject and ta.staff:
+                    staff_name = getattr(getattr(ta.staff, 'user', None), 'username', None)
+                    if staff_name:
+                        elective_staff_map[ta.elective_subject_id] = staff_name
+
+            # 2. Fetch all ElectiveSubject rows for this section's dept+sem and add to results
+            elective_qs = ElectiveSubject.objects.filter(
+                parent__department=dept,
+                semester__number=sem,
+            ).select_related('parent')
+            for es in elective_qs:
+                results.append({
+                    'id': es.pk,
+                    'course_code': es.course_code,
+                    'course_name': es.course_name,
+                    'regulation': es.regulation,
+                    'class_type': es.class_type,
+                    'is_elective': True,
+                    'is_elective_child': True,
+                    'parent_id': es.parent_id,
+                    'staff': elective_staff_map.get(es.pk),
                 })
 
             # include any timetable-only subjects (no curriculum_row) with staff

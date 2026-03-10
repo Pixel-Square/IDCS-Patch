@@ -229,8 +229,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   // fallback: always show profile
   items.unshift({ key: 'profile', label: 'Profile', to: '/profile' });
 
-  // Academic calendar is available for all authenticated users
-  items.push({ key: 'academic_calendar', label: 'Academic Calendar', to: '/academic-calendar' });
+  // Academic Calendar intentionally hidden from sidebar for all users
 
   // Settings (IQAC only) – includes Notification Templates and WhatsApp config
   if (isIqac && !items.some((item) => item.key === 'settings')) {
@@ -247,9 +246,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
     items.push({ key: 'academic_controller', label: 'Academic Controller', to: '/iqac/academic-controller' });
   }
 
-  if (canPbasManage && !items.some((item) => item.key === 'pbas_manager')) {
-    items.push({ key: 'pbas_manager', label: 'PBAS Manager', to: '/iqac/pbas' });
-  }
+  // PBAS Manager intentionally hidden from sidebar for all users
   
   // IQAC staff attendance
   if (rolesUpper.includes('IQAC') && !items.some((item) => item.key === 'iqac_staff_attendance')) {
