@@ -55,6 +55,8 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
   deptSectionsRef.current = deptSections
   // All departments list (fetched separately for dropdown)
   const [allDepartments, setAllDepartments] = useState<Array<{ id: number; code: string; short_name: string; name: string }>>([])
+  // All batch years list (fetched separately for dropdown)
+  const [allBatchYears, setAllBatchYears] = useState<Array<{ id: number; name: string; start_year?: number; end_year?: number }>>([])
   // Pre-cached students for my-students / my-mentees modes (keyed by section_id)
   const [studentsCache, setStudentsCache] = useState<Record<number, Student[]>>({})
   const [lazyStudents, setLazyStudents] = useState<Student[]>([])
@@ -241,22 +243,36 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
     }
   }
 
-  // Fetch departments once on mount
+  // Fetch all batch years for dropdown filters
+  async function fetchAllBatchYears() {
+    try {
+      const res = await fetchWithAuth('/api/academics/batch-years/')
+      if (!res.ok) throw new Error('Failed to fetch batch years')
+      const data = await res.json()
+      setAllBatchYears(data.results || data || [])
+    } catch (e) {
+      console.error('fetchAllBatchYears error:', e)
+    }
+  }
+
+  // Fetch departments and batch years once on mount
   useEffect(() => {
     fetchAllDepartments()
+    fetchAllBatchYears()
   }, [])
 
-  // Check for departments refresh signal from other pages (e.g., StaffsPage)
+  // Check for departments/batches refresh signal from other pages (e.g., StaffsPage)
   useEffect(() => {
     const checkRefreshSignal = () => {
       const signal = sessionStorage.getItem('students_departments_refresh')
       if (signal) {
         const signalTime = parseInt(signal, 10)
         const now = Date.now()
-        // If signal is less than 5 seconds old, refresh departments
+        // If signal is less than 5 seconds old, refresh departments and batches
         if (now - signalTime < 5000) {
-          console.log('Departments refresh signal detected, reloading departments...')
+          console.log('Refresh signal detected, reloading departments and batches...')
           fetchAllDepartments()
+          fetchAllBatchYears()
         }
         // Clear the signal after checking
         sessionStorage.removeItem('students_departments_refresh')
@@ -920,9 +936,11 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
           .map(d => d.short_name || d.code || '')
           .filter(Boolean)
           .sort()
-        const batchOptions = Array.from(new Set(
-          deptSections.map(s => s.batch_name || '').filter(Boolean)
-        )).sort()
+        // Use all batch years for dropdown (not just those with sections)
+        const batchOptions = allBatchYears
+          .map(b => b.name || '')
+          .filter(Boolean)
+          .sort()
         const sectionOptions = Array.from(new Set(
           deptSections.map(s => s.section_name).filter(Boolean)
         )).sort()
@@ -989,9 +1007,11 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
           .map(d => d.short_name || d.code || '')
           .filter(Boolean)
           .sort()
-        const batchOptions = Array.from(new Set(
-          allSections.map(s => s.batch_name || '').filter(Boolean)
-        )).sort()
+        // Use all batch years for dropdown (not just those with sections)
+        const batchOptions = allBatchYears
+          .map(b => b.name || '')
+          .filter(Boolean)
+          .sort()
         const sectionOptions = Array.from(new Set(
           allSections.map(s => s.section_name).filter(Boolean)
         )).sort()
@@ -1253,7 +1273,7 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
               {/* Status */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Status</label>
-                {isIQAC() ? (
+                {isIqacRole ? (
                   <select
                     value={editFormData.status || 'active'}
                     onChange={(e) => handleEditChange('status', e.target.value)}
