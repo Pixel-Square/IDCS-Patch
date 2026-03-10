@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ArrowRightLeft, Calendar, Clock, X, ChevronRight, RefreshCw, Users } from 'lucide-react'
+import { ArrowRightLeft, Calendar, Clock, X, ChevronRight, RefreshCw, Users, Bell } from 'lucide-react'
 import fetchWithAuth from '../../services/fetchAuth'
+import SwapRequestsModal from '../../components/SwapRequestsModal'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
@@ -71,6 +72,8 @@ export default function StaffTimetable(){
   const [timetable, setTimetable] = useState<any[]>([])
   const [periods, setPeriods] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [pendingRequestCount, setPendingRequestCount] = useState(0)
+  const [showRequestsModal, setShowRequestsModal] = useState(false)
   
   // Date selector state
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
@@ -145,6 +148,25 @@ export default function StaffTimetable(){
   }
 
   useEffect(() => { load() }, [selectedDate])
+
+  // Fetch pending swap request count
+  useEffect(() => {
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchPendingCount = async () => {
+    try {
+      const res = await fetchWithAuth('/api/timetable/swap-requests/?status=PENDING');
+      if (res.ok) {
+        const respData = await res.json();
+        setPendingRequestCount((respData.received || []).length);
+      }
+    } catch (e) {
+      console.error('Error fetching pending requests:', e);
+    }
+  };
 
   async function load(){
     setLoading(true)
@@ -258,22 +280,35 @@ export default function StaffTimetable(){
     if (!swapConfirm || !drawerSection) return
     setSwapLoading(true)
     try {
-      const res = await fetchWithAuth(`/api/timetable/section/${drawerSection.id}/swap-periods/`, {
+      // Send swap request instead of performing immediate swap
+      const res = await fetchWithAuth(`/api/timetable/swap-requests/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
+          section_id: drawerSection.id,
           from_date: swapConfirm.fromDate, 
           to_date: swapConfirm.toDate, 
           from_period_id: swapConfirm.fromPeriodId, 
-          to_period_id: swapConfirm.toPeriodId 
+          to_period_id: swapConfirm.toPeriodId,
+          reason: '' // Optional: can add a reason field to the UI
         }),
       })
-      if (!res.ok) { const t = await res.text(); throw new Error(t) }
+      
+      if (!res.ok) { 
+        const errorData = await res.json()
+        throw new Error(errorData.error || 'Failed to send swap request') 
+      }
+      
+      const data = await res.json()
+      alert(data.message || 'Swap request sent successfully. Waiting for approval from the other staff.')
+      
       setSwapConfirm(null)
       setSwapFrom(null)
-      await reloadSecTimetable(drawerSection.id)
-      load()
-    } catch(e) { console.error(e); alert('Swap failed: ' + String(e)) }
+      // Note: Don't reload timetable yet since the swap hasn't been approved
+    } catch(e) { 
+      console.error(e); 
+      alert('Swap request failed: ' + String(e)) 
+    }
     finally { setSwapLoading(false) }
   }
 
@@ -352,6 +387,18 @@ export default function StaffTimetable(){
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
                 >
                   Today
+                </button>
+                <button
+                  onClick={() => setShowRequestsModal(true)}
+                  className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-2"
+                >
+                  <Bell className="w-4 h-4" />
+                  Requests
+                  {pendingRequestCount > 0 && (
+                    <span className="inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold rounded-full bg-white text-orange-600">
+                      {pendingRequestCount}
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
@@ -983,6 +1030,13 @@ export default function StaffTimetable(){
           </div>
         </div>
       )}
+
+      {/* Swap Requests Modal */}
+      <SwapRequestsModal 
+        isOpen={showRequestsModal} 
+        onClose={() => setShowRequestsModal(false)}
+        onRequestUpdated={fetchPendingCount}
+      />
     </div>
   )
 }
