@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+import zipfile
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -54,6 +55,7 @@ class StudentImportTemplateDownloadView(APIView):
             return response
 
         try:
+            from io import BytesIO
             from academics.models import Department
 
             departments = list(
@@ -72,52 +74,56 @@ class StudentImportTemplateDownloadView(APIView):
             sample_dept = departments[0] if departments else 'AI&DS'
             ws.append(['REG2024001', 'John Doe', sample_dept, 'A', 'john.doe@example.com', '2024', 'ACTIVE'])
 
-            # Department dropdown
+            # Build a hidden "_Lists" sheet for dropdown reference data.
+            # Cross-sheet references avoid the 255-char inline list limit.
+            lists_ws = wb.create_sheet(title='_Lists')
+            lists_ws.sheet_state = 'hidden'
+            for i, dept in enumerate(departments, start=1):
+                lists_ws.cell(row=i, column=1, value=dept)
+            for i, s in enumerate(STUDENT_STATUS_CHOICES, start=1):
+                lists_ws.cell(row=i, column=2, value=s)
+
             if departments:
-                dept_list = ','.join(departments)
-                dv_dept = DataValidation(
-                    type='list', formula1=f'"{dept_list}"', allow_blank=True,
-                )
-                dv_dept.error = 'Select a department from the dropdown'
-                dv_dept.errorTitle = 'Invalid Department'
-                dv_dept.prompt = 'Select a department'
-                dv_dept.promptTitle = 'Department'
+                dept_ref = f"_Lists!$A$1:$A${len(departments)}"
+                dv_dept = DataValidation(type='list', formula1=dept_ref, allow_blank=True)
                 ws.add_data_validation(dv_dept)
                 dv_dept.add('C2:C1000')
 
-            # Status dropdown — column G (status moved after batch)
-            status_list = ','.join(STUDENT_STATUS_CHOICES)
-            dv_status = DataValidation(
-                type='list', formula1=f'"{ status_list}"', allow_blank=False,
-            )
-            dv_status.error = f'Must be one of: {", ".join(STUDENT_STATUS_CHOICES)}'
-            dv_status.errorTitle = 'Invalid Status'
-            dv_status.prompt = 'Select a status'
-            dv_status.promptTitle = 'Status'
+            status_ref = f"_Lists!$B$1:$B${len(STUDENT_STATUS_CHOICES)}"
+            dv_status = DataValidation(type='list', formula1=status_ref, allow_blank=False)
             ws.add_data_validation(dv_status)
             dv_status.add('G2:G1000')
 
-            # Column widths
-            ws.column_dimensions['A'].width = 20  # student_reg_no
-            ws.column_dimensions['B'].width = 25  # name
-            ws.column_dimensions['C'].width = 15  # department
-            ws.column_dimensions['D'].width = 12  # section
-            ws.column_dimensions['E'].width = 32  # email
-            ws.column_dimensions['F'].width = 12  # batch
-            ws.column_dimensions['G'].width = 12  # status
+            ws.column_dimensions['A'].width = 20
+            ws.column_dimensions['B'].width = 25
+            ws.column_dimensions['C'].width = 15
+            ws.column_dimensions['D'].width = 12
+            ws.column_dimensions['E'].width = 32
+            ws.column_dimensions['F'].width = 12
+            ws.column_dimensions['G'].width = 12
 
-            from io import BytesIO
-            buf = BytesIO()
-            wb.save(buf)
-            buf.seek(0)
+            # Save to buffer first
+            raw_buf = BytesIO()
+            wb.save(raw_buf)
+            raw_buf.seek(0)
 
+            # Post-process: strip <workbookProtection/> which WPS rejects
+            cleaned_buf = BytesIO()
+            with zipfile.ZipFile(raw_buf, 'r') as zin:
+                with zipfile.ZipFile(cleaned_buf, 'w', zipfile.ZIP_DEFLATED) as zout:
+                    for item in zin.infolist():
+                        data = zin.read(item.filename)
+                        if item.filename == 'xl/workbook.xml':
+                            data = data.replace(b'<workbookProtection/>', b'')
+                        zout.writestr(item, data)
+
+            xlsx_bytes = cleaned_buf.getvalue()
             response = HttpResponse(
-                buf.read(),
+                xlsx_bytes,
                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             )
-            response['Content-Disposition'] = (
-                'attachment; filename="students_import_template.xlsx"'
-            )
+            response['Content-Disposition'] = 'attachment; filename="students_import_template.xlsx"'
+            response['Content-Length'] = str(len(xlsx_bytes))
             return response
 
         except Exception as exc:

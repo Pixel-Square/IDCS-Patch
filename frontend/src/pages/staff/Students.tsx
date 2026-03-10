@@ -3,9 +3,9 @@ import fetchWithAuth from '../../services/fetchAuth'
 import { Users, GraduationCap, Mail, Loader2, UserCircle2, ChevronLeft, ChevronRight, Building2, Globe, UserCheck, Heart, RefreshCw, Edit2, X, Search, Upload, Download, FileText, AlertCircle, CheckCircle2 } from 'lucide-react'
 
 
-// Cache key and expiry time (5 minutes)
+// Cache key and expiry time (1 minute - shorter to pick up new departments quickly)
 const CACHE_KEY = 'students_page_cache'
-const CACHE_EXPIRY_MS = 5 * 60 * 1000
+const CACHE_EXPIRY_MS = 1 * 60 * 1000
 
 type Student = { 
   id: number; 
@@ -53,6 +53,8 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
   const deptSectionsRef = useRef<SectionMeta[]>([])
   allSectionsRef.current = allSections
   deptSectionsRef.current = deptSections
+  // All departments list (fetched separately for dropdown)
+  const [allDepartments, setAllDepartments] = useState<Array<{ id: number; code: string; short_name: string; name: string }>>([])
   // Pre-cached students for my-students / my-mentees modes (keyed by section_id)
   const [studentsCache, setStudentsCache] = useState<Record<number, Student[]>>({})
   const [lazyStudents, setLazyStudents] = useState<Student[]>([])
@@ -227,6 +229,46 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
     } catch {}
   }
 
+  // Fetch all departments for dropdown filters
+  async function fetchAllDepartments() {
+    try {
+      const res = await fetchWithAuth('/api/academics/departments/')
+      if (!res.ok) throw new Error('Failed to fetch departments')
+      const data = await res.json()
+      setAllDepartments(data.results || [])
+    } catch (e) {
+      console.error('fetchAllDepartments error:', e)
+    }
+  }
+
+  // Fetch departments once on mount
+  useEffect(() => {
+    fetchAllDepartments()
+  }, [])
+
+  // Check for departments refresh signal from other pages (e.g., StaffsPage)
+  useEffect(() => {
+    const checkRefreshSignal = () => {
+      const signal = sessionStorage.getItem('students_departments_refresh')
+      if (signal) {
+        const signalTime = parseInt(signal, 10)
+        const now = Date.now()
+        // If signal is less than 5 seconds old, refresh departments
+        if (now - signalTime < 5000) {
+          console.log('Departments refresh signal detected, reloading departments...')
+          fetchAllDepartments()
+        }
+        // Clear the signal after checking
+        sessionStorage.removeItem('students_departments_refresh')
+      }
+    }
+    
+    // Check on mount and when window gains focus
+    checkRefreshSignal()
+    window.addEventListener('focus', checkRefreshSignal)
+    return () => window.removeEventListener('focus', checkRefreshSignal)
+  }, [])
+
   // Set default view mode to the first available view
   useEffect(() => {
     if (availableViews.length > 0 && !availableViews.find(v => v.key === viewMode)) {
@@ -240,7 +282,7 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
     setCurrentPage(1)
     setSearchQuery('')
     setDebouncedSearch('')
-    fetchSectionsOrStudents()
+    fetchSectionsOrStudents(true)  // Bypass cache when switching views
   }, [viewMode])
 
   useEffect(() => {
@@ -360,30 +402,32 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
   }
 
   // Fetch section list; then lazy-load students per selected section
-  async function fetchSectionsOrStudents() {
+  async function fetchSectionsOrStudents(bypassCache: boolean = false) {
     // Don't call the API if the current view isn't available to this user
     if (availableViews.length === 0 || !availableViews.find(v => v.key === viewMode)) return
     
-    // Check cache first
-    const cached = getCachedData(viewMode)
-    if (cached) {
-      console.log(`Loading ${viewMode} from cache`)
-      if (viewMode === 'my-students') {
-        setStudentsCache(prev => ({ ...prev, ...cached.studentsCache }))
-        setMyStudentsSections(cached.sections)
-        if (cached.sections.length > 0) setSelectedSection(cached.sections[0].section_id)
-      } else if (viewMode === 'my-mentees') {
-        setStudentsCache(prev => ({ ...prev, ...cached.studentsCache }))
-        setMyMenteesSections(cached.sections)
-        if (cached.sections.length > 0) setSelectedSection(cached.sections[0].section_id)
-      } else if (viewMode === 'department-students') {
-        setDeptSections(cached.sections)
-        if (cached.sections.length > 0) setSelectedSection(cached.sections[0].section_id)
-      } else if (viewMode === 'all-students') {
-        setAllSections(cached.sections)
-        if (cached.sections.length > 0) setSelectedSection(cached.sections[0].section_id)
+    // Check cache first (unless bypass requested)
+    if (!bypassCache) {
+      const cached = getCachedData(viewMode)
+      if (cached) {
+        console.log(`Loading ${viewMode} from cache`)
+        if (viewMode === 'my-students') {
+          setStudentsCache(prev => ({ ...prev, ...cached.studentsCache }))
+          setMyStudentsSections(cached.sections)
+          if (cached.sections.length > 0) setSelectedSection(cached.sections[0].section_id)
+        } else if (viewMode === 'my-mentees') {
+          setStudentsCache(prev => ({ ...prev, ...cached.studentsCache }))
+          setMyMenteesSections(cached.sections)
+          if (cached.sections.length > 0) setSelectedSection(cached.sections[0].section_id)
+        } else if (viewMode === 'department-students') {
+          setDeptSections(cached.sections)
+          if (cached.sections.length > 0) setSelectedSection(cached.sections[0].section_id)
+        } else if (viewMode === 'all-students') {
+          setAllSections(cached.sections)
+          if (cached.sections.length > 0) setSelectedSection(cached.sections[0].section_id)
+        }
+        return
       }
-      return
     }
     
     setLoading(true)
@@ -681,14 +725,20 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
       const res = await fetchWithAuth('/api/academics/students/import/template/')
       if (!res.ok) throw new Error('Failed to download template')
       const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
+      const url = URL.createObjectURL(
+        new Blob([blob], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      )
       const a = document.createElement('a')
+      a.style.display = 'none'
       a.href = url
       a.download = 'students_import_template.xlsx'
       document.body.appendChild(a)
       a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      // Delay revoke to ensure the browser has time to initiate the download
+      window.setTimeout(() => {
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }, 30000)
     } catch (e) {
       alert('Failed to download template. Please try again.')
     }
@@ -713,7 +763,7 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
         setImportResult(data)
         // Refresh students list
         clearCache()
-        fetchSectionsOrStudents()
+        fetchSectionsOrStudents(true)  // Bypass cache after import
       }
     } catch (e) {
       setImportError('An error occurred while importing. Please try again.')
@@ -760,7 +810,7 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
               </button>
             )}
             <button
-              onClick={() => { clearCache(); fetchSectionsOrStudents() }}
+              onClick={() => { clearCache(); fetchSectionsOrStudents(true) }}  // Bypass cache on manual refresh
               disabled={loading}
               title="Refresh — clears cached data and reloads sections"
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
@@ -865,9 +915,11 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
 
       {/* Department-Students dept + batch + section dropdowns */}
       {hasContent && viewMode === 'department-students' && (() => {
-        const deptOptions = Array.from(new Set(
-          deptSections.map(s => s.department_short_name || s.department_code || '').filter(Boolean)
-        )).sort()
+        // Use all departments for dropdown (not just those with sections)
+        const deptOptions = allDepartments
+          .map(d => d.short_name || d.code || '')
+          .filter(Boolean)
+          .sort()
         const batchOptions = Array.from(new Set(
           deptSections.map(s => s.batch_name || '').filter(Boolean)
         )).sort()
@@ -932,9 +984,11 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
 
       {/* All-Students independent dropdowns */}
       {hasContent && viewMode === 'all-students' && (() => {
-        const deptOptions = Array.from(new Set(
-          allSections.map(s => s.department_short_name || s.department_code || '').filter(Boolean)
-        )).sort()
+        // Use all departments for dropdown (not just those with sections)
+        const deptOptions = allDepartments
+          .map(d => d.short_name || d.code || '')
+          .filter(Boolean)
+          .sort()
         const batchOptions = Array.from(new Set(
           allSections.map(s => s.batch_name || '').filter(Boolean)
         )).sort()

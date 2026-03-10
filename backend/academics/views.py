@@ -5296,3 +5296,384 @@ class BatchYearViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         from .models import BatchYear
         return BatchYear.objects.all().order_by('-name')
+
+
+class AllStaffListView(APIView):
+    """Return all staff members from the database (not department-filtered).
+    
+    Used for listing all available staff to add to a department.
+    Requires academics.view_staffs_page permission.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+        perms = get_user_permissions(user)
+
+        # Require page-view permission unless superuser
+        if not (user.is_superuser or 'academics.view_staffs_page' in perms):
+            return Response({'detail': 'You do not have permission to view staff list.'}, status=403)
+
+        from .models import StaffProfile, DepartmentRole, AcademicYear
+
+        # Get all staff members ordered by staff_id
+        staff_qs = StaffProfile.objects.select_related('user', 'department').order_by('staff_id')
+
+        # Get active academic year
+        active_year = AcademicYear.objects.filter(is_active=True).first()
+
+        # Get all active department roles for current academic year
+        dept_roles = {}
+        if active_year:
+            for dr in DepartmentRole.objects.filter(
+                academic_year=active_year,
+                is_active=True
+            ).select_related('department', 'staff'):
+                staff_id = dr.staff_id
+                if staff_id not in dept_roles:
+                    dept_roles[staff_id] = []
+                dept_roles[staff_id].append({
+                    'department': {
+                        'id': dr.department.id,
+                        'code': dr.department.code,
+                        'name': dr.department.name,
+                        'short_name': dr.department.short_name,
+                    },
+                    'role': dr.role,
+                    'academic_year': active_year.name,
+                })
+
+        results = []
+        for s in staff_qs:
+            user_data = None
+            user_roles = []
+            if s.user:
+                user_data = {
+                    'username': s.user.username,
+                    'first_name': getattr(s.user, 'first_name', ''),
+                    'last_name': getattr(s.user, 'last_name', ''),
+                    'email': getattr(s.user, 'email', ''),
+                }
+                # Get user roles
+                try:
+                    user_roles = [r.name for r in s.user.roles.all()]
+                except Exception:
+                    user_roles = []
+
+            dept_data = None
+            if s.department:
+                dept_data = {
+                    'id': s.department.id,
+                    'code': s.department.code,
+                    'name': s.department.name,
+                    'short_name': s.department.short_name,
+                }
+
+            results.append({
+                'id': s.id,
+                'staff_id': s.staff_id,
+                'user': user_data,
+                'user_roles': user_roles,
+                'designation': getattr(s, 'designation', None),
+                'status': getattr(s, 'status', None),
+                'current_department': dept_data,
+                'department_roles': dept_roles.get(s.id, []),
+            })
+
+        return Response({'results': results})
+
+
+class StaffDepartmentAssignView(APIView):
+    """Assign a staff member to a department with a specific role.
+    
+    POST /api/academics/staff-department-assign/
+    Body: { 
+        staff_id: <int>, 
+        department_id: <int>,
+        role: 'STAFF' | 'HOD' | 'AHOD' (default: 'STAFF')
+    }
+    
+    Requires academics.edit_staff permission.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        user = request.user
+        perms = get_user_permissions(user)
+
+        # Check permission
+        if not (user.is_superuser or 'academics.edit_staff' in perms):
+            return Response(
+                {'detail': 'You do not have permission to assign staff to departments.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        staff_id = request.data.get('staff_id')
+        department_id = request.data.get('department_id')
+        role = request.data.get('role', 'STAFF').upper()
+
+        if not staff_id or not department_id:
+            return Response(
+                {'detail': 'Both staff_id and department_id are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if role not in ['STAFF', 'HOD', 'AHOD']:
+            return Response(
+                {'detail': 'Invalid role. Must be STAFF, HOD, or AHOD.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from .models import StaffProfile, Department, DepartmentRole, AcademicYear
+
+        try:
+            staff = StaffProfile.objects.get(id=staff_id)
+        except StaffProfile.DoesNotExist:
+            return Response(
+                {'detail': 'Staff member not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            department = Department.objects.get(id=department_id)
+        except Department.DoesNotExist:
+            return Response(
+                {'detail': 'Department not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Validate department scope for non-superusers
+        if not user.is_superuser and 'academics.view_all_staff' not in perms:
+            from academics.utils import get_user_effective_departments
+            
+            allowed_dept_ids = get_user_effective_departments(user)
+            if allowed_dept_ids:
+                if department_id not in allowed_dept_ids:
+                    return Response(
+                        {'detail': 'You can only assign staff to departments you manage.'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            else:
+                return Response(
+                    {'detail': 'You are not mapped to any departments.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        # Get active academic year for HOD/AHOD assignments
+        active_year = AcademicYear.objects.filter(is_active=True).first()
+        if not active_year and role in ['HOD', 'AHOD']:
+            return Response(
+                {'detail': 'No active academic year found. Cannot assign HOD/AHOD roles.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if role == 'STAFF':
+            # For STAFF role: update primary department
+            # Allow swapping departments - if staff already has a department, update it
+            if staff.department and staff.department.id == department_id:
+                # Already assigned to this department
+                return Response({
+                    'detail': f'Staff is already assigned as STAFF to {department.name}.',
+                    'staff_id': staff.id,
+                    'department_id': department.id,
+                    'role': 'STAFF',
+                }, status=status.HTTP_200_OK)
+
+            # Assign or swap department
+            old_dept_name = staff.department.name if staff.department else None
+            staff.department = department
+            staff.save(update_fields=['department'])
+
+            if old_dept_name:
+                detail_msg = f'Staff department changed from {old_dept_name} to {department.name} successfully.'
+            else:
+                detail_msg = f'Staff assigned as STAFF to {department.name} successfully.'
+
+            return Response({
+                'detail': detail_msg,
+                'staff_id': staff.id,
+                'department_id': department.id,
+                'role': 'STAFF',
+            }, status=status.HTTP_200_OK)
+
+        else:
+            # For HOD/AHOD roles: create or update DepartmentRole
+            dept_role, created = DepartmentRole.objects.get_or_create(
+                department=department,
+                staff=staff,
+                role=role,
+                academic_year=active_year,
+                defaults={'is_active': True}
+            )
+
+            if not created:
+                # Update existing role to active
+                dept_role.is_active = True
+                dept_role.save(update_fields=['is_active'])
+
+            # Auto-assign corresponding user role (HOD or AHOD)
+            from accounts.models import Role, UserRole
+            try:
+                role_obj = Role.objects.get(name=role)
+                # Check if user already has this role
+                if not UserRole.objects.filter(user=staff.user, role=role_obj).exists():
+                    UserRole.objects.create(user=staff.user, role=role_obj)
+            except Role.DoesNotExist:
+                # Role doesn't exist in system, skip user role assignment
+                pass
+            except Exception as e:
+                # Log but don't fail the department role assignment
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to assign user role {role} to {staff.user.username}: {e}")
+
+            action = 'assigned' if created else 'updated'
+            return Response({
+                'detail': f'Staff {action} as {role} to {department.name} successfully.',
+                'staff_id': staff.id,
+                'department_id': department.id,
+                'role': role,
+                'academic_year': active_year.name if active_year else None,
+            }, status=status.HTTP_200_OK)
+
+
+class StaffDepartmentRoleRemoveView(APIView):
+    """Remove a staff member's department role (HOD/AHOD) or primary STAFF assignment.
+    
+    POST /api/academics/staff-department-role-remove/
+    Body: { 
+        staff_id: <int>, 
+        department_id: <int>,
+        role: 'STAFF' | 'HOD' | 'AHOD'
+    }
+    
+    Requires academics.edit_staff permission.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        user = request.user
+        perms = get_user_permissions(user)
+
+        # Check permission
+        if not (user.is_superuser or 'academics.edit_staff' in perms):
+            return Response(
+                {'detail': 'You do not have permission to modify staff department assignments.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        staff_id = request.data.get('staff_id')
+        department_id = request.data.get('department_id')
+        role = request.data.get('role', '').upper()
+
+        if not staff_id or not department_id or not role:
+            return Response(
+                {'detail': 'staff_id, department_id, and role are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if role not in ['STAFF', 'HOD', 'AHOD']:
+            return Response(
+                {'detail': 'Invalid role. Must be STAFF, HOD, or AHOD.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from .models import StaffProfile, Department, DepartmentRole, AcademicYear
+
+        try:
+            staff = StaffProfile.objects.get(id=staff_id)
+        except StaffProfile.DoesNotExist:
+            return Response(
+                {'detail': 'Staff member not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            department = Department.objects.get(id=department_id)
+        except Department.DoesNotExist:
+            return Response(
+                {'detail': 'Department not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Validate department scope for non-superusers
+        if not user.is_superuser and 'academics.view_all_staff' not in perms:
+            from academics.utils import get_user_effective_departments
+            
+            allowed_dept_ids = get_user_effective_departments(user)
+            if allowed_dept_ids:
+                if department_id not in allowed_dept_ids:
+                    return Response(
+                        {'detail': 'You can only modify staff in departments you manage.'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            else:
+                return Response(
+                    {'detail': 'You are not mapped to any departments.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        if role == 'STAFF':
+            # Remove primary department assignment
+            if staff.department and staff.department.id == department_id:
+                staff.department = None
+                staff.save(update_fields=['department'])
+                return Response({
+                    'detail': f'Staff removed from {department.name} (STAFF role).',
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'detail': 'Staff is not assigned as STAFF to this department.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        else:
+            # Remove HOD/AHOD role
+            active_year = AcademicYear.objects.filter(is_active=True).first()
+            if not active_year:
+                return Response(
+                    {'detail': 'No active academic year found.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            dept_roles = DepartmentRole.objects.filter(
+                department=department,
+                staff=staff,
+                role=role,
+                academic_year=active_year,
+                is_active=True
+            )
+
+            if dept_roles.exists():
+                dept_roles.update(is_active=False)
+
+                # Check if staff still has any other active roles of this type (HOD or AHOD)
+                # If not, remove the corresponding user role
+                other_active_roles = DepartmentRole.objects.filter(
+                    staff=staff,
+                    role=role,
+                    is_active=True
+                ).exclude(
+                    department=department,
+                    academic_year=active_year
+                ).exists()
+
+                if not other_active_roles:
+                    # No other active roles of this type - remove user role
+                    from accounts.models import Role, UserRole
+                    try:
+                        role_obj = Role.objects.get(name=role)
+                        UserRole.objects.filter(user=staff.user, role=role_obj).delete()
+                    except Role.DoesNotExist:
+                        pass
+                    except Exception as e:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.warning(f"Failed to remove user role {role} from {staff.user.username}: {e}")
+
+                return Response({
+                    'detail': f'Removed {role} role from {department.name}.',
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'detail': f'Staff does not have an active {role} role in this department.',
+                }, status=status.HTTP_400_BAD_REQUEST)

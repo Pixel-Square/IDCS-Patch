@@ -35,6 +35,9 @@ from .views import (
     StudentAttendanceView,
     StudentMarksView,
     BatchYearViewSet,
+    AllStaffListView,
+    StaffDepartmentAssignView,
+    StaffDepartmentRoleRemoveView,
 )
 from .analytics_views import AttendanceAnalyticsView, AnalyticsFiltersView, ClassAttendanceReportView, TodayPeriodAttendanceView, PeriodAttendanceReportView, OverallSectionView, MyClassStudentsView, DailyAttendanceView, DailyAttendanceLockView, DailyAttendanceUnlockView, MyClassAttendanceAnalyticsView, DailyAttendanceSessionDetailView, SectionStudentAttendanceDayView, DailyAttendanceRevertAssignmentView, DailyAttendanceUnlockRequestView, PeriodAttendanceUnlockRequestView, HODUnlockRequestsView, PeriodAttendanceSwapView, PeriodAttendanceRevertAssignmentView
 from .views import UnifiedUnlockRequestsView, DepartmentStudentsView, AllStudentsView, MentorMyMenteesView
@@ -66,6 +69,9 @@ urlpatterns = [
     # HOD / staff endpoints
     path('hod-staff/', HODStaffListView.as_view()),
     path('staffs-page/', StaffsPageView.as_view()),
+    path('all-staff/', AllStaffListView.as_view()),
+    path('staff-department-assign/', StaffDepartmentAssignView.as_view()),
+    path('staff-department-role-remove/', StaffDepartmentRoleRemoveView.as_view()),
     path('department-staff/', DepartmentStaffListView.as_view()),
     path('staffs/', StaffProfileCreateView.as_view()),
     path('staffs/<int:pk>/', StaffProfileUpdateView.as_view()),

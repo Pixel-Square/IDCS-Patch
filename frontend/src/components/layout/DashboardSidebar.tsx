@@ -181,7 +181,6 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if (flags.is_student) {
     items.push({ key: 'student_academics', label: 'My Marks', to: '/student/academics' });
     items.push({ key: 'student_attendance', label: 'My Attendance', to: '/student/attendance' });
-    items.push({ key: 'pbas', label: 'My Progress', to: '/student/pbas' });
   }
 
   // Staff assigned subjects page
@@ -192,7 +191,6 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
 
   // PBAS submission for staff
   if (flags.is_staff) {
-    items.push({ key: 'pbas', label: 'PBAS', to: '/staff/pbas' });
   }
 
   // Period attendance for staff
@@ -232,9 +230,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   if (isIqac && !items.some((item) => item.key === 'academic_controller')) {
     items.push({ key: 'academic_controller', label: 'Academic Controller', to: '/iqac/academic-controller' });
   }
-  if (canPbasManage && !items.some((item) => item.key === 'pbas_manager')) {
-    items.push({ key: 'pbas_manager', label: 'PBAS Manager', to: '/iqac/pbas' });
-  }
+  // PBAS Manager link removed
   if (canObeMaster && !isIqac && !items.some(item => item.key === 'obe_due_dates')) {
     items.push({ key: 'obe_due_dates', label: 'OBE: Due Dates', to: '/obe/master/due-dates' });
   }

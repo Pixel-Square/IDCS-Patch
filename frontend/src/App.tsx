@@ -47,8 +47,7 @@ import QueriesPage from './pages/queries/QueriesPage';
 import StaffsPage from './pages/StaffsPage';
 import AcademicCalendarRedirect from './pages/academicCalendar/AcademicCalendarRedirect';
 import AcademicCalendarPage from './pages/academicCalendar/AcademicCalendarPage';
-import PBASSubmissionPage from './pages/staff/PBASSubmissionPage';
-import PBASManagerPage from './pages/iqac/PBASManagerPage';
+// PBAS pages intentionally removed to hide PBAS from all users
 import BrandingLayout from './pages/branding/BrandingLayout';
 import BrandingProtectedRoute from './components/routing/BrandingProtectedRoute';
 import HodResultAnalysisPage from './pages/hod/HodResultAnalysisPage';
@@ -271,10 +270,7 @@ export default function App() {
                   path="/iqac/obe-requests"
                   element={<ProtectedRoute user={user} requiredPermissions={["obe.master.manage"]} element={<ObeRequestsPage />} />}
                 />
-                <Route
-                  path="/iqac/pbas"
-                  element={<ProtectedRoute user={user} requiredRoles={['IQAC', 'ADMIN', 'PRINCIPAL', 'PS']} element={<PBASManagerPage />} />}
-                />
+                {/* PBAS IQAC route removed */}
                 <Route
                   path="/advisor/timetable"
                   element={<ProtectedRoute user={user} requiredRoles={["ADVISOR"]} requiredPermissions={["timetable.assign"]} element={<TimetableEditor />} />}
@@ -295,10 +291,7 @@ export default function App() {
                   path="/student/academics"
                   element={<ProtectedRoute user={user} requiredProfile={'STUDENT'} element={<StudentAcademics />} />}
                 />
-                <Route
-                  path="/student/pbas"
-                  element={<ProtectedRoute user={user} requiredProfile={'STUDENT'} element={<PBASSubmissionPage viewer="student" />} />}
-                />
+                {/* Student PBAS route removed */}
                 {/* Attendance pages removed */}
                 <Route
                   path="/staff/timetable"
@@ -313,11 +306,7 @@ export default function App() {
                   path="/staff/students"
                   element={<ProtectedRoute user={user} requiredProfile={'STAFF'} requiredPermissions={["students.view_students"]} element={<StudentsPage user={user} />} />}
                 />
-                <Route
-                  path="/staff/pbas"
-                  element={<ProtectedRoute user={user} requiredProfile={'STAFF'} element={<PBASSubmissionPage viewer="faculty" />} />}
-
-                />
+                {/* Staff PBAS route removed */}
                 <Route
                   path="/staff/period-attendance"
                   element={<ProtectedRoute user={user} requiredProfile={'STAFF'} requiredPermissions={['academics.mark_attendance']} element={<PeriodAttendance />} />}
