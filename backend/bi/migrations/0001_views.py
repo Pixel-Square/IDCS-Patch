@@ -186,11 +186,31 @@ DROP VIEW IF EXISTS bi_dim_student;
 """
 
 
+def create_bi_views(apps, schema_editor):
+    """Only create BI views on PostgreSQL (not SQLite)."""
+    if schema_editor.connection.vendor != 'postgresql':
+        return  # Skip for SQLite - these views use PostgreSQL-specific syntax
+    for statement in VIEW_SQL.split(';'):
+        statement = statement.strip()
+        if statement:
+            schema_editor.execute(statement)
+
+
+def drop_bi_views(apps, schema_editor):
+    """Drop BI views on PostgreSQL."""
+    if schema_editor.connection.vendor != 'postgresql':
+        return
+    for statement in DROP_SQL.split(';'):
+        statement = statement.strip()
+        if statement:
+            schema_editor.execute(statement)
+
+
 class Migration(migrations.Migration):
     initial = True
 
     dependencies = []
 
     operations = [
-        migrations.RunSQL(VIEW_SQL, reverse_sql=DROP_SQL),
+        migrations.RunPython(create_bi_views, reverse_code=drop_bi_views),
     ]

@@ -203,6 +203,45 @@ function uniqueKeepOrder<T>(items: T[]): T[] {
   return out;
 }
 
+function pickDominantTimer(rows: Array<{ open_from?: string | null; due_at?: string | null }>): {
+  open_from: string | null;
+  due_at: string | null;
+} {
+  if (!rows.length) return { open_from: null, due_at: null };
+
+  const counts = new Map<string, { count: number; open_from: string | null; due_at: string | null }>();
+  for (const row of rows) {
+    const open_from = row?.open_from ? String(row.open_from) : null;
+    const due_at = row?.due_at ? String(row.due_at) : null;
+    if (!due_at) continue;
+
+    const key = `${open_from || ''}::${due_at}`;
+    const existing = counts.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      counts.set(key, { count: 1, open_from, due_at });
+    }
+  }
+
+  if (!counts.size) return { open_from: null, due_at: null };
+
+  let winner: { count: number; open_from: string | null; due_at: string | null } | null = null;
+  for (const value of counts.values()) {
+    if (!winner || value.count > winner.count) {
+      winner = value;
+      continue;
+    }
+    if (winner && value.count === winner.count) {
+      const winnerTs = winner.due_at ? new Date(winner.due_at).getTime() : Number.NEGATIVE_INFINITY;
+      const valueTs = value.due_at ? new Date(value.due_at).getTime() : Number.NEGATIVE_INFINITY;
+      if (valueTs > winnerTs) winner = value;
+    }
+  }
+
+  return winner ? { open_from: winner.open_from, due_at: winner.due_at } : { open_from: null, due_at: null };
+}
+
 function computeLeafOpenStatus(params: {
   controls: Array<{ subject_code: string; assessment: string; is_open: boolean; is_enabled: boolean }> | null | undefined;
   subjectCodes: string[];
@@ -274,6 +313,7 @@ export default function OBEDueDatesPage(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isEditingTimer, setIsEditingTimer] = useState(false);
 
   const pageTabStyle = useCallback(
     (active: boolean): React.CSSProperties => ({
@@ -532,27 +572,49 @@ export default function OBEDueDatesPage(): JSX.Element {
     });
   }, [globalPublishControlsForSelected, selectedSemesterId]);
 
-  // Auto-fill the current semester timer from existing due schedules (so you can extend due date easily).
-  const commonSemesterTimer = useMemo(() => {
-    if (!selectedSemesterId) return { open_from: null as string | null, due_at: null as string | null };
-    const rows = (Array.isArray(dueSchedulesForSelected) ? dueSchedulesForSelected : []).filter((r: any) => {
-      if (!r) return false;
-      if (r?.is_active === false) return false;
+  const managedSemesterDueRows = useMemo(() => {
+    if (!selectedSemesterId) return [] as DueScheduleRow[];
+    const validSubjectCodes = new Set(allSubjectCodesForSemester.map((code) => String(code).trim()).filter(Boolean));
+    const validAssessments = new Set(ALL_ASSESSMENTS);
+
+    return (Array.isArray(dueSchedulesForSelected) ? dueSchedulesForSelected : []).filter((r: any) => {
+      if (!r || r?.is_active === false) return false;
       const semId = Number(r?.semester?.id);
-      return Number.isFinite(semId) && semId === Number(selectedSemesterId);
+      if (!Number.isFinite(semId) || semId !== Number(selectedSemesterId)) return false;
+
+      const assessment = String(r?.assessment || '').trim().toLowerCase() as DueAssessmentKey;
+      if (!validAssessments.has(assessment)) return false;
+
+      const subjectCode = String(r?.subject_code || '').trim();
+      if (validSubjectCodes.size > 0 && !validSubjectCodes.has(subjectCode)) return false;
+
+      return true;
     });
-    if (!rows.length) return { open_from: null as string | null, due_at: null as string | null };
+  }, [selectedSemesterId, dueSchedulesForSelected, allSubjectCodesForSemester]);
 
-    const openVals = uniqueKeepOrder(rows.map((r: any) => (r?.open_from ? String(r.open_from) : '')));
-    const dueVals = uniqueKeepOrder(rows.map((r: any) => (r?.due_at ? String(r.due_at) : '')));
-
-    const open_from = openVals.length === 1 && openVals[0] ? openVals[0] : null;
-    const due_at = dueVals.length === 1 && dueVals[0] ? dueVals[0] : null;
-    return { open_from, due_at };
-  }, [selectedSemesterId, dueSchedulesForSelected]);
+  // Auto-fill the current semester timer from managed due schedules.
+  // Some semesters can contain stale or mixed rows; use the dominant timer pair instead of requiring perfect uniformity.
+  const commonSemesterTimer = useMemo(() => {
+    return pickDominantTimer(managedSemesterDueRows);
+  }, [managedSemesterDueRows]);
 
   useEffect(() => {
     if (publishModeThisSemester !== 'ON') return;
+    
+    // Check if timer is expired - if so, clear inputs for new timer
+    const dueAt = commonSemesterTimer.due_at;
+    if (dueAt) {
+      const dueTime = new Date(dueAt).getTime();
+      if (Number.isFinite(dueTime) && Date.now() > dueTime) {
+        // Timer expired - clear inputs for fresh start
+        setStartDate('');
+        setStartTime('');
+        setDueDate('');
+        setDueTime('');
+        return;
+      }
+    }
+    
     const due = isoToLocalDateTime(commonSemesterTimer.due_at);
     if (due) {
       setDueDate(due.date);
@@ -564,6 +626,22 @@ export default function OBEDueDatesPage(): JSX.Element {
       setStartTime(start.time);
     }
   }, [publishModeThisSemester, commonSemesterTimer.due_at, commonSemesterTimer.open_from]);
+
+  // Reset editing mode when timer is applied or semester changes
+  useEffect(() => {
+    setIsEditingTimer(false);
+  }, [selectedSemesterId]);
+
+  // Determine if a timer is currently applied
+  const hasAppliedTimer = managedSemesterDueRows.length > 0 && Boolean(commonSemesterTimer.due_at);
+
+  // Check if the timer has expired (current time > due_at)
+  const isTimerExpired = useMemo(() => {
+    if (!commonSemesterTimer.due_at) return false;
+    const dueTime = new Date(commonSemesterTimer.due_at).getTime();
+    if (!Number.isFinite(dueTime)) return false;
+    return Date.now() > dueTime;
+  }, [commonSemesterTimer.due_at]);
 
   const publishModeAllSemesters = useMemo<PublishMode>(() => {
     if (!allSemesterIds.length) return 'MIXED';
@@ -730,6 +808,7 @@ export default function OBEDueDatesPage(): JSX.Element {
       });
 
       setMessage(`SEM ${selectedSemNumber}: Timer applied to all class types.`);
+      setIsEditingTimer(false);
       await reloadSelectedSemester();
     } catch (e: any) {
       setError(e?.message || 'Save failed');
@@ -746,6 +825,42 @@ export default function OBEDueDatesPage(): JSX.Element {
     startTime,
     reloadSelectedSemester,
     publishModeThisSemester,
+  ]);
+
+  const stopTimer = useCallback(async () => {
+    setLoading(true);
+    setMessage(null);
+    setError(null);
+    try {
+      if (!selectedSemesterId) throw new Error(`Semester ${selectedSemNumber} is not available in the database.`);
+      if (!allSubjectCodesForSemester.length) throw new Error(`No courses found for SEM ${selectedSemNumber}.`);
+
+      // Delete all timer schedules for this semester
+      await bulkDeleteDueSchedule({
+        semester_id: selectedSemesterId,
+        subject_codes: allSubjectCodesForSemester,
+        assessments: ALL_ASSESSMENTS,
+      });
+
+      // Clear the date/time inputs
+      setStartDate('');
+      setStartTime('');
+      setDueDate('');
+      setDueTime('');
+      setIsEditingTimer(false);
+
+      setMessage(`SEM ${selectedSemNumber}: Timer stopped and cleared.`);
+      await reloadSelectedSemester();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to stop timer');
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    selectedSemesterId,
+    selectedSemNumber,
+    allSubjectCodesForSemester,
+    reloadSelectedSemester,
   ]);
 
   const setLeafEditable = useCallback(
@@ -906,33 +1021,85 @@ export default function OBEDueDatesPage(): JSX.Element {
                 <span style={{ fontSize: 16 }}>🔒</span> Locked — Common Publish is Off
               </div>
             ) : publishModeThisSemester === 'ON' ? (
-              /* ── Semester ON → show date+time picker inline ── */
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flex: '1 1 auto' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ fontSize: 11, fontWeight: 900, color: '#374151' }}>Start</div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={loading}
-                      style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
-                    <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} disabled={loading}
-                      style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+              /* ── Semester ON → show timer controls ── */
+              hasAppliedTimer && !isTimerExpired && !isEditingTimer ? (
+                /* ── Timer is applied and active → show applied state with stop/edit buttons ── */
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', flex: '1 1 auto' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 10,
+                    background: '#ecfdf5', border: '1px solid #10b981', color: '#065f46' }}>
+                    <span style={{ fontSize: 16 }}>✓</span>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: 13 }}>Timer Applied — SEM {selectedSemNumber}</div>
+                      <div style={{ fontSize: 11, color: '#047857', marginTop: 2 }}>
+                        {commonSemesterTimer.open_from && isoToLocalDateTime(commonSemesterTimer.open_from) ? (
+                          <>{isoToLocalDateTime(commonSemesterTimer.open_from)?.date} {isoToLocalDateTime(commonSemesterTimer.open_from)?.time} → </>
+                        ) : null}
+                        {isoToLocalDateTime(commonSemesterTimer.due_at)?.date} {isoToLocalDateTime(commonSemesterTimer.due_at)?.time}
+                      </div>
+                    </div>
                   </div>
+                  <button onClick={() => setIsEditingTimer(true)} disabled={loading}
+                    style={{ padding: '9px 16px', borderRadius: 8, fontWeight: 700, fontSize: 13,
+                      background: '#fff', border: '1px solid #e5e7eb', color: '#374151', cursor: 'pointer' }}>
+                    Edit Timer
+                  </button>
+                  <button onClick={() => void stopTimer()} disabled={loading}
+                    style={{ padding: '9px 16px', borderRadius: 8, fontWeight: 700, fontSize: 13,
+                      background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', cursor: 'pointer' }}>
+                    {loading ? 'Stopping…' : 'Stop Timer'}
+                  </button>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>All {allSubjectCodesForSemester.length} subjects · all class types</div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ fontSize: 11, fontWeight: 900, color: '#374151' }}>End</div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={loading}
-                  style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
-                <input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} disabled={loading}
-                  style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+              ) : (
+                /* ── No timer, timer expired, or editing → show date+time picker inline ── */
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flex: '1 1 auto' }}>
+                  {isTimerExpired && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10,
+                      background: '#fef3c7', border: '1px solid #f59e0b', color: '#92400e', marginRight: 8 }}>
+                      <span style={{ fontSize: 16 }}>⏰</span>
+                      <div>
+                        <div style={{ fontWeight: 900, fontSize: 13 }}>Time Over — SEM {selectedSemNumber}</div>
+                        <div style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>
+                          Ended: {isoToLocalDateTime(commonSemesterTimer.due_at)?.date} {isoToLocalDateTime(commonSemesterTimer.due_at)?.time}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: '#374151' }}>Start</div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={loading}
+                        style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                      <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} disabled={loading}
+                        style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                    </div>
                   </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: '#374151' }}>End</div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={loading}
+                        style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                      <input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} disabled={loading}
+                        style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => void applyTimerAndSelection()} disabled={loading}
+                      className="obe-btn obe-btn-primary"
+                      style={{ padding: '9px 16px', borderRadius: 8, fontWeight: 900, fontSize: 13 }}>
+                      {loading ? 'Saving…' : isTimerExpired ? `Set New Timer — SEM ${selectedSemNumber}` : hasAppliedTimer ? `Update Timer — SEM ${selectedSemNumber}` : `Apply Timer — SEM ${selectedSemNumber}`}
+                    </button>
+                    {isEditingTimer && (
+                      <button onClick={() => setIsEditingTimer(false)} disabled={loading}
+                        style={{ padding: '9px 16px', borderRadius: 8, fontWeight: 700, fontSize: 13,
+                          background: '#f3f4f6', border: '1px solid #e5e7eb', color: '#374151', cursor: 'pointer' }}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>All {allSubjectCodesForSemester.length} subjects · all class types</div>
                 </div>
-                <button onClick={() => void applyTimerAndSelection()} disabled={loading}
-                  className="obe-btn obe-btn-primary"
-                  style={{ padding: '9px 16px', borderRadius: 8, fontWeight: 900, fontSize: 13 }}>
-                  {loading ? 'Saving…' : `Apply Timer — SEM ${selectedSemNumber}`}
-                </button>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>All {allSubjectCodesForSemester.length} subjects · all class types</div>
-              </div>
+              )
             ) : publishModeThisSemester === 'UNLIMITED' ? (
               /* ── Semester UNLIMITED → no timer needed ── */
               <div style={{ padding: '10px 16px', borderRadius: 10, background: '#eff6ff',
