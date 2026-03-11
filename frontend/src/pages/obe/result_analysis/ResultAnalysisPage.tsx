@@ -6,6 +6,7 @@ import {
   fetchDraft,
   fetchMyTeachingAssignments,
   fetchPublishedFormative,
+  fetchPublishedLabSheet,
   fetchPublishedModelSheet,
   fetchPublishedReview1,
   fetchPublishedReview2,
@@ -13,6 +14,47 @@ import {
   fetchPublishedSsa2,
   TeachingAssignmentItem,
 } from '../../../services/obe';
+
+/** Extract per-student total from a LabPublishedSheet data payload. */
+function extractLabSheetTotals(data: any): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  if (!data || typeof data !== 'object') return out;
+  const rows: Record<string, any> = data?.sheet?.rowsByStudentId || {};
+  for (const [sid, row] of Object.entries(rows)) {
+    if (!row || typeof row !== 'object') { out[sid] = null; continue; }
+    // ciaExam is the scalar total for most lab/TCPL deployments
+    const ciaExam = row.ciaExam;
+    if (ciaExam !== '' && ciaExam != null && Number.isFinite(Number(ciaExam))) {
+      out[sid] = clamp(Number(ciaExam), 0, 100);
+      continue;
+    }
+    // Fallback: sum all experiment marks from marksA, marksB, marksByCo
+    let sum = 0;
+    let hasAny = false;
+    const allMarksArrays: Array<number | ''>[] = [];
+    if (Array.isArray(row.marksA)) allMarksArrays.push(row.marksA);
+    if (Array.isArray(row.marksB)) allMarksArrays.push(row.marksB);
+    if (row.marksByCo && typeof row.marksByCo === 'object') {
+      Object.values(row.marksByCo).forEach((arr) => { if (Array.isArray(arr)) allMarksArrays.push(arr as any); });
+    }
+    for (const arr of allMarksArrays) {
+      for (const v of arr) {
+        if (v !== '' && v != null && Number.isFinite(Number(v))) { sum += Number(v); hasAny = true; }
+      }
+    }
+    // Also include caaExamByCo, ciaExamByCo sums
+    for (const field of ['caaExamByCo', 'ciaExamByCo'] as const) {
+      const byco = row[field];
+      if (byco && typeof byco === 'object') {
+        Object.values(byco).forEach((v) => {
+          if (v !== '' && v != null && Number.isFinite(Number(v))) { sum += Number(v); hasAny = true; }
+        });
+      }
+    }
+    out[sid] = hasAny ? clamp(Math.round(sum), 0, 100) : null;
+  }
+  return out;
+}
 import { fetchTeachingAssignmentRoster, TeachingAssignmentRosterStudent } from '../../../services/roster';
 import fetchWithAuth from '../../../services/fetchAuth';
 import { lsGet, lsSet } from '../../../utils/localStorage';
@@ -173,7 +215,15 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
         })();
 
         const fa1 = await (async () => {
-          if (ct !== 'THEORY' && ct !== 'TCPL' && ct !== 'SPECIAL') return {};
+          if (ct === 'TCPL') {
+            // TCPL uses LabPublishedSheet for lab marks (stored with key formative1)
+            if (!allow('formative1')) return {};
+            try {
+              const res = await fetchPublishedLabSheet('formative1', courseId, selectedTaId);
+              return extractLabSheetTotals((res as any)?.data);
+            } catch { return {}; }
+          }
+          if (ct !== 'THEORY' && ct !== 'SPECIAL') return {};
           if (!allow('formative1')) return {};
           return (await tryDraft('formative1')) || (await (async () => { try { return (await fetchPublishedFormative('formative1', courseId, selectedTaId))?.marks || {}; } catch { return {}; } })());
         })();
@@ -216,7 +266,15 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
         })();
 
         const fa2 = await (async () => {
-          if (ct !== 'THEORY' && ct !== 'TCPL' && ct !== 'SPECIAL') return {};
+          if (ct === 'TCPL') {
+            // TCPL uses LabPublishedSheet for lab marks (stored with key formative2)
+            if (!allow('formative2')) return {};
+            try {
+              const res = await fetchPublishedLabSheet('formative2', courseId, selectedTaId);
+              return extractLabSheetTotals((res as any)?.data);
+            } catch { return {}; }
+          }
+          if (ct !== 'THEORY' && ct !== 'SPECIAL') return {};
           if (!allow('formative2')) return {};
           return (await tryDraft('formative2')) || (await (async () => { try { return (await fetchPublishedFormative('formative2', courseId, selectedTaId))?.marks || {}; } catch { return {}; } })());
         })();
@@ -266,10 +324,13 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
   const cols1: SheetCol[] = useMemo(() => {
     const c: SheetCol[] = [];
     if (allow('cia1')) c.push({ key: 'cia1', label: 'CIA 1', max: 60, weight: w.cia1 });
+    // SSA: all types except pure lab/practical/project
     if (ct !== 'LAB' && ct !== 'PRACTICAL' && ct !== 'PROJECT' && allow('ssa1'))
       c.push({ key: 'ssa1', label: 'SSA 1', max: 20, weight: w.ssa1 });
-    if ((ct === 'THEORY' || ct === 'TCPL') && allow('formative1'))
-      c.push({ key: 'fa1', label: 'FA 1', max: 20, weight: w.fa1 });
+    // Formative/Lab — NEVER for TCPR/PROJECT (they use Review instead)
+    if (ct !== 'TCPR' && ct !== 'PROJECT' && allow('formative1'))
+      c.push({ key: 'fa1', label: ct === 'TCPL' ? 'Lab 1' : 'FA 1', max: 20, weight: w.fa1 });
+    // Review — ONLY for TCPR/PROJECT
     if ((ct === 'TCPR' || ct === 'PROJECT') && allow('review1'))
       c.push({ key: 'rev1', label: 'Review 1', max: 20, weight: w.fa1 });
     return c;
@@ -280,8 +341,10 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
     if (allow('cia2')) c.push({ key: 'cia2', label: 'CIA 2', max: 60, weight: w.cia2 });
     if (ct !== 'LAB' && ct !== 'PRACTICAL' && ct !== 'PROJECT' && allow('ssa2'))
       c.push({ key: 'ssa2', label: 'SSA 2', max: 20, weight: w.ssa2 });
-    if ((ct === 'THEORY' || ct === 'TCPL') && allow('formative2'))
-      c.push({ key: 'fa2', label: 'FA 2', max: 20, weight: w.fa2 });
+    // Formative/Lab — NEVER for TCPR/PROJECT
+    if (ct !== 'TCPR' && ct !== 'PROJECT' && allow('formative2'))
+      c.push({ key: 'fa2', label: ct === 'TCPL' ? 'Lab 2' : 'FA 2', max: 20, weight: w.fa2 });
+    // Review — ONLY for TCPR/PROJECT
     if ((ct === 'TCPR' || ct === 'PROJECT') && allow('review2'))
       c.push({ key: 'rev2', label: 'Review 2', max: 20, weight: w.fa2 });
     return c;
@@ -298,7 +361,8 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
         const raw = rawSource[col.key] || {};
         if (col.key === 'fa1' || col.key === 'fa2') {
           const fRow = (raw as any)[sid];
-          const v = toNum(fRow?.total);
+          // extractLabSheetTotals returns flat number; fetchPublishedFormative returns {total, ...}
+          const v = typeof fRow === 'number' ? fRow : toNum(fRow?.total);
           marks[col.key] = v == null ? null : clamp(v, 0, col.max);
         } else {
           const v = toNum((raw as any)[sid]);
@@ -489,12 +553,8 @@ export default function ResultAnalysisPage({ courseId, classType, enabledAssessm
             {cycleLabels[activeCycle]}
           </span>
           <span style={{ color: '#6b7280', fontSize: 13 }}>
-            {activeCycle === 'cycle1' && (ct === 'THEORY' || ct === 'TCPL') && 'CIA 1 + SSA 1 + FA 1'}
-            {activeCycle === 'cycle1' && (ct === 'TCPR' || ct === 'PROJECT') && 'CIA 1 + SSA 1 + Review 1'}
-            {activeCycle === 'cycle1' && (ct === 'LAB' || ct === 'PRACTICAL') && 'CIA 1'}
-            {activeCycle === 'cycle2' && (ct === 'THEORY' || ct === 'TCPL') && 'CIA 2 + SSA 2 + FA 2'}
-            {activeCycle === 'cycle2' && (ct === 'TCPR' || ct === 'PROJECT') && 'CIA 2 + SSA 2 + Review 2'}
-            {activeCycle === 'cycle2' && (ct === 'LAB' || ct === 'PRACTICAL') && 'CIA 2'}
+            {activeCycle === 'cycle1' && cols1.map((c) => c.label).join(' + ')}
+            {activeCycle === 'cycle2' && cols2.map((c) => c.label).join(' + ')}
             {activeCycle === 'model' && 'Model Examination'}
           </span>
         </div>

@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { fetchLcaRevision, saveLcaRevision } from '../../services/lcaDb';
+import { createEditRequest, fetchMarkTableLockStatus, formatEditRequestSentMessage, MarkTableLockStatusResponse } from '../../services/obe';
 
 type NumberInputProps = {
   value: number | '';
   onChange: (value: number | '') => void;
   min?: number;
   max?: number;
+  highlightError?: boolean;
 };
 
-function NumberInput({ value, onChange, min, max }: NumberInputProps): JSX.Element {
+function NumberInput({ value, onChange, min, max, highlightError }: NumberInputProps): JSX.Element {
   return (
     <input
       type="number"
@@ -24,12 +27,15 @@ function NumberInput({ value, onChange, min, max }: NumberInputProps): JSX.Eleme
       min={min}
       max={max}
       style={{
-        width: 76,
-        padding: '8px 10px',
+        width: '100%',
+        minWidth: 56,
+        padding: '8px 6px',
         borderRadius: 8,
-        border: '1px solid #e6eef8',
+        border: highlightError ? '2px solid #ef4444' : '1px solid #e6eef8',
+        background: highlightError ? '#fef2f2' : undefined,
         outline: 'none',
         fontSize: 15,
+        boxSizing: 'border-box' as React.CSSProperties['boxSizing'],
       }}
     />
   );
@@ -90,6 +96,7 @@ const styles: { [k: string]: React.CSSProperties } = {
     width: '100%',
     margin: 0,
     flex: '1 1 auto',
+    overflowX: 'auto' as React.CSSProperties['overflowX'],
   },
   // ensure large pages fit the viewport and become scrollable
   cardScrollable: {
@@ -104,7 +111,6 @@ const styles: { [k: string]: React.CSSProperties } = {
     width: '100%',
     borderCollapse: 'collapse',
     marginTop: 8,
-    tableLayout: 'fixed' as React.CSSProperties['tableLayout'],
   },
   th: {
     background: '#f3f8ff',
@@ -124,8 +130,7 @@ const styles: { [k: string]: React.CSSProperties } = {
     border: '1px solid #e6eef8',
     textAlign: 'left',
     fontSize: 15,
-    whiteSpace: 'nowrap',
-    minWidth: 220,
+    minWidth: 120,
   },
   td: {
     padding: '10px 14px',
@@ -140,7 +145,7 @@ const styles: { [k: string]: React.CSSProperties } = {
     color: '#234451',
     fontSize: 15,
     textAlign: 'left',
-    minWidth: 220,
+    minWidth: 120,
   },
   cellYellow: { background: '#fef9c3' },
   cellGreen: { background: '#ecfdf3' },
@@ -295,6 +300,14 @@ export default function LCAPage({
   const navigate = useNavigate();
   const isPbrRoute = (location.pathname || '').toLowerCase().includes('/lca/pbr');
 
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionNote, setActionNote] = useState<string | null>(null);
+  const [editRequestOpen, setEditRequestOpen] = useState(false);
+  const [editReason, setEditReason] = useState('');
+  const [markLock, setMarkLock] = useState<MarkTableLockStatusResponse | null>(null);
+  const [revStatus, setRevStatus] = useState<string>('draft');
+  const [validationErrors, setValidationErrors] = useState<Set<string>>(new Set());
+
   const [courseMeta, setCourseMeta] = useState({
     courseCode: courseCodeProp ?? courseId ?? '',
     courseName: courseNameProp ?? '',
@@ -309,6 +322,170 @@ export default function LCAPage({
       courseName: courseNameProp ?? prev.courseName,
     }));
   }, [courseId, courseCodeProp, courseNameProp]);
+
+  const subjectIdForRequests = useMemo(() => {
+    return String(courseCodeProp ?? courseId ?? courseMeta.courseCode ?? '').trim();
+  }, [courseCodeProp, courseId, courseMeta.courseCode]);
+
+  const isPublished = useMemo(() => {
+    if (markLock?.exists) return Boolean(markLock.is_published);
+    return String(revStatus || '').toLowerCase() === 'published';
+  }, [markLock?.exists, markLock?.is_published, revStatus]);
+
+  const entryOpen = useMemo(() => {
+    if (!isPublished) return true;
+    if (!markLock) return false;
+    return Boolean(markLock.entry_open);
+  }, [isPublished, markLock]);
+
+  const readOnly = useMemo(() => Boolean(isPublished && !entryOpen), [isPublished, entryOpen]);
+
+  // Load previously saved LCA inputs
+  useEffect(() => {
+    let mounted = true;
+    const subjectId = subjectIdForRequests;
+    if (!subjectId) return;
+    (async () => {
+      try {
+        const res = await fetchLcaRevision(subjectId);
+        setRevStatus(String((res as any)?.status || 'draft'));
+        const d = (res as any)?.data || {};
+        if (!mounted) return;
+        if (d.courseMeta && typeof d.courseMeta === 'object') {
+          setCourseMeta((p) => ({
+            ...p,
+            credit: String((d.courseMeta as any).credit ?? p.credit ?? ''),
+            courseModule: String((d.courseMeta as any).courseModule ?? p.courseModule ?? ''),
+          }));
+        }
+        if (d.currentGpaCounts && typeof d.currentGpaCounts === 'object') {
+          setCurrentGpaCounts({
+            band1: (d.currentGpaCounts as any).band1 ?? '',
+            band2: (d.currentGpaCounts as any).band2 ?? '',
+            band3: (d.currentGpaCounts as any).band3 ?? '',
+          });
+        }
+        if (Array.isArray(d.prerequisites)) {
+          const rows = (d.prerequisites as any[]).map((r, idx) => ({
+            name: String(r?.name || `Prerequisite ${idx + 1}`),
+            band1: r?.band1 ?? '',
+            band2: r?.band2 ?? '',
+            band3: r?.band3 ?? '',
+          }));
+          if (rows.length) setPrerequisites(rows);
+        }
+        if (typeof d.pbrManualCourseLevel === 'string') {
+          setPbrManualCourseLevel(d.pbrManualCourseLevel as any);
+        }
+        setActionNote('Loaded');
+      } catch {
+        // Ignore load failures (page still usable)
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId, courseCodeProp]);
+
+  // Fetch publish/lock state for read-only behavior
+  useEffect(() => {
+    let mounted = true;
+    const subjectId = subjectIdForRequests;
+    if (!subjectId) return;
+    (async () => {
+      try {
+        const lock = await fetchMarkTableLockStatus('lca' as any, subjectId);
+        if (!mounted) return;
+        setMarkLock(lock);
+      } catch {
+        // best-effort; if lock status cannot be verified and the server says published, default to read-only
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [subjectIdForRequests]);
+
+  const handleFinalize = async () => {
+    // Validate required fields before finalizing
+    const errs = new Set<string>();
+    if (!String(courseMeta.credit || '').trim()) errs.add('credit');
+    if (!String(courseMeta.courseModule || '').trim()) errs.add('courseModule');
+    const hasGpa = currentGpaCounts.band1 !== '' || currentGpaCounts.band2 !== '' || currentGpaCounts.band3 !== '';
+    if (!hasGpa) errs.add('gpa');
+    if (errs.size > 0) {
+      setValidationErrors(errs);
+      const labels: string[] = [];
+      if (errs.has('credit')) labels.push('Credit of the Course');
+      if (errs.has('courseModule')) labels.push('Course Module');
+      if (errs.has('gpa')) labels.push('at least one GPA band count (Number of Students)');
+      setActionNote(`Please fill in: ${labels.join(', ')}`);
+      return;
+    }
+    setValidationErrors(new Set());
+    const subjectId = subjectIdForRequests;
+    if (!subjectId) {
+      setActionNote('Missing course code');
+      return;
+    }
+    setActionBusy(true);
+    setActionNote(null);
+    setEditRequestOpen(false);
+    try {
+      await saveLcaRevision(
+        subjectId,
+        {
+          courseMeta: { credit: courseMeta.credit, courseModule: courseMeta.courseModule },
+          currentGpaCounts,
+          prerequisites,
+          pbrManualCourseLevel,
+        },
+        'published',
+      );
+      setRevStatus('published');
+      setActionNote('Finalized');
+      try {
+        const lock = await fetchMarkTableLockStatus('lca' as any, subjectId);
+        setMarkLock(lock);
+      } catch {
+        // ignore
+      }
+    } catch (e: any) {
+      setActionNote(String(e?.message || 'Publish failed'));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleSendEditRequest = async () => {
+    const subjectId = subjectIdForRequests;
+    if (!subjectId) {
+      setActionNote('Missing course code');
+      return;
+    }
+    const reason = String(editReason || '').trim();
+    if (!reason) {
+      setActionNote('Please enter a reason');
+      return;
+    }
+    setActionBusy(true);
+    setActionNote(null);
+    try {
+      const created = await createEditRequest({
+        assessment: 'lca' as any,
+        subject_code: subjectId,
+        scope: 'MARK_MANAGER',
+        reason,
+      });
+      setActionNote(formatEditRequestSentMessage(created));
+      setEditRequestOpen(false);
+    } catch (e: any) {
+      setActionNote(String(e?.message || 'Request failed'));
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const [currentGpaCounts, setCurrentGpaCounts] = useState<TriBandCounts>({ band1: '', band2: '', band3: '' });
   const cgpLevel = useMemo(() => levelFromBands1to3(currentGpaCounts), [currentGpaCounts]);
@@ -554,8 +731,67 @@ export default function LCAPage({
             <h2 style={styles.title}>Learner Centric Approach</h2>
             <div style={styles.subtitle}>Enter values in the highlighted cells; levels are computed automatically.</div>
           </div>
-          <div style={{ ...styles.pill, fontWeight: 800 }}>INDEX</div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            {!readOnly ? (
+              <button
+                type="button"
+                onClick={handleFinalize}
+                disabled={actionBusy}
+                style={{
+                  ...styles.btn,
+                  background: styles.cellGreen.background,
+                  color: '#067647',
+                  opacity: actionBusy ? 0.7 : 1,
+                  cursor: actionBusy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {actionBusy ? 'Finalizing…' : 'Finalize'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditRequestOpen(true)}
+                disabled={actionBusy}
+                style={{
+                  ...styles.btn,
+                  opacity: actionBusy ? 0.7 : 1,
+                  cursor: actionBusy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {actionBusy ? 'Please wait…' : 'Request Edit'}
+              </button>
+            )}
+            <div style={{ ...styles.pill, fontWeight: 800 }}>INDEX</div>
+          </div>
         </div>
+
+        {editRequestOpen && readOnly && (
+          <div style={{ marginBottom: 12, background: '#fff7ed', border: '1px solid #fed7aa', color: '#7c2d12', padding: 12, borderRadius: 12 }}>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>Request edit approval (IQAC)</div>
+            <textarea
+              value={editReason}
+              onChange={(e) => setEditReason(e.target.value)}
+              placeholder="Reason for requesting edits"
+              style={{ width: '100%', minHeight: 72, borderRadius: 10, border: '1px solid #fdba74', padding: 10, outline: 'none' }}
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
+              <button type="button" className="obe-btn obe-btn-secondary" onClick={() => setEditRequestOpen(false)} disabled={actionBusy}>
+                Cancel
+              </button>
+              <button type="button" className="obe-btn obe-btn-primary" onClick={handleSendEditRequest} disabled={actionBusy}>
+                {actionBusy ? 'Sending…' : 'Send Request'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {actionNote && (
+          <div style={{ marginBottom: 12, color: actionNote === 'Finalized' ? '#067647' : (validationErrors.size > 0 ? '#b42318' : '#3d5566'), fontWeight: 700, whiteSpace: 'pre-line', ...(validationErrors.size > 0 ? { background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px' } : {}) }}>
+            {actionNote}
+          </div>
+        )}
+
+        <div style={{ pointerEvents: readOnly ? 'none' : 'auto', opacity: readOnly ? 0.94 : 1 }}>
 
         {/* Course meta (kept simple; layout matches the sheet) */}
         <table style={styles.table}>
@@ -588,22 +824,26 @@ export default function LCAPage({
             </tr>
             <tr>
               <td style={{ ...styles.tdLeft, fontWeight: 700 }}>CREDIT OF THE COURSE</td>
-              <td style={{ ...styles.tdLeft, ...styles.cellGreen }}>
+              <td style={{ ...styles.tdLeft, ...styles.cellGreen, ...(validationErrors.has('credit') ? { border: '2px solid #ef4444' } : {}) }}>
                 <input
                   value={courseMeta.credit}
-                  onChange={(e) => setCourseMeta((p) => ({ ...p, credit: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setCourseMeta((p) => ({ ...p, credit: e.target.value }));
+                    if (validationErrors.has('credit')) setValidationErrors((p) => { const s = new Set(p); s.delete('credit'); return s; });
+                  }}
                   style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 15, outline: 'none' }}
                 />
               </td>
             </tr>
             <tr>
               <td style={{ ...styles.tdLeft, fontWeight: 700 }}>COURSE MODULE</td>
-              <td style={{ ...styles.tdLeft, ...styles.cellGreen }}>
+              <td style={{ ...styles.tdLeft, ...styles.cellGreen, ...(validationErrors.has('courseModule') ? { border: '2px solid #ef4444' } : {}) }}>
                 <input
                   value={courseMeta.courseModule}
-                  onChange={(e) => setCourseMeta((p) => ({ ...p, courseModule: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setCourseMeta((p) => ({ ...p, courseModule: e.target.value }));
+                    if (validationErrors.has('courseModule')) setValidationErrors((p) => { const s = new Set(p); s.delete('courseModule'); return s; });
+                  }}
                   style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 15, outline: 'none' }}
                 />
               </td>
@@ -647,13 +887,13 @@ export default function LCAPage({
             <tr>
               <td style={{ ...styles.tdLeft, fontWeight: 700 }}>NUMBER OF STUDENTS (CAY-1)</td>
               <td style={{ ...styles.td, ...styles.cellYellow }}>
-                <NumberInput value={currentGpaCounts.band1} onChange={(v) => setCurrentGpaCounts((p) => ({ ...p, band1: v }))} />
+                <NumberInput value={currentGpaCounts.band1} highlightError={validationErrors.has('gpa')} onChange={(v) => { setCurrentGpaCounts((p) => ({ ...p, band1: v })); if (validationErrors.has('gpa')) setValidationErrors((p) => { const s = new Set(p); s.delete('gpa'); return s; }); }} />
               </td>
               <td style={{ ...styles.td, ...styles.cellYellow }}>
-                <NumberInput value={currentGpaCounts.band2} onChange={(v) => setCurrentGpaCounts((p) => ({ ...p, band2: v }))} />
+                <NumberInput value={currentGpaCounts.band2} highlightError={validationErrors.has('gpa')} onChange={(v) => { setCurrentGpaCounts((p) => ({ ...p, band2: v })); if (validationErrors.has('gpa')) setValidationErrors((p) => { const s = new Set(p); s.delete('gpa'); return s; }); }} />
               </td>
               <td style={{ ...styles.td, ...styles.cellYellow }}>
-                <NumberInput value={currentGpaCounts.band3} onChange={(v) => setCurrentGpaCounts((p) => ({ ...p, band3: v }))} />
+                <NumberInput value={currentGpaCounts.band3} highlightError={validationErrors.has('gpa')} onChange={(v) => { setCurrentGpaCounts((p) => ({ ...p, band3: v })); if (validationErrors.has('gpa')) setValidationErrors((p) => { const s = new Set(p); s.delete('gpa'); return s; }); }} />
               </td>
               <td style={{ ...styles.td, fontWeight: 800, color: '#0b4a6f' }} colSpan={2}>{cgpLevel}</td>
             </tr>
@@ -850,6 +1090,7 @@ export default function LCAPage({
             </tr>
           </tbody>
         </table>
+        </div>
       </>
   );
 }
