@@ -5544,10 +5544,10 @@ class DepartmentStudentsView(APIView):
                 return Response({'sections': [], 'results': []})
 
             sections = Section.objects.filter(
-                batch__course__department_id__in=dept_ids
-            ).select_related('batch', 'batch__course', 'batch__course__department').order_by(
-                'batch__course__department__code', 'batch__name', 'name'
-            )
+                Q(batch__course__department_id__in=dept_ids) | Q(batch__department_id__in=dept_ids)
+            ).select_related(
+                'batch', 'batch__course', 'batch__course__department', 'batch__department'
+            ).order_by('batch__name', 'name')
 
             section_id_param = request.query_params.get('section_id')
 
@@ -5558,7 +5558,7 @@ class DepartmentStudentsView(APIView):
                 for sec in sections:
                     batch = getattr(sec, 'batch', None)
                     course = getattr(batch, 'course', None) if batch else None
-                    dept = getattr(course, 'department', None) if course else None
+                    dept = (getattr(course, 'department', None) if course else None) or getattr(batch, 'department', None)
                     section_list.append({
                         'section_id': sec.id,
                         'section_name': sec.name,
@@ -5581,7 +5581,7 @@ class DepartmentStudentsView(APIView):
 
             batch = getattr(sec, 'batch', None)
             course = getattr(batch, 'course', None) if batch else None
-            dept = getattr(course, 'department', None) if course else None
+            dept = (getattr(course, 'department', None) if course else None) or getattr(batch, 'department', None)
 
             studs = []
             assign_qs = StudentSectionAssignment.objects.filter(
@@ -5658,10 +5658,10 @@ class AllStudentsView(APIView):
             from .models import Section, StudentSectionAssignment, StudentProfile
             
             sections = Section.objects.filter(
-                batch__course__department__isnull=False
-            ).select_related('batch', 'batch__course', 'batch__course__department').order_by(
-                'batch__course__department__code', 'batch__name', 'name'
-            )
+                Q(batch__course__department__isnull=False) | Q(batch__department__isnull=False)
+            ).select_related(
+                'batch', 'batch__course', 'batch__course__department', 'batch__department'
+            ).order_by('batch__name', 'name')
 
             section_id_param = request.query_params.get('section_id')
 
@@ -5671,7 +5671,7 @@ class AllStudentsView(APIView):
                 for sec in sections:
                     batch = getattr(sec, 'batch', None)
                     course = getattr(batch, 'course', None) if batch else None
-                    dept = getattr(course, 'department', None) if course else None
+                    dept = (getattr(course, 'department', None) if course else None) or getattr(batch, 'department', None)
                     section_list.append({
                         'section_id': sec.id,
                         'section_name': sec.name,
@@ -5694,7 +5694,7 @@ class AllStudentsView(APIView):
 
             batch = getattr(sec, 'batch', None)
             course = getattr(batch, 'course', None) if batch else None
-            dept = getattr(course, 'department', None) if course else None
+            dept = (getattr(course, 'department', None) if course else None) or getattr(batch, 'department', None)
 
             studs = []
             assign_qs = StudentSectionAssignment.objects.filter(
@@ -5764,6 +5764,30 @@ class BatchYearViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         from .models import BatchYear
         return BatchYear.objects.all().order_by('-name')
+
+
+class BatchListView(APIView):
+    """List all Batch objects with department info and is_active status.
+
+    Used by frontend dropdowns that need per-department active flags.
+    Returns: id, name, department_code, department_short_name, is_active
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        from .models import Batch
+        qs = Batch.objects.select_related('course__department', 'department').order_by('-name')
+        results = []
+        for b in qs:
+            dept = b.effective_department
+            results.append({
+                'id': b.id,
+                'name': b.name,
+                'department_code': getattr(dept, 'code', None),
+                'department_short_name': getattr(dept, 'short_name', None),
+                'is_active': b.is_active,
+            })
+        return Response(results)
 
 
 class AllStaffListView(APIView):

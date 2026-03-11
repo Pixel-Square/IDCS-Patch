@@ -55,8 +55,8 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
   deptSectionsRef.current = deptSections
   // All departments list (fetched separately for dropdown)
   const [allDepartments, setAllDepartments] = useState<Array<{ id: number; code: string; short_name: string; name: string }>>([])
-  // All batch years list (fetched separately for dropdown)
-  const [allBatchYears, setAllBatchYears] = useState<Array<{ id: number; name: string; start_year?: number; end_year?: number }>>([])
+  // All batch list (fetched separately for dropdown, per-department active status)
+  const [allBatches, setAllBatches] = useState<Array<{ id: number; name: string; department_code?: string; department_short_name?: string; is_active: boolean }>>([])
   // Pre-cached students for my-students / my-mentees modes (keyed by section_id)
   const [studentsCache, setStudentsCache] = useState<Record<number, Student[]>>({})
   const [lazyStudents, setLazyStudents] = useState<Student[]>([])
@@ -243,22 +243,22 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
     }
   }
 
-  // Fetch all batch years for dropdown filters
-  async function fetchAllBatchYears() {
+  // Fetch all batches for dropdown filters (per-department active status)
+  async function fetchAllBatches() {
     try {
-      const res = await fetchWithAuth('/api/academics/batch-years/')
-      if (!res.ok) throw new Error('Failed to fetch batch years')
+      const res = await fetchWithAuth('/api/academics/batches/')
+      if (!res.ok) throw new Error('Failed to fetch batches')
       const data = await res.json()
-      setAllBatchYears(data.results || data || [])
+      setAllBatches(data.results || data || [])
     } catch (e) {
-      console.error('fetchAllBatchYears error:', e)
+      console.error('fetchAllBatches error:', e)
     }
   }
 
   // Fetch departments and batch years once on mount
   useEffect(() => {
     fetchAllDepartments()
-    fetchAllBatchYears()
+    fetchAllBatches()
   }, [])
 
   // Check for departments/batches refresh signal from other pages (e.g., StaffsPage)
@@ -272,7 +272,7 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
         if (now - signalTime < 5000) {
           console.log('Refresh signal detected, reloading departments and batches...')
           fetchAllDepartments()
-          fetchAllBatchYears()
+          fetchAllBatches()
         }
         // Clear the signal after checking
         sessionStorage.removeItem('students_departments_refresh')
@@ -936,11 +936,20 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
           .map(d => d.short_name || d.code || '')
           .filter(Boolean)
           .sort()
-        // Use all batch years for dropdown (not just those with sections)
-        const batchOptions = allBatchYears
-          .map(b => b.name || '')
-          .filter(Boolean)
-          .sort()
+        // Batch options: filter by selected dept (if any), deduplicate by name, show active status
+        const batchOptions = (() => {
+          const deptFiltered = deptDeptFilter
+            ? allBatches.filter(b => (b.department_short_name || b.department_code) === deptDeptFilter)
+            : allBatches
+          // Deduplicate by name, preferring inactive=false (active) if mixed
+          const map = new Map<string, { name: string; is_active: boolean }>()
+          for (const b of deptFiltered) {
+            if (!b.name) continue
+            const existing = map.get(b.name)
+            if (!existing || (!b.is_active && existing.is_active)) map.set(b.name, { name: b.name, is_active: b.is_active })
+          }
+          return Array.from(map.values()).sort((a, b) => b.name.localeCompare(a.name))
+        })()
         const sectionOptions = Array.from(new Set(
           deptSections.map(s => s.section_name).filter(Boolean)
         )).sort()
@@ -968,7 +977,11 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
                   className="px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[140px]"
                 >
                   <option value="">-- All Batches --</option>
-                  {batchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                  {batchOptions.map(b => (
+                    <option key={b.name} value={b.name}>
+                      {b.name}{b.is_active === false ? ' (Inactive)' : ' ✓'}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="flex flex-col gap-1">
@@ -1008,10 +1021,18 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
           .filter(Boolean)
           .sort()
         // Use all batch years for dropdown (not just those with sections)
-        const batchOptions = allBatchYears
-          .map(b => b.name || '')
-          .filter(Boolean)
-          .sort()
+        const batchOptions = (() => {
+          const deptFiltered = allDeptFilter
+            ? allBatches.filter(b => (b.department_short_name || b.department_code) === allDeptFilter)
+            : allBatches
+          const map = new Map<string, { name: string; is_active: boolean }>()
+          for (const b of deptFiltered) {
+            if (!b.name) continue
+            const existing = map.get(b.name)
+            if (!existing || (!b.is_active && existing.is_active)) map.set(b.name, { name: b.name, is_active: b.is_active })
+          }
+          return Array.from(map.values()).sort((a, b) => b.name.localeCompare(a.name))
+        })()
         const sectionOptions = Array.from(new Set(
           allSections.map(s => s.section_name).filter(Boolean)
         )).sort()
@@ -1037,7 +1058,11 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
                   className="px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[140px]"
                 >
                   <option value="">-- Select --</option>
-                  {batchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                  {batchOptions.map(b => (
+                    <option key={b.name} value={b.name}>
+                      {b.name}{b.is_active === false ? ' (Inactive)' : ' ✓'}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="flex flex-col gap-1">

@@ -299,6 +299,7 @@ class Batch(models.Model):
     start_year = models.PositiveSmallIntegerField(null=True, blank=True)
     end_year = models.PositiveSmallIntegerField(null=True, blank=True)
     regulation = models.ForeignKey('curriculum.Regulation', on_delete=models.SET_NULL, null=True, blank=True, related_name='batches', help_text='Curriculum regulation this batch follows')
+    is_active = models.BooleanField(default=True, help_text='Whether this batch is currently active for this department')
 
     class Meta:
         constraints = [
