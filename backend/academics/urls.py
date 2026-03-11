@@ -35,7 +35,7 @@ from .views import (
     StudentMarksView,
     BatchYearViewSet,
 )
-from .analytics_views import AttendanceAnalyticsView, AnalyticsFiltersView, ClassAttendanceReportView, TodayPeriodAttendanceView, PeriodAttendanceReportView, OverallSectionView, MyClassStudentsView, DailyAttendanceView, DailyAttendanceLockView, DailyAttendanceUnlockView, MyClassAttendanceAnalyticsView, DailyAttendanceSessionDetailView, SectionStudentAttendanceDayView, DailyAttendanceRevertAssignmentView, DailyAttendanceUnlockRequestView, PeriodAttendanceUnlockRequestView, HODUnlockRequestsView, PeriodAttendanceSwapView, PeriodAttendanceRevertAssignmentView
+from .analytics_views import AttendanceAnalyticsView, AnalyticsFiltersView, ClassAttendanceReportView, TodayPeriodAttendanceView, PeriodAttendanceReportView, OverallSectionView, MyClassStudentsView, DailyAttendanceView, DailyAttendanceLockView, DailyAttendanceUnlockView, MyClassAttendanceAnalyticsView, DailyAttendanceSessionDetailView, SectionStudentAttendanceDayView, DailyAttendanceRevertAssignmentView, DailyAttendanceUnlockRequestView, PeriodAttendanceUnlockRequestView, HODUnlockRequestsView, PeriodAttendanceSwapView, PeriodAttendanceRevertAssignmentView, AttendanceAssignmentRequestView, AttendanceAssignmentRequestActionView
 from .views import UnifiedUnlockRequestsView, DepartmentStudentsView, AllStudentsView, MentorMyMenteesView
 
 router = DefaultRouter()
@@ -116,4 +116,6 @@ urlpatterns = [
     path('period-attendance-unlock-request/', PeriodAttendanceUnlockRequestView.as_view()),
     path('hod-unlock-requests/', HODUnlockRequestsView.as_view()),
     path('unified-unlock-requests/', UnifiedUnlockRequestsView.as_view()),
+    path('attendance-assignment-requests/', AttendanceAssignmentRequestView.as_view()),
+    path('attendance-assignment-requests/<int:pk>/<str:action>/', AttendanceAssignmentRequestActionView.as_view()),
 ]
