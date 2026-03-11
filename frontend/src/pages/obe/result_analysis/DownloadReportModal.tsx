@@ -239,7 +239,6 @@ export default function DownloadReportModal({
          ───────────────────────────────────────────────────────── */
       const colW3 = UW / 3;
       const labelW3 = 26; // space reserved for label text in each 3rd-column
-      const rowH = 6.5;
 
       // Build info cells as a flat list: [label, value] pairs.
       // We'll flow them into 3 columns, left-to-right across each row.
@@ -260,7 +259,23 @@ export default function DownloadReportModal({
       while (infoCells.length % 3 !== 0) infoCells.push(['', '']);
 
       const numInfoRows = infoCells.length / 3;
-      const gridH = numInfoRows * rowH;
+      const valMaxW = colW3 - labelW3 - 7;
+
+      // Pre-compute wrapped lines per visual row for dynamic row heights
+      doc.setFontSize(8);
+      const infoGrid: Array<{ cells: Array<{ lbl: string; lines: string[] }>; rH: number }> = [];
+      for (let ri = 0; ri < numInfoRows; ri++) {
+        const cells: Array<{ lbl: string; lines: string[] }> = [];
+        let maxLines = 1;
+        for (let ci = 0; ci < 3; ci++) {
+          const [lbl, val] = infoCells[ri * 3 + ci];
+          const lines = val ? (doc.splitTextToSize(val, valMaxW) as string[]) : [];
+          cells.push({ lbl, lines });
+          maxLines = Math.max(maxLines, lines.length);
+        }
+        infoGrid.push({ cells, rH: 4.5 + (maxLines - 1) * 3.8 + 2.0 });
+      }
+      const gridH = infoGrid.reduce((s, r) => s + r.rH, 0);
 
       // Draw light background
       doc.setFillColor(248, 250, 253);
@@ -271,11 +286,12 @@ export default function DownloadReportModal({
       doc.roundedRect(ML, curY, UW, gridH, 1.5, 1.5, 'S');
 
       // Draw horizontal row separators
-      for (let i = 1; i < numInfoRows; i++) {
-        const ly = curY + i * rowH;
+      let sepY = curY;
+      for (let i = 0; i < infoGrid.length - 1; i++) {
+        sepY += infoGrid[i].rH;
         doc.setDrawColor(220, 228, 238);
         doc.setLineWidth(0.2);
-        doc.line(ML + 1, ly, PW - MR - 1, ly);
+        doc.line(ML + 1, sepY, PW - MR - 1, sepY);
       }
       // Draw 2 vertical dividers (at 1/3 and 2/3)
       doc.setDrawColor(200, 210, 225);
@@ -283,24 +299,24 @@ export default function DownloadReportModal({
       doc.line(ML + colW3,     curY + 1, ML + colW3,     curY + gridH - 1);
       doc.line(ML + colW3 * 2, curY + 1, ML + colW3 * 2, curY + gridH - 1);
 
-      // Render text per cell
-      doc.setFontSize(8);
-      for (let ri = 0; ri < numInfoRows; ri++) {
-        const baselineY = curY + ri * rowH + 4.5;
+      // Render text per cell (with wrapping)
+      let cellRowY = curY;
+      for (const { cells, rH: rHh } of infoGrid) {
         for (let ci = 0; ci < 3; ci++) {
-          const [lbl, val] = infoCells[ri * 3 + ci];
+          const { lbl, lines } = cells[ci];
           const cellX = ML + ci * colW3;
           if (lbl) {
             doc.setFont('helvetica', 'bold');
             doc.setTextColor(30, 58, 95);
-            doc.text(`${lbl}:`, cellX + 3, baselineY);
+            doc.text(`${lbl}:`, cellX + 3, cellRowY + 4.5);
           }
-          if (val) {
+          for (let li = 0; li < lines.length; li++) {
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(55, 65, 81);
-            doc.text(val, cellX + 3 + labelW3, baselineY);
+            doc.text(lines[li], cellX + 3 + labelW3, cellRowY + 4.5 + li * 3.8);
           }
         }
+        cellRowY += rHh;
       }
 
       curY += gridH + 4;

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { fetchTeachingAssignmentRoster, TeachingAssignmentRosterStudent } from '../../services/roster';
 import { lsGet } from '../../utils/localStorage';
 import { exportCqiPdf } from '../../utils/cqiExportPdf';
@@ -480,10 +481,26 @@ export default function CQIEntry({
     });
   }, [students, coTotals, coNumbers]);
 
+  // ── Export modal state ─────────────────────────────────────
+  type ExportReportType = 'all' | 'flagged';
+  const [exportStep, setExportStep] = useState<'closed' | 'type' | 'format'>('closed');
+  const [exportReportType, setExportReportType] = useState<ExportReportType>('all');
+
+  const exportRowsFiltered = useMemo(
+    () =>
+      exportReportType === 'flagged'
+        ? exportRowsAll.filter((r) => r.flaggedCos.length > 0)
+        : exportRowsAll,
+    [exportRowsAll, exportReportType],
+  );
+
+  const openExportModal = () => setExportStep('type');
+  const closeExportModal = () => setExportStep('closed');
+
   const handleExportPdf = () => {
     const subjectCode = String(taMeta?.subjectCode || '').trim() || (subjectId != null ? `SUBJECT_${subjectId}` : '—');
     const subjectName = String(taMeta?.subjectName || '').trim() || null;
-    const title = `CQI Export${Array.isArray(cos) && cos.length ? ` - ${cos.join(', ')}` : ''}`;
+    const title = `CQI Report — ${subjectCode}`;
 
     const me = getCachedMe() as any;
     const instructorName =
@@ -496,11 +513,34 @@ export default function CQIEntry({
       subjectCode,
       subjectName,
       coNumbers,
-      rows: exportRowsAll,
+      rows: exportRowsFiltered,
       title,
       filename: `CQI_${subjectCode}${teachingAssignmentId ? `_TA${teachingAssignmentId}` : ''}.pdf`,
       instructorName,
     });
+    closeExportModal();
+  };
+
+  const handleExportExcel = () => {
+    const subjectCode = String(taMeta?.subjectCode || '').trim() || (subjectId != null ? `SUBJECT_${subjectId}` : '—');
+    const rows = exportRowsFiltered;
+    const header = ['S.No', 'Reg No.', 'Student Name', 'Section', 'Flagged COs', 'Total (%)'];
+    const data = rows.map((r, i) => [
+      i + 1,
+      r.regNo || '',
+      r.name || '',
+      r.section || '',
+      r.flaggedCos.length > 0 ? r.flaggedCos.join(', ') : '—',
+      r.total != null ? Math.round((r.total as number) * 10) / 10 : '',
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
+    // Column widths
+    ws['!cols'] = [{ wch: 6 }, { wch: 20 }, { wch: 32 }, { wch: 8 }, { wch: 22 }, { wch: 12 }];
+    const wb = XLSX.utils.book_new();
+    const sheetLabel = exportReportType === 'flagged' ? 'CQI Students' : 'All Students';
+    XLSX.utils.book_append_sheet(wb, ws, sheetLabel);
+    XLSX.writeFile(wb, `CQI_${subjectCode}${teachingAssignmentId ? `_TA${teachingAssignmentId}` : ''}.xlsx`);
+    closeExportModal();
   };
 
   // Load CQI entries from server draft
@@ -1170,11 +1210,11 @@ export default function CQIEntry({
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <button
                       type="button"
-                      onClick={handleExportPdf}
+                      onClick={openExportModal}
                       className="obe-btn"
                       style={{ minWidth: 110 }}
                     >
-                      Export PDF
+                      Export
                     </button>
           <button
             type="button"
@@ -1574,6 +1614,121 @@ export default function CQIEntry({
           color: '#94a3b8',
         }}>
           No students found in this section
+        </div>
+      )}
+
+      {/* ── Export Modal ── */}
+      {exportStep !== 'closed' && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(15,23,42,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={closeExportModal}
+        >
+          <div
+            style={{
+              background: '#fff', borderRadius: 16, padding: 32, width: 400,
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {exportStep === 'type' && (
+              <>
+                <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
+                  Select Report Type
+                </h3>
+                <p style={{ margin: '0 0 20px', fontSize: 13, color: '#64748b' }}>
+                  Choose which students to include in the export.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {([
+                    { value: 'all',     label: 'All Students Report',            desc: 'Export data for every student in the class.' },
+                    { value: 'flagged', label: 'CQI Containing Students Report', desc: 'Export only students with at least one CO below threshold.' },
+                  ] as const).map(({ value, label, desc }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => { setExportReportType(value); setExportStep('format'); }}
+                      style={{
+                        textAlign: 'left', padding: '14px 16px', borderRadius: 10,
+                        border: '2px solid #e2e8f0', background: '#f8fafc',
+                        cursor: 'pointer', transition: 'border-color 0.15s',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+                      onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#e2e8f0')}
+                    >
+                      <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>{label}</div>
+                      <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>{desc}</div>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button" onClick={closeExportModal}
+                  style={{ marginTop: 16, width: '100%', padding: '10px 0', borderRadius: 8,
+                    border: '1px solid #e2e8f0', background: 'transparent', cursor: 'pointer',
+                    color: '#64748b', fontWeight: 600, fontSize: 14 }}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+
+            {exportStep === 'format' && (
+              <>
+                <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
+                  Select Format
+                </h3>
+                <p style={{ margin: '0 0 20px', fontSize: 13, color: '#64748b' }}>
+                  {exportReportType === 'flagged'
+                    ? `Exporting ${exportRowsFiltered.length} CQI student(s).`
+                    : `Exporting all ${exportRowsFiltered.length} student(s).`}
+                </p>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {([
+                    { fmt: 'pdf',   icon: '📄', label: 'PDF',   color: '#dc2626' },
+                    { fmt: 'excel', icon: '📊', label: 'Excel', color: '#16a34a' },
+                  ] as const).map(({ fmt, icon, label, color }) => (
+                    <button
+                      key={fmt}
+                      type="button"
+                      onClick={fmt === 'pdf' ? handleExportPdf : handleExportExcel}
+                      style={{
+                        flex: 1, padding: '18px 8px', borderRadius: 12,
+                        border: `2px solid ${color}20`, background: `${color}08`,
+                        cursor: 'pointer', display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', gap: 8, transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = `${color}15`)}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = `${color}08`)}
+                    >
+                      <span style={{ fontSize: 28 }}>{icon}</span>
+                      <span style={{ fontWeight: 700, fontSize: 14, color }}>{label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                  <button
+                    type="button" onClick={() => setExportStep('type')}
+                    style={{ flex: 1, padding: '10px 0', borderRadius: 8,
+                      border: '1px solid #e2e8f0', background: 'transparent', cursor: 'pointer',
+                      color: '#64748b', fontWeight: 600, fontSize: 14 }}
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="button" onClick={closeExportModal}
+                    style={{ flex: 1, padding: '10px 0', borderRadius: 8,
+                      border: '1px solid #e2e8f0', background: 'transparent', cursor: 'pointer',
+                      color: '#64748b', fontWeight: 600, fontSize: 14 }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

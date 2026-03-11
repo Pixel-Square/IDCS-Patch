@@ -34,6 +34,20 @@ class LcaRevision(models.Model):
     class Meta:
         db_table = 'lca_revisions'
 
+
+class CoTargetRevision(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    subject_id = models.CharField(max_length=64, unique=True)
+    status = models.TextField(default='draft')
+    data = models.JSONField(default=dict)
+    created_by = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_by = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'co_target_revisions'
+
 class CdapActiveLearningAnalysisMapping(models.Model):
     id = models.IntegerField(primary_key=True)
     mapping = models.JSONField(default=dict)

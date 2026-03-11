@@ -934,9 +934,14 @@ export default function C1CQIPage({ courseId }: Props): JSX.Element {
       subjectName,
       coNumbers: visibleCos,
       rows,
-      title: `CQI Export - ${visibleCos.map((n) => `CO${n}`).join(', ')}`,
+      title: `CQI Report — ${subjectCode}`,
       filename: `CQI_${subjectCode}.pdf`,
       instructorName,
+      sectionName: selectedTa?.section_name ?? null,
+      studentCount: students.length || null,
+      semester: selectedTa?.semester ?? null,
+      academicYear: selectedTa?.academic_year ?? null,
+      department: selectedTa?.department?.short_name || selectedTa?.department?.name || null,
     });
   };
 
