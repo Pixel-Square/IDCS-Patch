@@ -1360,6 +1360,64 @@ class DailyAttendanceSwapRecord(models.Model):
         return f"{self.session} assigned by {self.assigned_by} to {self.assigned_to} @ {self.assigned_at.strftime('%Y-%m-%d %H:%M')}"
 
 
+class AttendanceAssignmentRequest(models.Model):
+    """
+    Tracks requests by staff to assign their daily attendance session to another staff member.
+    Staff A sends a request to Staff B; Staff B can approve or reject it.
+    On approval the DailyAttendanceSession is assigned to Staff B.
+    """
+    ASSIGNMENT_TYPE_CHOICES = [
+        ('DAILY', 'Daily Attendance'),
+        ('PERIOD', 'Period Attendance'),
+    ]
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+
+    assignment_type = models.CharField(max_length=10, choices=ASSIGNMENT_TYPE_CHOICES, default='DAILY')
+    section = models.ForeignKey('academics.Section', on_delete=models.CASCADE, related_name='attendance_assignment_requests')
+    date = models.DateField()
+    daily_session = models.ForeignKey(
+        'academics.DailyAttendanceSession', on_delete=models.CASCADE,
+        null=True, blank=True, related_name='assignment_requests'
+    )
+    period_session = models.ForeignKey(
+        'academics.PeriodAttendanceSession', on_delete=models.CASCADE,
+        null=True, blank=True, related_name='assignment_requests'
+    )
+    period = models.ForeignKey(
+        'timetable.TimetableSlot', on_delete=models.SET_NULL,
+        null=True, blank=True, help_text='For period attendance only'
+    )
+    requested_by = models.ForeignKey(
+        'academics.StaffProfile', on_delete=models.CASCADE,
+        related_name='sent_attendance_requests',
+        help_text='Staff requesting to assign attendance'
+    )
+    requested_to = models.ForeignKey(
+        'academics.StaffProfile', on_delete=models.CASCADE,
+        related_name='received_attendance_requests',
+        help_text='Staff being requested to take attendance'
+    )
+    reason = models.CharField(max_length=500, blank=True, null=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    responded_at = models.DateTimeField(blank=True, null=True)
+    response_message = models.CharField(max_length=500, blank=True, null=True)
+
+    class Meta:
+        verbose_name = 'Attendance Assignment Request'
+        verbose_name_plural = 'Attendance Assignment Requests'
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f"{self.requested_by} → {self.requested_to} for {self.section} on {self.date} [{self.status}]"
+
+
 # Historically the code deleted users when profiles were removed.
 # That behavior is unsafe for audit/history. Do NOT delete users when
 # profiles are removed; prefer deactivation via accounts.services.deactivate_user.

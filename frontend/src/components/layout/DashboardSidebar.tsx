@@ -59,6 +59,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   const { collapsed, toggle } = useSidebar();
   const [pendingObeReqCount, setPendingObeReqCount] = useState<number>(0);
   const [pendingSwapReqCount, setPendingSwapReqCount] = useState<number>(0);
+  const [pendingAttendanceReqCount, setPendingAttendanceReqCount] = useState<number>(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [applicationsNav, setApplicationsNav] = useState<ApplicationsNavResponse | null>(null);
 
@@ -101,33 +102,39 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
     };
   }, [canObeMaster]);
 
-  // Fetch pending swap request count for staff
+  // Fetch pending swap request count and attendance assignment request count for staff
   useEffect(() => {
     let mounted = true;
-    
-    const fetchSwapRequestCount = async () => {
+
+    const fetchCounts = async () => {
       if (!isStaff) {
         setPendingSwapReqCount(0);
+        setPendingAttendanceReqCount(0);
         return;
       }
-      
       try {
-        const response = await fetchWithAuth('/api/timetable/swap-requests/?status=PENDING');
+        const [swapRes, attendanceRes] = await Promise.all([
+          fetchWithAuth('/api/timetable/swap-requests/?status=PENDING'),
+          fetchWithAuth('/api/academics/attendance-assignment-requests/?status=PENDING'),
+        ]);
         if (!mounted) return;
-        if (response.ok) {
-          const respData = await response.json();
-          const receivedCount = (respData.received || []).length;
-          setPendingSwapReqCount(receivedCount);
+        if (swapRes.ok) {
+          const d = await swapRes.json();
+          setPendingSwapReqCount((d.received || []).length);
+        }
+        if (attendanceRes.ok) {
+          const d = await attendanceRes.json();
+          setPendingAttendanceReqCount(
+            (d.received || []).length
+          );
         }
       } catch {
         // badge is best-effort
       }
     };
 
-    // Fetch immediately and then every 30 seconds
-    fetchSwapRequestCount();
-    const interval = window.setInterval(fetchSwapRequestCount, 30_000);
-    
+    fetchCounts();
+    const interval = window.setInterval(fetchCounts, 30_000);
     return () => {
       mounted = false;
       window.clearInterval(interval);
@@ -430,6 +437,9 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
                       ) : null}
                       {i.key === 'staff_timetable' && pendingSwapReqCount > 0 ? (
                         <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-full bg-orange-600 text-white">{pendingSwapReqCount}</span>
+                      ) : null}
+                      {i.key === 'period_attendance' && pendingAttendanceReqCount > 0 ? (
+                        <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-full bg-blue-600 text-white">{pendingAttendanceReqCount}</span>
                       ) : null}
                     </span>
                   </Link>
