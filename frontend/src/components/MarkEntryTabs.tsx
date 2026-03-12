@@ -1021,7 +1021,7 @@ export default function MarkEntryTabs({
                 await iqacResetAssessment(assessment, String(subjectId), Number(selectedTaId));
 
                 // Clear local cached drafts so UI doesn't keep showing old marks
-                clearLocalDraftCache(String(subjectId), String(assessment));
+                clearLocalDraftCache(String(subjectId), String(assessment), selectedTaId ?? null);
 
                 setRefreshKey((k) => k + 1);
                 alert('Reset completed.');

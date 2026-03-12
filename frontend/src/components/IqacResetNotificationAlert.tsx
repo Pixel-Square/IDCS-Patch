@@ -34,7 +34,7 @@ export default function IqacResetNotificationAlert({ teachingAssignmentId, subje
         // Clear local cached drafts immediately so the UI doesn't keep showing old marks.
         try {
           for (const n of filtered) {
-            clearLocalDraftCache(String(subjectId), String(n.assessment));
+            clearLocalDraftCache(String(subjectId), String(n.assessment), teachingAssignmentId ?? null);
           }
         } catch {
           // ignore
@@ -59,7 +59,7 @@ export default function IqacResetNotificationAlert({ teachingAssignmentId, subje
       const ids = notifications.map(n => n.id);
       await dismissResetNotifications(ids);
       try {
-        for (const a of assessments) clearLocalDraftCache(String(subjectId), String(a));
+        for (const a of assessments) clearLocalDraftCache(String(subjectId), String(a), teachingAssignmentId ?? null);
       } catch {
         // ignore
       }
