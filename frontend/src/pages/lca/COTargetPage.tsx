@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fetchCdapRevision, fetchArticulationMatrix } from '../../services/cdapDb';
-import { createEditRequest, fetchMarkTableLockStatus, fetchMyTeachingAssignments, formatEditRequestSentMessage, MarkTableLockStatusResponse } from '../../services/obe';
+import { createEditRequest, fetchMyTeachingAssignments, formatEditRequestSentMessage } from '../../services/obe';
 import { fetchDeptRows } from '../../services/curriculum';
-import { fetchCoTargetRevision, saveCoTargetRevision } from '../../services/lcaDb';
+import { fetchCoTargetRevision, fetchLcaRevision, saveCoTargetRevision } from '../../services/lcaDb';
 
 const styles: { [k: string]: React.CSSProperties } = {
   page: { padding: '20px 24px', width: '100%', boxSizing: 'border-box', minHeight: '100vh', fontFamily: "Inter, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial", color: '#1f3947' },
@@ -34,6 +34,8 @@ export default function COTargetPage({
   embedded?: boolean;
   onClose?: () => void;
 }): JSX.Element {
+  type LearnerCentricCode = 'L1' | 'L2' | 'L3' | '-';
+
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -41,9 +43,9 @@ export default function COTargetPage({
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [editRequestOpen, setEditRequestOpen] = useState(false);
   const [editReason, setEditReason] = useState('');
-  const [markLock, setMarkLock] = useState<MarkTableLockStatusResponse | null>(null);
   const [revStatus, setRevStatus] = useState<string>('draft');
   const [validationErrors, setValidationErrors] = useState<Set<string>>(new Set());
+  const [learnerCentricLevelCode, setLearnerCentricLevelCode] = useState<LearnerCentricCode>('-');
 
   const containerStyle = embedded ? { padding: 12, width: '100%', margin: 0 } as React.CSSProperties : styles.page;
 
@@ -136,28 +138,7 @@ export default function COTargetPage({
     };
   }, [courseCode]);
 
-  // Fetch publish/lock state for read-only behavior
-  useEffect(() => {
-    let mounted = true;
-    const subjectId = String(courseCode || '').trim();
-    if (!subjectId) return;
-    (async () => {
-      try {
-        const lock = await fetchMarkTableLockStatus('lca' as any, subjectId);
-        if (!mounted) return;
-        setMarkLock(lock);
-      } catch {
-        // best-effort only
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [courseCode]);
-
-  const isPublished = Boolean((markLock?.exists && markLock.is_published) || String(revStatus || '').toLowerCase() === 'published');
-  const entryOpen = !isPublished ? true : Boolean(markLock?.entry_open);
-  const readOnly = Boolean(isPublished && !entryOpen);
+  const readOnly = String(revStatus || '').toLowerCase() === 'published';
 
   const handlePublish = async () => {
     const missingBtl = btlSelection.map((v, i) => v === null ? i : -1).filter((i) => i >= 0);
@@ -188,12 +169,6 @@ export default function COTargetPage({
       );
       setRevStatus('published');
       setSaveNote('Published');
-      try {
-        const lock = await fetchMarkTableLockStatus('lca' as any, subjectId);
-        setMarkLock(lock);
-      } catch {
-        // ignore
-      }
     } catch (e: any) {
       setSaveNote(String(e?.message || 'Publish failed'));
     } finally {
@@ -243,6 +218,69 @@ export default function COTargetPage({
     const v = roundHalfUp(n, decimals);
     return v < 0 ? 0 : v;
   }
+
+  function convertHundredScaleToThreeScale(value: number | null) {
+    if (!Number.isFinite(value)) return null;
+    return roundHalfUp(((value as number) * 3) / 100, 2);
+  }
+
+  function levelFromBands1to3(counts: { band1?: number | string; band2?: number | string; band3?: number | string }): 1 | 2 | 3 | '-' {
+    const v1 = typeof counts.band1 === 'number' ? counts.band1 : Number(counts.band1) || 0;
+    const v2 = typeof counts.band2 === 'number' ? counts.band2 : Number(counts.band2) || 0;
+    const v3 = typeof counts.band3 === 'number' ? counts.band3 : Number(counts.band3) || 0;
+    const total = v1 + v2 + v3;
+    if (!total) return '-';
+    const max = Math.max(v1, v2, v3);
+    if (max === v1) return 1;
+    if (max === v2) return 2;
+    return 3;
+  }
+
+  function learnerCentricFromCourseLevel(level: string | null | undefined): LearnerCentricCode {
+    if (level === 'EC') return 'L1';
+    if (level === 'MC') return 'L2';
+    if (level === 'HC') return 'L3';
+    return '-';
+  }
+
+  function deriveLearnerCentricLevelFromRevision(data: any): LearnerCentricCode {
+    const pbrLevel = learnerCentricFromCourseLevel(String(data?.pbrManualCourseLevel || '-'));
+    if (pbrLevel !== '-') return pbrLevel;
+
+    const prerequisites = Array.isArray(data?.prerequisites) ? data.prerequisites : [];
+    const prereqLevels = prerequisites
+      .map((row: any) => levelFromBands1to3({ band1: row?.band1, band2: row?.band2, band3: row?.band3 }))
+      .filter((value: 1 | 2 | 3 | '-') : value is 1 | 2 | 3 => value !== '-');
+
+    if (!prereqLevels.length) return '-';
+
+    const average = prereqLevels.reduce((acc, value) => acc + value, 0) / prereqLevels.length;
+    const standardized = Math.floor(Number(average.toFixed(2)));
+    if (standardized === 1) return 'L1';
+    if (standardized === 2) return 'L2';
+    if (standardized === 3) return 'L3';
+    return '-';
+  }
+
+  useEffect(() => {
+    let mounted = true;
+    const subjectId = String(courseCode || '').trim();
+    if (!subjectId) return;
+    (async () => {
+      try {
+        const res = await fetchLcaRevision(subjectId);
+        if (!mounted) return;
+        const d = (res as any)?.data || {};
+        setLearnerCentricLevelCode(deriveLearnerCentricLevelFromRevision(d));
+      } catch {
+        if (!mounted) return;
+        setLearnerCentricLevelCode('-');
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [courseCode]);
 
   // fetch articulation matrix and compute 3s-scale per-CO rows (CO1..CO5)
   useEffect(() => {
@@ -363,22 +401,44 @@ export default function COTargetPage({
     });
   }, [manuals]);
 
-  // computed big table derived values (rounded weighted sum and final col)
-  const bigTableComputed = React.useMemo(() => {
-    const rowsOut: Array<{ weightedRounded: number; final: number }> = [];
-    for (let i = 0; i < 5; i++) {
-      const ico = icoComputed && icoComputed[i] ? icoComputed[i].ico : 0;
-      const bco = bcoComputed[i] ?? 0;
-      const aco = acoComputed[i] ?? 0;
-      const api = manuals[i]?.api ?? 0;
-      const iic = manuals[i]?.iic ?? 0;
-      const sum = (ico * weights.ico) + (bco * weights.bco) + (aco * weights.aco) + (api * weights.api) + (iic * weights.iic);
-      const rounded = Math.round(sum);
-      const final = roundHalfUp(rounded * 0.03, 2);
-      rowsOut.push({ weightedRounded: rounded, final });
-    }
-    return rowsOut;
-  }, [acoComputed, icoComputed, bcoComputed, manuals, weights]);
+  const iicComputed = React.useMemo(() => {
+    if (learnerCentricLevelCode === 'L1') return 50;
+    if (learnerCentricLevelCode === 'L2') return 55;
+    if (learnerCentricLevelCode === 'L3') return 60;
+    return null;
+  }, [learnerCentricLevelCode]);
+
+  const coTargetComputed = React.useMemo(() => {
+    return Array.from({ length: 5 }, (_, idx) => {
+      const icoValue = icoComputed?.[idx]?.ico;
+      const bcoValue = bcoComputed[idx];
+      const acoValue = acoComputed[idx];
+
+      if (
+        !Number.isFinite(icoValue) ||
+        !Number.isFinite(bcoValue) ||
+        !Number.isFinite(acoValue) ||
+        !Number.isFinite(apiGpaComputed) ||
+        !Number.isFinite(iicComputed)
+      ) {
+        return { target: null, scale: null };
+      }
+
+      const target = roundHalfUp(
+        (icoValue as number) * weights.ico +
+          (bcoValue as number) * weights.bco +
+          (acoValue as number) * weights.aco +
+          (apiGpaComputed as number) * weights.api +
+          (iicComputed as number) * weights.iic,
+        2,
+      );
+
+      return {
+        target,
+        scale: convertHundredScaleToThreeScale(target),
+      };
+    });
+  }, [acoComputed, apiGpaComputed, bcoComputed, icoComputed, iicComputed, weights]);
 
   useEffect(() => {
     let mounted = true;
@@ -452,13 +512,7 @@ export default function COTargetPage({
     return () => { mounted = false; };
   }, [courseCode, resolvedCourseName, displayName, teachingAssignmentId]);
 
-  const rows = [
-    { co: 'CO1', ico: 0.4, bco: 0.3, aco: 0.1, api: 0.1, iic: 0.1, target: 68, scale: 2.03 },
-    { co: 'CO2', ico: 0.4, bco: 0.3, aco: 0.1, api: 0.1, iic: 0.1, target: 66, scale: 1.99 },
-    { co: 'CO3', ico: 0.4, bco: 0.3, aco: 0.1, api: 0.1, iic: 0.1, target: 67, scale: 2.01 },
-    { co: 'CO4', ico: 0.4, bco: 0.3, aco: 0.1, api: 0.1, iic: 0.1, target: 67, scale: 2.02 },
-    { co: 'CO5', ico: 0.0, bco: 0.5, aco: 0.0, api: 0.0, iic: 0.0, target: 74, scale: 2.22 },
-  ];
+  const coLabels = ['CO1', 'CO2', 'CO3', 'CO4', 'CO5'];
 
   return (
     <div style={containerStyle}>
@@ -589,7 +643,7 @@ export default function COTargetPage({
                         <td style={styles.td}>{data.med}</td>
                         <td style={styles.td}>{data.low}</td>
                         <td style={styles.td}>{data.total}</td>
-                        <td style={styles.td}>{data.ico.toFixed(2)}%</td>
+                        <td style={styles.td}>{data.ico.toFixed(2)}</td>
                       </tr>
                     );
                   })}
@@ -660,9 +714,9 @@ export default function COTargetPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, idx) => (
-                    <tr key={r.co}>
-                      <td style={styles.tdLeft}>{r.co}</td>
+                  {coLabels.map((co, idx) => (
+                    <tr key={co}>
+                      <td style={styles.tdLeft}>{co}</td>
                        <td style={styles.td}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.aco ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], aco: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], aco: v }; return copy; }); }} /></td>
                     </tr>
                   ))}
@@ -790,24 +844,24 @@ export default function COTargetPage({
                       <tbody>
                         <tr>
                           <td style={{ padding: 10, borderTop: '1px solid #e6eef8', background: '#f3f8ff', fontWeight: 700 }}>Weight Values</td>
-                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={weights.ico} onChange={(e) => setWeights((w) => ({ ...w, ico: Number(e.target.value || 0) }))} onBlur={(e) => setWeights((w) => ({ ...w, ico: normalizeNumberInput(e.target.value, 2, false) as number }))} /></td>
-                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={weights.bco} onChange={(e) => setWeights((w) => ({ ...w, bco: Number(e.target.value || 0) }))} onBlur={(e) => setWeights((w) => ({ ...w, bco: normalizeNumberInput(e.target.value, 2, false) as number }))} /></td>
-                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={weights.aco} onChange={(e) => setWeights((w) => ({ ...w, aco: Number(e.target.value || 0) }))} onBlur={(e) => setWeights((w) => ({ ...w, aco: normalizeNumberInput(e.target.value, 2, false) as number }))} /></td>
-                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={weights.api} onChange={(e) => setWeights((w) => ({ ...w, api: Number(e.target.value || 0) }))} onBlur={(e) => setWeights((w) => ({ ...w, api: normalizeNumberInput(e.target.value, 2, false) as number }))} /></td>
-                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={weights.iic} onChange={(e) => setWeights((w) => ({ ...w, iic: Number(e.target.value || 0) }))} onBlur={(e) => setWeights((w) => ({ ...w, iic: normalizeNumberInput(e.target.value, 2, false) as number }))} /></td>
+                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={{ ...styles.inputNumber, background: '#f8fafc', color: '#64748b', cursor: 'not-allowed' }} type="number" value={weights.ico} readOnly disabled aria-label="ICO weight (locked)" title="ICO weight is locked" /></td>
+                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={{ ...styles.inputNumber, background: '#f8fafc', color: '#64748b', cursor: 'not-allowed' }} type="number" value={weights.bco} readOnly disabled aria-label="BCO weight (locked)" title="BCO weight is locked" /></td>
+                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={{ ...styles.inputNumber, background: '#f8fafc', color: '#64748b', cursor: 'not-allowed' }} type="number" value={weights.aco} readOnly disabled aria-label="ACO weight (locked)" title="ACO weight is locked" /></td>
+                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={{ ...styles.inputNumber, background: '#f8fafc', color: '#64748b', cursor: 'not-allowed' }} type="number" value={weights.api} readOnly disabled aria-label="API weight (locked)" title="API weight is locked" /></td>
+                          <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={{ ...styles.inputNumber, background: '#f8fafc', color: '#64748b', cursor: 'not-allowed' }} type="number" value={weights.iic} readOnly disabled aria-label="IIC weight (locked)" title="IIC weight is locked" /></td>
                           <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}></td>
                           <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}></td>
                         </tr>
                         {['CO-1','CO-2','CO-3','CO-4','CO-5'].map((c, idx) => (
                           <tr key={c}>
                             <td style={{ padding: 10, borderTop: '1px solid #eef6fb', textAlign: 'left', fontWeight: 700 }}>{c}</td>
-                            <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{(icoComputed && icoComputed[idx]) ? icoComputed[idx].ico.toFixed(2) + '%' : ''}</td>
+                            <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{(icoComputed && icoComputed[idx]) ? icoComputed[idx].ico.toFixed(2) : ''}</td>
                             <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{bcoComputed[idx] ?? ''}</td>
                                <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{acoComputed[idx] != null ? acoComputed[idx]?.toFixed(2) : ''}</td>
-                                 <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.api ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v }; return copy; }); }} /></td>
-                                 <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.iic ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], iic: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], iic: v }; return copy; }); }} /></td>
-                            <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{bigTableComputed[idx]?.weightedRounded ?? ''}</td>
-                            <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{bigTableComputed[idx]?.final ?? ''}</td>
+                                 <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{apiGpaComputed != null ? apiGpaComputed.toFixed(2) : ''}</td>
+                                 <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{iicComputed ?? ''}</td>
+                            <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{coTargetComputed[idx]?.target != null ? coTargetComputed[idx].target.toFixed(2) : ''}</td>
+                            <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{coTargetComputed[idx]?.scale != null ? coTargetComputed[idx].scale.toFixed(2) : ''}</td>
                           </tr>
                         ))}
                       </tbody>

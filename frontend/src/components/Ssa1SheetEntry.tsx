@@ -103,8 +103,8 @@ function displayBtlMax(raw: any): number {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_BTL_MAX_WHEN_VISIBLE;
 }
 
-function storageKey(subjectId: string, assessmentKey: 'ssa1' | 'review1') {
-  return `${assessmentKey}_sheet_${subjectId}`;
+function storageKey(subjectId: string, assessmentKey: 'ssa1' | 'review1', teachingAssignmentId?: number) {
+  return `${assessmentKey}_sheet_${subjectId}_ta_${String(teachingAssignmentId ?? 'none')}`;
 }
 
 function safeFilePart(raw: string) {
@@ -167,8 +167,10 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
   const displayLabel = String(label || 'SSA1');
   const isReview = assessmentKey === 'review1';
   const showTotalColumn = false;
-  const key = useMemo(() => storageKey(subjectId, assessmentKey), [subjectId, assessmentKey]);
-  const fetchPublished = assessmentKey === 'review1' ? fetchPublishedReview1 : fetchPublishedSsa1;
+  const key = useMemo(() => storageKey(subjectId, assessmentKey, teachingAssignmentId), [subjectId, assessmentKey, teachingAssignmentId]);
+  const fetchPublished = assessmentKey === 'review1'
+    ? (sid: string) => fetchPublishedReview1(sid, teachingAssignmentId)
+    : (sid: string) => fetchPublishedSsa1(sid, teachingAssignmentId);
   const publishNow = assessmentKey === 'review1' ? publishReview1 : publishSsa1;
   const [masterCfg, setMasterCfg] = useState<any>(null);
   const [taMeta, setTaMeta] = useState<{ courseName?: string; courseCode?: string; className?: string } | null>(null);
@@ -421,7 +423,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     const tid = setTimeout(async () => {
       try {
         const payload: Ssa1DraftPayload = { sheet, selectedBtls };
-          await saveDraft(assessmentKey, subjectId, payload);
+          await saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId);
         try {
           if (key) lsSet(key, { termLabel: sheet.termLabel, batchLabel: sheet.batchLabel, rows: sheet.rows, coSplitMax: (sheet as any).coSplitMax });
         } catch {}
@@ -458,7 +460,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     (async () => {
       if (!subjectId) return;
       try {
-        const res = await fetchDraft<Ssa1DraftPayload>(assessmentKey, subjectId);
+        const res = await fetchDraft<Ssa1DraftPayload>(assessmentKey, subjectId, teachingAssignmentId);
         if (!mounted) return;
         const d = res?.draft;
         const draftSheet = (d as any)?.sheet;
@@ -742,7 +744,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     let mounted = true;
     (async () => {
       try {
-        const res = await fetchDraft<Ssa1DraftPayload>(assessmentKey, String(subjectId));
+        const res = await fetchDraft<Ssa1DraftPayload>(assessmentKey, String(subjectId), teachingAssignmentId);
         if (!mounted) return;
         const d = res?.draft;
         const draftSheet = (d as any)?.sheet;
@@ -804,7 +806,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     setSaveError(null);
     try {
       const payload: Ssa1DraftPayload = { sheet, selectedBtls };
-      await saveDraft(assessmentKey, subjectId, payload);
+      await saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch (e: any) {
       setSaveError(e?.message || `Failed to save ${displayLabel} draft`);
@@ -822,7 +824,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     const handler = () => {
       if (!subjectId || tableBlocked) return;
       const payload: Ssa1DraftPayload = { sheet: sheetRef.current, selectedBtls: btlRef.current };
-      saveDraft(assessmentKey, subjectId, payload).catch(() => {});
+      saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
@@ -993,7 +995,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
       setMarkManagerModal(null);
       setMarkManagerAnimating(true);
 
-      await saveDraft(assessmentKey, String(subjectId), payload);
+      await saveDraft(assessmentKey, String(subjectId), payload, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
 
       try {

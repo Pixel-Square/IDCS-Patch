@@ -98,8 +98,8 @@ function getBtlMaxFromCfg(cfg: any, n: 1 | 2 | 3 | 4 | 5 | 6, fallback: number):
   return parsed == null ? fallback : parsed;
 }
 
-function storageKey(subjectId: string, assessmentKey: 'ssa2' | 'review2') {
-  return `${assessmentKey}_sheet_${subjectId}`;
+function storageKey(subjectId: string, assessmentKey: 'ssa2' | 'review2', teachingAssignmentId?: number) {
+  return `${assessmentKey}_sheet_${subjectId}_ta_${String(teachingAssignmentId ?? 'none')}`;
 }
 
 function safeFilePart(raw: string) {
@@ -161,8 +161,10 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
   const displayLabel = String(label || 'SSA2');
   const isReview = assessmentKey === 'review2';
   const showTotalColumn = false;
-  const key = useMemo(() => storageKey(subjectId, assessmentKey), [subjectId, assessmentKey]);
-  const fetchPublished = assessmentKey === 'review2' ? fetchPublishedReview2 : fetchPublishedSsa2;
+  const key = useMemo(() => storageKey(subjectId, assessmentKey, teachingAssignmentId), [subjectId, assessmentKey, teachingAssignmentId]);
+  const fetchPublished = assessmentKey === 'review2'
+    ? (sid: string) => fetchPublishedReview2(sid, teachingAssignmentId)
+    : (sid: string) => fetchPublishedSsa2(sid, teachingAssignmentId);
   const publishNow = assessmentKey === 'review2' ? publishReview2 : publishSsa2;
   const [masterCfg, setMasterCfg] = useState<any>(null);
   const [taMeta, setTaMeta] = useState<{ courseName?: string; courseCode?: string; className?: string } | null>(null);
@@ -426,7 +428,7 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
     const tid = setTimeout(async () => {
       try {
         const payload: Ssa2DraftPayload = { sheet, selectedBtls };
-        await saveDraft(assessmentKey, subjectId, payload);
+        await saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId);
         try {
           if (key) lsSet(key, { termLabel: sheet.termLabel, batchLabel: sheet.batchLabel, rows: sheet.rows, coSplitMax: (sheet as any).coSplitMax });
         } catch {}
@@ -473,7 +475,7 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
     (async () => {
       if (!subjectId) return;
       try {
-        const res = await fetchDraft<Ssa2DraftPayload>(assessmentKey, subjectId);
+        const res = await fetchDraft<Ssa2DraftPayload>(assessmentKey, subjectId, teachingAssignmentId);
         if (!mounted) return;
         const d = res?.draft;
         const draftSheet = (d as any)?.sheet;
@@ -766,7 +768,7 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
     let mounted = true;
     (async () => {
       try {
-        const res = await fetchDraft<Ssa2DraftPayload>(assessmentKey, String(subjectId));
+        const res = await fetchDraft<Ssa2DraftPayload>(assessmentKey, String(subjectId), teachingAssignmentId);
         if (!mounted) return;
         const d = res?.draft;
         const draftSheet = (d as any)?.sheet;
@@ -829,7 +831,7 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
     setSaveError(null);
     try {
       const payload: Ssa2DraftPayload = { sheet, selectedBtls };
-      await saveDraft(assessmentKey, subjectId, payload);
+      await saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch (e: any) {
       setSaveError(e?.message || `Failed to save ${displayLabel} draft`);
@@ -847,7 +849,7 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
     const handler = () => {
       if (!subjectId || tableBlocked) return;
       const payload: Ssa2DraftPayload = { sheet: sheetRef.current, selectedBtls: btlRef.current };
-      saveDraft(assessmentKey, subjectId, payload).catch(() => {});
+      saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
@@ -1066,7 +1068,7 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
       setSheet(nextSheet);
       setMarkManagerModal(null);
 
-      await saveDraft(assessmentKey, String(subjectId), payload);
+      await saveDraft(assessmentKey, String(subjectId), payload, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
 
       try {

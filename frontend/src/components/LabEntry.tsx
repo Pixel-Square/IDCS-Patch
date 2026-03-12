@@ -164,8 +164,8 @@ function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
-function storageKey(assessmentKey: 'formative1' | 'formative2' | 'review1' | 'review2', subjectId: string) {
-  return `${assessmentKey}_sheet_${subjectId}`;
+function storageKey(assessmentKey: 'formative1' | 'formative2' | 'review1' | 'review2', subjectId: string, teachingAssignmentId?: number) {
+  return `${assessmentKey}_sheet_${subjectId}_ta_${String(teachingAssignmentId ?? 'none')}`;
 }
 
 function safeFilePart(raw: string) {
@@ -426,7 +426,7 @@ export default function LabEntry({
     },
   });
 
-  const key = useMemo(() => (subjectId ? storageKey(assessmentKey, subjectId) : ''), [assessmentKey, subjectId]);
+  const key = useMemo(() => (subjectId ? storageKey(assessmentKey, subjectId, teachingAssignmentId) : ''), [assessmentKey, subjectId, teachingAssignmentId]);
 
   // Avoid leaking published state across subject/assignment switches.
   useEffect(() => {
@@ -528,7 +528,7 @@ export default function LabEntry({
     (async () => {
       if (!subjectId) return;
       try {
-        const res = await fetchDraft<LabDraftPayload>(assessmentKey, subjectId);
+        const res = await fetchDraft<LabDraftPayload>(assessmentKey, subjectId, teachingAssignmentId);
         if (!mounted) return;
         const d = (res as any)?.draft as LabDraftPayload | null;
         if (d && typeof d === 'object' && d.sheet && typeof d.sheet === 'object') {
@@ -828,7 +828,7 @@ export default function LabEntry({
     let cancelled = false;
     const tid = setTimeout(async () => {
       try {
-        await saveDraft(assessmentKey, subjectId, draft);
+        await saveDraft(assessmentKey, subjectId, draft, teachingAssignmentId);
         if (!cancelled) setSavedAt(new Date().toLocaleString());
       } catch {
         // ignore autosave errors
@@ -1553,7 +1553,7 @@ export default function LabEntry({
     if (!subjectId) return;
     setSavingDraft(true);
     try {
-      await saveDraft(assessmentKey, subjectId, draft);
+      await saveDraft(assessmentKey, subjectId, draft, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch (e: any) {
       alert(e?.message || 'Draft save failed');
@@ -1568,7 +1568,7 @@ export default function LabEntry({
   useEffect(() => {
     const handler = () => {
       if (!subjectId || tableBlocked) return;
-      saveDraft(assessmentKey, subjectId, draftRef.current).catch(() => {});
+      saveDraft(assessmentKey, subjectId, draftRef.current, teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
@@ -1608,7 +1608,7 @@ export default function LabEntry({
     }
 
     try {
-      await saveDraft(assessmentKey, subjectId, nextDraft);
+      await saveDraft(assessmentKey, subjectId, nextDraft, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch {
       // ignore
@@ -3056,7 +3056,7 @@ export default function LabEntry({
                     };
 
                     // Save draft first
-                    await saveDraft(assessmentKey, String(subjectId), nextDraft);
+                    await saveDraft(assessmentKey, String(subjectId), nextDraft, teachingAssignmentId);
                     setSavedAt(new Date().toLocaleString());
 
                     // Persist Mark Manager confirmation to server lock row

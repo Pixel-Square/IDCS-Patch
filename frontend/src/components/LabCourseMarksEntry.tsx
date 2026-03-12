@@ -257,8 +257,8 @@ function shortenRollNo(raw: unknown, keepLast: number = 7): string {
   return s.slice(-keepLast);
 }
 
-function storageKey(assessmentKey: LabAssessmentKey, subjectId: string) {
-  return `${assessmentKey}_sheet_${subjectId}`;
+function storageKey(assessmentKey: LabAssessmentKey, subjectId: string, teachingAssignmentId?: number) {
+  return `${assessmentKey}_sheet_${subjectId}_ta_${String(teachingAssignmentId ?? 'none')}`;
 }
 
 function safeFilePart(raw: string) {
@@ -379,7 +379,7 @@ export default function LabCourseMarksEntry({
   const lastAutoSavedSigRef = useRef<string | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
 
-  const key = useMemo(() => (subjectId ? storageKey(assessmentKey, String(subjectId)) : ''), [assessmentKey, subjectId]);
+  const key = useMemo(() => (subjectId ? storageKey(assessmentKey, String(subjectId), teachingAssignmentId) : ''), [assessmentKey, subjectId, teachingAssignmentId]);
 
   const { data: publishWindow, publishAllowed, remainingSeconds, editAllowed, refresh: refreshPublishWindow } = usePublishWindow({
     assessment: assessmentKey,
@@ -602,7 +602,7 @@ export default function LabCourseMarksEntry({
     (async () => {
       if (!subjectId) return;
       try {
-        const res = await fetchDraft<LabDraftPayload>(assessmentKey, String(subjectId));
+        const res = await fetchDraft<LabDraftPayload>(assessmentKey, String(subjectId), teachingAssignmentId);
         if (!mounted) return;
         const d = (res as any)?.draft as LabDraftPayload | null;
         if (d && typeof d === 'object' && d.sheet && typeof d.sheet === 'object') {
@@ -1158,7 +1158,7 @@ export default function LabCourseMarksEntry({
       if (!subjectId) return;
       try {
         setSavingDraft(true);
-        await saveDraft(assessmentKey, String(subjectId), draft);
+        await saveDraft(assessmentKey, String(subjectId), draft, teachingAssignmentId);
         lastAutoSavedSigRef.current = sig;
         setSavedAt(new Date().toLocaleString());
       } catch {
@@ -1642,7 +1642,7 @@ export default function LabCourseMarksEntry({
       setPendingMarkManagerReset(null);
       setMarkManagerAnimating(true);
 
-      await saveDraft(assessmentKey, String(subjectId), nextDraft);
+      await saveDraft(assessmentKey, String(subjectId), nextDraft, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
 
       try {
@@ -2094,7 +2094,7 @@ export default function LabCourseMarksEntry({
     if (!subjectId) return;
     setSavingDraft(true);
     try {
-      await saveDraft(assessmentKey, String(subjectId), draft);
+      await saveDraft(assessmentKey, String(subjectId), draft, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch (e: any) {
       alert(e?.message || 'Draft save failed');
@@ -2109,7 +2109,7 @@ export default function LabCourseMarksEntry({
   useEffect(() => {
     const handler = () => {
       if (!subjectId || tableBlocked) return;
-      saveDraft(assessmentKey, String(subjectId), draftRefForTabSwitch.current).catch(() => {});
+      saveDraft(assessmentKey, String(subjectId), draftRefForTabSwitch.current, teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
@@ -2156,7 +2156,7 @@ export default function LabCourseMarksEntry({
     }
 
     try {
-      await saveDraft(assessmentKey, String(subjectId), nextDraft);
+      await saveDraft(assessmentKey, String(subjectId), nextDraft, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch {
       // ignore
@@ -4071,7 +4071,7 @@ export default function LabCourseMarksEntry({
 
                     const resetDraft: LabDraftPayload = { sheet: { ...cur.sheet, rowsByStudentId: rows } } as any;
                     setDraft(resetDraft);
-                    await saveDraft(assessmentKey, String(subjectId), resetDraft);
+                    await saveDraft(assessmentKey, String(subjectId), resetDraft, teachingAssignmentId);
                     setSavedAt(new Date().toLocaleString());
 
                     if (pendingCoDiff.mode === 'request') {

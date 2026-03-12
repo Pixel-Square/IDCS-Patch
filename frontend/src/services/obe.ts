@@ -1057,9 +1057,12 @@ export async function fetchDraft<T>(assessment: DraftAssessmentKey, subjectId: s
   return res.json();
 }
 
-export async function saveDraft<T>(assessment: DraftAssessmentKey, subjectId: string, data: T): Promise<{ status: string }> {
-  const url = `${apiBase()}/api/obe/draft/${encodeURIComponent(assessment)}/${encodeURIComponent(subjectId)}`;
-  const res = await fetchWithAuth(url, { method: 'PUT', body: JSON.stringify({ data }) });
+export async function saveDraft<T>(assessment: DraftAssessmentKey, subjectId: string, data: T, teachingAssignmentId?: number): Promise<{ status: string }> {
+  const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
+  const url = `${apiBase()}/api/obe/draft/${encodeURIComponent(assessment)}/${encodeURIComponent(subjectId)}${qp}`;
+  const body: Record<string, unknown> = { data };
+  if (typeof teachingAssignmentId === 'number') body.teaching_assignment_id = teachingAssignmentId;
+  const res = await fetchWithAuth(url, { method: 'PUT', body: JSON.stringify(body) });
   if (res.status === 401) throw new Error('Authentication required');
   if (!res.ok) await parseError(res, 'Draft save failed');
   return res.json();
@@ -1092,8 +1095,9 @@ export async function publishSsa1(subjectId: string, data: any, teachingAssignme
 
 export type PublishedReview1Response = PublishedSsa1Response;
 
-export async function fetchPublishedReview1(subjectId: string): Promise<PublishedReview1Response> {
-  const url = `${apiBase()}/api/obe/review1-published/${encodeURIComponent(subjectId)}`;
+export async function fetchPublishedReview1(subjectId: string, teachingAssignmentId?: number): Promise<PublishedReview1Response> {
+  const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
+  const url = `${apiBase()}/api/obe/review1-published/${encodeURIComponent(subjectId)}${qp}`;
   const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json', ...authHeader() } });
   if (!res.ok) await parseError(res, 'Review 1 published fetch failed');
   return res.json();
@@ -1136,8 +1140,9 @@ export async function publishSsa2(subjectId: string, data: any, teachingAssignme
   return res.json();
 }
 
-export async function fetchPublishedReview2(subjectId: string): Promise<PublishedSsa2Response> {
-  const url = `${apiBase()}/api/obe/review2-published/${encodeURIComponent(subjectId)}`;
+export async function fetchPublishedReview2(subjectId: string, teachingAssignmentId?: number): Promise<PublishedSsa2Response> {
+  const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
+  const url = `${apiBase()}/api/obe/review2-published/${encodeURIComponent(subjectId)}${qp}`;
   const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json', ...authHeader() } });
   if (!res.ok) await parseError(res, 'Review 2 published fetch failed');
   return res.json();
