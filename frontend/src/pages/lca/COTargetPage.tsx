@@ -87,7 +87,7 @@ export default function COTargetPage({
     Array.from({ length: 5 }, () => ({ aco: null, api: null, iic: null }))
   );
 
-  // API batch summary inputs
+  // API summary inputs
   const [apiSummary, setApiSummary] = useState<{ batchCay: string; noOfSuccessful: string; meanCgpa: string }>(
     { batchCay: '', noOfSuccessful: '', meanCgpa: '' }
   );
@@ -343,13 +343,33 @@ export default function COTargetPage({
   // computed BCO values (based on BTL selection)
   const bcoComputed = React.useMemo(() => btlSelection.map((s) => (s ? s * 10 : null)), [btlSelection]);
 
+  const apiGpaComputed = React.useMemo(() => {
+    const strength = Number(apiSummary.batchCay);
+    const noOfSuccessful = Number(apiSummary.noOfSuccessful);
+    const meanCgpa = Number(apiSummary.meanCgpa);
+
+    if (!Number.isFinite(strength) || !Number.isFinite(noOfSuccessful) || !Number.isFinite(meanCgpa) || strength <= 0) {
+      return null;
+    }
+
+    return roundHalfUp((meanCgpa * noOfSuccessful / strength) * 10, 2);
+  }, [apiSummary]);
+
+  const acoComputed = React.useMemo(() => {
+    return manuals.map((entry) => {
+      const subValue = Number(entry?.aco);
+      if (!Number.isFinite(subValue)) return null;
+      return roundHalfUp((subValue * 3) / 100, 2);
+    });
+  }, [manuals]);
+
   // computed big table derived values (rounded weighted sum and final col)
   const bigTableComputed = React.useMemo(() => {
     const rowsOut: Array<{ weightedRounded: number; final: number }> = [];
     for (let i = 0; i < 5; i++) {
       const ico = icoComputed && icoComputed[i] ? icoComputed[i].ico : 0;
       const bco = bcoComputed[i] ?? 0;
-      const aco = manuals[i]?.aco ?? 0;
+      const aco = acoComputed[i] ?? 0;
       const api = manuals[i]?.api ?? 0;
       const iic = manuals[i]?.iic ?? 0;
       const sum = (ico * weights.ico) + (bco * weights.bco) + (aco * weights.aco) + (api * weights.api) + (iic * weights.iic);
@@ -358,7 +378,7 @@ export default function COTargetPage({
       rowsOut.push({ weightedRounded: rounded, final });
     }
     return rowsOut;
-  }, [icoComputed, bcoComputed, manuals, weights]);
+  }, [acoComputed, icoComputed, bcoComputed, manuals, weights]);
 
   useEffect(() => {
     let mounted = true;
@@ -655,9 +675,9 @@ export default function COTargetPage({
               <div style={{ fontWeight: 700, marginBottom: 12, color: '#0b3b57', fontSize: 15 }}>4. Average Performance Index (API)</div>
 
               <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                {/* Left: batch summary inputs */}
+                {/* Left: summary inputs */}
                 <div style={{ flex: '1 1 260px', minWidth: 220 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8, color: '#334e68', fontSize: 13 }}>Batch Summary</div>
+                  <div style={{ fontWeight: 700, marginBottom: 8, color: '#334e68', fontSize: 13 }}>Strength Summary</div>
                   <table style={{ borderCollapse: 'collapse', width: '100%', border: '1px solid #94a3b8', borderRadius: 6, overflow: 'hidden' }}>
                     <thead>
                       <tr>
@@ -667,13 +687,14 @@ export default function COTargetPage({
                     </thead>
                     <tbody>
                       <tr>
-                        <td style={{ padding: '10px 12px', background: '#fff', fontWeight: 700, fontSize: 13, borderRight: '1px solid #94a3b8', borderBottom: '1px solid #e2e8f0', minWidth: 160 }}>BATCH (CAY)</td>
+                        <td style={{ padding: '10px 12px', background: '#fff', fontWeight: 700, fontSize: 13, borderRight: '1px solid #94a3b8', borderBottom: '1px solid #e2e8f0', minWidth: 160 }}>STRENGTH</td>
                         <td style={{ padding: '6px 10px', background: '#fef9c3', borderBottom: '1px solid #e2e8f0' }}>
                           <input
-                            type="text"
+                            type="number"
+                            min={0}
                             value={apiSummary.batchCay}
                             onChange={(e) => setApiSummary((p) => ({ ...p, batchCay: e.target.value }))}
-                            placeholder="e.g. 2024-25"
+                            placeholder="0"
                             style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 14, outline: 'none', fontWeight: 700, boxSizing: 'border-box' }}
                           />
                         </td>
@@ -712,32 +733,12 @@ export default function COTargetPage({
                   <div style={{ marginTop: 12, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ color: '#0b4a6f', fontWeight: 700, fontSize: 13 }}>API (GPA) =</span>
                     <span style={{ background: '#fff', border: '2px solid #0b4a6f', padding: '4px 14px', borderRadius: 6, fontWeight: 900, fontSize: 15, minWidth: 60, textAlign: 'center' }}>
-                      {apiSummary.meanCgpa || '—'}
+                      {apiGpaComputed != null ? apiGpaComputed.toFixed(2) : '—'}
                     </span>
                     <span style={{ color: '#557085', fontSize: 13 }}>/100</span>
                   </div>
                 </div>
 
-                {/* Right: Per-CO API manual inputs */}
-                <div style={{ flex: '1 1 220px', minWidth: 200 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8, color: '#334e68', fontSize: 13 }}>Per-CO API Value</div>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr>
-                        <th style={styles.th}>CO</th>
-                        <th style={styles.th}>API</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {['CO1','CO2','CO3','CO4','CO5'].map((co, idx) => (
-                        <tr key={co}>
-                          <td style={styles.tdLeft}>{co}</td>
-                          <td style={styles.td}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.api ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v }; return copy; }); }} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
               </div>
             </div>
 
@@ -747,23 +748,23 @@ export default function COTargetPage({
 
               <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                 {/* Left: Learner Centric Approach (LCA) box */}
-                <div style={{ border: '2px solid #0b3b57', borderRadius: 4, overflow: 'hidden', width: 360, background: '#fff' }}>
+                <div style={{ border: '2px solid #0b3b57', borderRadius: 4, overflow: 'hidden', width: 280, background: '#fff' }}>
                   <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                     <tbody>
                       <tr>
-                        <td colSpan={2} style={{ padding: 12, background: '#f8fafc', fontWeight: 800, color: '#0b3b57' }}>Learner Centric Approach (LCA)</td>
+                        <td colSpan={2} style={{ padding: '10px 12px', background: '#f8fafc', fontWeight: 800, color: '#0b3b57' }}>Learner Centric Approach (LCA)</td>
                       </tr>
                       <tr>
-                        <td style={{ padding: 10, background: '#bfdbfe', textAlign: 'right', paddingRight: 20, fontWeight: 700 }}>L3</td>
-                        <td style={{ padding: 10, background: '#bfdbfe', textAlign: 'center', fontWeight: 800 }}></td>
+                        <td style={{ width: '45%', padding: '8px 10px', background: '#bfdbfe', textAlign: 'right', paddingRight: 10, fontWeight: 700 }}>L3</td>
+                        <td style={{ width: '55%', padding: '8px 10px', background: '#bfdbfe', textAlign: 'center', fontWeight: 800 }}>60</td>
                       </tr>
                       <tr>
-                        <td style={{ padding: 10, background: '#bfdbfe', textAlign: 'right', paddingRight: 20, fontWeight: 700 }}>L2</td>
-                        <td style={{ padding: 10, background: '#bfdbfe', textAlign: 'center', fontWeight: 800 }}></td>
+                        <td style={{ width: '45%', padding: '8px 10px', background: '#bfdbfe', textAlign: 'right', paddingRight: 10, fontWeight: 700 }}>L2</td>
+                        <td style={{ width: '55%', padding: '8px 10px', background: '#bfdbfe', textAlign: 'center', fontWeight: 800 }}>55</td>
                       </tr>
                       <tr>
-                        <td style={{ padding: 10, background: '#bfdbfe', textAlign: 'right', paddingRight: 20, fontWeight: 700 }}>L1</td>
-                        <td style={{ padding: 10, background: '#bfdbfe', textAlign: 'center', fontWeight: 800 }}></td>
+                        <td style={{ width: '45%', padding: '8px 10px', background: '#bfdbfe', textAlign: 'right', paddingRight: 10, fontWeight: 700 }}>L1</td>
+                        <td style={{ width: '55%', padding: '8px 10px', background: '#bfdbfe', textAlign: 'center', fontWeight: 800 }}>50</td>
                       </tr>
                     </tbody>
                   </table>
@@ -802,7 +803,7 @@ export default function COTargetPage({
                             <td style={{ padding: 10, borderTop: '1px solid #eef6fb', textAlign: 'left', fontWeight: 700 }}>{c}</td>
                             <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{(icoComputed && icoComputed[idx]) ? icoComputed[idx].ico.toFixed(2) + '%' : ''}</td>
                             <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{bcoComputed[idx] ?? ''}</td>
-                               <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.aco ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], aco: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], aco: v }; return copy; }); }} /></td>
+                               <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{acoComputed[idx] != null ? acoComputed[idx]?.toFixed(2) : ''}</td>
                                  <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.api ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], api: v }; return copy; }); }} /></td>
                                  <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}><input min={0} step="any" style={styles.inputNumber} type="number" value={manuals[idx]?.iic ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : e.target.value; setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], iic: v === null ? null : Number(v) }; return copy; }); }} onBlur={(e) => { const v = normalizeNumberInput(e.target.value, 2, true); setManuals((m) => { const copy = [...m]; copy[idx] = { ...copy[idx], iic: v }; return copy; }); }} /></td>
                             <td style={{ padding: 10, borderTop: '1px solid #eef6fb' }}>{bigTableComputed[idx]?.weightedRounded ?? ''}</td>
