@@ -195,8 +195,8 @@ function pct(mark: number, max: number) {
   return s.endsWith('.0') ? s.slice(0, -2) : s;
 }
 
-function sheetKey(assessmentKey: AssessmentKey, subjectId: string) {
-  return `${assessmentKey}_sheet_${subjectId}`;
+function sheetKey(assessmentKey: AssessmentKey, subjectId: string, teachingAssignmentId?: number) {
+  return `${assessmentKey}_sheet_${subjectId}_ta_${String(teachingAssignmentId ?? 'none')}`;
 }
 
 function downloadCsv(filename: string, rows: Array<Record<string, string | number>>) {
@@ -597,7 +597,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
     let mounted = true;
     (async () => {
       try {
-        const res = await fetchDraft<Cia1DraftPayload>(assessmentKey, subjectId);
+        const res = await fetchDraft<Cia1DraftPayload>(assessmentKey, subjectId, teachingAssignmentId);
         if (!mounted) return;
         const d = res?.draft as any;
         if (d && typeof d === 'object') {
@@ -689,7 +689,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
 
       setSheet(nextSheet);
       setMarkManagerModal(null);
-      await saveDraft(assessmentKey, subjectId, draft);
+      await saveDraft(assessmentKey, subjectId, draft, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
 
       try {
@@ -859,9 +859,9 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
         try {
           let pub: any = null;
           if (assessmentKey === 'cia1') {
-            pub = await fetchPublishedCia1Sheet(subjectId);
+            pub = await fetchPublishedCia1Sheet(subjectId, teachingAssignmentId);
           } else {
-            pub = await fetchPublishedCiaSheet('cia2', subjectId);
+            pub = await fetchPublishedCiaSheet('cia2', subjectId, teachingAssignmentId);
           }
           if (pub && pub.data && typeof pub.data === 'object') {
             const pd = pub.data as any;
@@ -901,7 +901,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
             setSheet({ termLabel: String(pd.termLabel || masterCfg?.termLabel || 'KRCT AY25-26'), batchLabel: subjectId, questionBtl, rowsByStudentId });
             setPublishedAt(new Date().toLocaleString());
             try {
-              lsSet(sheetKey(assessmentKey, subjectId), { termLabel: String(pd.termLabel || masterCfg?.termLabel || 'KRCT AY25-26'), batchLabel: subjectId, questionBtl, rowsByStudentId });
+              lsSet(sheetKey(assessmentKey, subjectId, teachingAssignmentId), { termLabel: String(pd.termLabel || masterCfg?.termLabel || 'KRCT AY25-26'), batchLabel: subjectId, questionBtl, rowsByStudentId });
             } catch {}
             // we've applied published sheet; continue to merge draft/local in subsequent effect if needed
           }
@@ -910,7 +910,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
         }
 
         // Load local sheet and merge with roster.
-        const stored = lsGet<Cia1Sheet>(sheetKey(assessmentKey, subjectId));
+        const stored = lsGet<Cia1Sheet>(sheetKey(assessmentKey, subjectId, teachingAssignmentId));
         const base: Cia1Sheet =
           stored && typeof stored === 'object'
             ? {
@@ -988,7 +988,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
     (async () => {
       if (!subjectId) return;
       try {
-        const res = await fetchDraft<Cia1DraftPayload>(assessmentKey, subjectId);
+        const res = await fetchDraft<Cia1DraftPayload>(assessmentKey, subjectId, teachingAssignmentId);
         if (!mounted) return;
         const d = res?.draft;
         if (d && typeof d === 'object') {
@@ -1006,7 +1006,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
                 : prev.rowsByStudentId,
           }));
           try {
-            const sk = sheetKey(assessmentKey, subjectId);
+            const sk = sheetKey(assessmentKey, subjectId, teachingAssignmentId);
             lsSet(sk, {
               termLabel: String((d as any).termLabel || 'KRCT AY25-26'),
               batchLabel: String(subjectId),
@@ -1165,9 +1165,9 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
           questionBtl: sheet.questionBtl,
           rowsByStudentId: sheet.rowsByStudentId,
         };
-        await saveDraft(assessmentKey, subjectId, draft);
+        await saveDraft(assessmentKey, subjectId, draft, teachingAssignmentId);
         try {
-          const sk = sheetKey(assessmentKey, subjectId);
+          const sk = sheetKey(assessmentKey, subjectId, teachingAssignmentId);
           lsSet(sk, {
             termLabel: sheet.termLabel,
             batchLabel: subjectId,
@@ -1285,7 +1285,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
         questionBtl: s.questionBtl,
         rowsByStudentId: s.rowsByStudentId,
       };
-      saveDraft(assessmentKey, subjectId, draft).catch(() => {});
+      saveDraft(assessmentKey, subjectId, draft, teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
@@ -1301,7 +1301,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
         questionBtl: sheet.questionBtl,
         rowsByStudentId: sheet.rowsByStudentId,
       };
-      await saveDraft(assessmentKey, subjectId, draft);
+      await saveDraft(assessmentKey, subjectId, draft, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch (e: any) {
       setError(e?.message || `Failed to save ${assessmentLabel} draft`);

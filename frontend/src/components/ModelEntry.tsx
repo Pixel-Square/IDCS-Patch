@@ -573,7 +573,7 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     setSavingDraft(true);
     setActionError(null);
     try {
-      await OBE.saveDraft('model', subjectId, buildPayload());
+      await OBE.saveDraft('model', subjectId, buildPayload(), teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch (e: any) {
       setActionError(e?.message || 'Draft save failed');
@@ -586,7 +586,7 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
   useEffect(() => {
     const handler = () => {
       if (!subjectId || publishedEditLocked) return;
-      OBE.saveDraft('model', subjectId, buildPayload()).catch(() => {});
+      OBE.saveDraft('model', subjectId, buildPayload(), teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
@@ -914,7 +914,7 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     return theoryCoTheoryMaxRow;
   }, [theoryCoTheoryMaxRow]);
 
-  const theoryQuestionBtlStorageKey = useMemo(() => `model_theory_questionBtl_${subjectId}`, [subjectId]);
+  const theoryQuestionBtlStorageKey = useMemo(() => `model_theory_questionBtl_${subjectId}_${String(teachingAssignmentId ?? 'none')}`, [subjectId, teachingAssignmentId]);
   const defaultTheoryQuestionBtl = useMemo(() => {
     return Object.fromEntries(
       theoryQuestions.map((q, i) => {
@@ -985,7 +985,7 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
   }, [iqacPattern, isTcplLike, tcplLikeKind, tcplQuestions.length]);
 
   const tcplStoragePrefix = tcplLikeKind === 'TCPR' ? 'tcpr' : 'tcpl';
-  const tcplQuestionBtlStorageKey = useMemo(() => `model_${tcplStoragePrefix}_questionBtl_${subjectId}`, [subjectId, tcplStoragePrefix]);
+  const tcplQuestionBtlStorageKey = useMemo(() => `model_${tcplStoragePrefix}_questionBtl_${subjectId}_${String(teachingAssignmentId ?? 'none')}`, [subjectId, tcplStoragePrefix, teachingAssignmentId]);
   const defaultTcplQuestionBtl = useMemo(() => {
     return Object.fromEntries(tcplQuestions.map((q) => [q.key, '' as BtlValue]));
   }, [tcplQuestions]);
@@ -1074,7 +1074,7 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     let cancelled = false;
     const tid = window.setTimeout(async () => {
       try {
-        await OBE.saveDraft('model', subjectId, buildPayload());
+        await OBE.saveDraft('model', subjectId, buildPayload(), teachingAssignmentId);
         if (!cancelled) setSavedAt(new Date().toLocaleString());
       } catch {
         // Ignore autosave errors (manual Save Draft shows errors).
