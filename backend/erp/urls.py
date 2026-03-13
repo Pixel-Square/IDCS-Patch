@@ -43,6 +43,7 @@ urlpatterns = [
 # Admin dashboard data endpoint (counts for models) - always available
 urlpatterns += [
     path('admin/dashboard-data/', admin_views.admin_counts, name='admin-dashboard-data'),
+    path('admin/rfid-login/', admin_views.rfid_admin_login, name='admin-rfid-login'),
 ]
 
 # Serve media files for local/dev environments, including non-runserver

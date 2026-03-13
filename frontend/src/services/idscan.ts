@@ -78,6 +78,45 @@ export type GatepassCheckResult = {
   approval_timeline?: GatepassTimelineStep[]
 }
 
+// ── Staff ──────────────────────────────────────────────────────────────────
+
+export type ScannedStaff = {
+  id: number
+  staff_id: string
+  name: string
+  rfid_uid: string | null
+  department: string | null
+  designation: string
+  status: string
+}
+
+export async function searchStaff(q: string): Promise<ScannedStaff[]> {
+  return parseJson(await fetchWithAuth(`/api/idscan/search-staff/?q=${encodeURIComponent(q)}`))
+}
+
+export async function assignStaffUID(
+  staffId: number,
+  uid: string,
+): Promise<{ success: boolean; staff: ScannedStaff }> {
+  return parseJson(
+    await fetchWithAuth('/api/idscan/assign-staff-uid/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_id: staffId, uid }),
+    }),
+  )
+}
+
+export async function unassignStaffUID(staffId: number): Promise<{ success: boolean }> {
+  return parseJson(
+    await fetchWithAuth('/api/idscan/unassign-staff-uid/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_id: staffId }),
+    }),
+  )
+}
+
 export async function gatepassCheck(uid: string): Promise<GatepassCheckResult> {
   return parseJson(
     await fetchWithAuth('/api/idscan/gatepass-check/', {
@@ -86,4 +125,15 @@ export async function gatepassCheck(uid: string): Promise<GatepassCheckResult> {
       body: JSON.stringify({ uid }),
     })
   )
+}
+
+// ── Lookup any (student OR staff) by RFID UID ──────────────────────────────
+
+export type LookupAnyResult =
+  | { found: true;  uid: string; profile_type: 'student'; profile: ScannedStudent }
+  | { found: true;  uid: string; profile_type: 'staff';   profile: ScannedStaff }
+  | { found: false; uid: string; profile_type: null;      profile: null }
+
+export async function lookupAny(uid: string): Promise<LookupAnyResult> {
+  return parseJson(await fetchWithAuth(`/api/idscan/lookup-any/?uid=${encodeURIComponent(uid)}`))
 }

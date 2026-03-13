@@ -1,0 +1,188 @@
+{% extends "admin/login.html" %}
+{% load i18n static %}
+
+{% block content %}
+{{ block.super }}
+
+{# ── RFID Login Widget ──────────────────────────────────────────────────── #}
+<style>
+  #rfid-login-section {
+    margin-top: 1.5rem;
+    padding: 1.25rem 1.5rem;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+  }
+  #rfid-login-section h3 {
+    margin: 0 0 .75rem;
+    font-size: .95rem;
+    color: #447e9b;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+  }
+  #rfid-scan-input {
+    width: 100%;
+    padding: .45rem .75rem;
+    font-size: .95rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    outline: none;
+    box-sizing: border-box;
+    letter-spacing: .1em;
+    transition: border-color .2s;
+  }
+  #rfid-scan-input:focus {
+    border-color: #447e9b;
+    box-shadow: 0 0 0 2px rgba(68,126,155,.2);
+  }
+  #rfid-scan-input.success { border-color: #28a745; background: #f0fff4; }
+  #rfid-scan-input.error   { border-color: #dc3545; background: #fff5f5; }
+  #rfid-status {
+    margin-top: .5rem;
+    font-size: .85rem;
+    min-height: 1.2em;
+    color: #555;
+  }
+  #rfid-status.ok  { color: #28a745; }
+  #rfid-status.err { color: #dc3545; }
+  .rfid-pulse {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #28a745;
+    animation: rfid-blink 1.2s infinite;
+  }
+  @keyframes rfid-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: .3; }
+  }
+</style>
+
+<div id="rfid-login-section">
+  <h3>
+    <span class="rfid-pulse"></span>
+    {% trans "RF Card Login" %}
+  </h3>
+  <label for="rfid-scan-input" style="font-size:.85rem;color:#555;display:block;margin-bottom:.35rem;">
+    {% trans "Tap or scan your RFID card below to login instantly" %}
+  </label>
+  <input
+    id="rfid-scan-input"
+    type="text"
+    autocomplete="off"
+    placeholder="{% trans 'Scan card here…' %}"
+    inputmode="none"
+  />
+  <div id="rfid-status"></div>
+</div>
+
+<script>
+(function () {
+  var input    = document.getElementById('rfid-scan-input');
+  var statusEl = document.getElementById('rfid-status');
+
+  // RFID scanners type each character < ~30 ms apart then send Enter.
+  // We buffer characters and flush when Enter is received or after a pause.
+  var buffer = '';
+  var lastKeyTime = 0;
+  var SCAN_DEBOUNCE_MS = 80;   // max gap between chars for scanner input
+  var MIN_UID_LEN = 4;
+
+  function setStatus(msg, type) {
+    statusEl.textContent = msg;
+    statusEl.className = type || '';
+  }
+
+  function submitUID(uid) {
+    if (!uid || uid.length < MIN_UID_LEN) return;
+
+    input.disabled = true;
+    input.classList.remove('success', 'error');
+    setStatus('{% trans "Verifying card…" %}', '');
+
+    // Get CSRF token from the existing login form on the page
+    var csrfInput = document.querySelector('[name=csrfmiddlewaretoken]');
+    var csrfToken = csrfInput ? csrfInput.value : '';
+
+    // Resolve the ?next= parameter if present
+    var params = new URLSearchParams(window.location.search);
+    var nextURL = params.get('next') || '/admin/';
+
+    var body = new URLSearchParams();
+    body.append('uid', uid);
+    body.append('next', nextURL);
+    body.append('csrfmiddlewaretoken', csrfToken);
+
+    fetch('{% url "admin-rfid-login" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': csrfToken },
+      body: body.toString(),
+      credentials: 'same-origin',
+    })
+    .then(function (res) { return res.json().then(function(d){ return {ok: res.ok, data: d}; }); })
+    .then(function (r) {
+      if (r.ok && r.data.success) {
+        input.classList.add('success');
+        setStatus('{% trans "Welcome" %} ' + (r.data.username || '') + '! {% trans "Redirecting…" %}', 'ok');
+        setTimeout(function () { window.location.href = r.data.redirect || '/admin/'; }, 600);
+      } else {
+        input.classList.add('error');
+        setStatus(r.data.error || '{% trans "Card not recognised." %}', 'err');
+        input.disabled = false;
+        input.value = '';
+        buffer = '';
+      }
+    })
+    .catch(function () {
+      input.classList.add('error');
+      setStatus('{% trans "Network error. Please try again." %}', 'err');
+      input.disabled = false;
+      input.value = '';
+      buffer = '';
+    });
+  }
+
+  input.addEventListener('keydown', function (e) {
+    var now = Date.now();
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var uid = buffer.trim().toUpperCase();
+      buffer = '';
+      input.value = '';
+      if (uid.length >= MIN_UID_LEN) submitUID(uid);
+      return;
+    }
+
+    if (e.key.length === 1) {
+      if (now - lastKeyTime > 500 && buffer.length > 0) {
+        // Long pause — user is typing manually; reset
+        buffer = '';
+        input.value = '';
+        input.classList.remove('success', 'error');
+        statusEl.textContent = '';
+      }
+      buffer += e.key;
+      lastKeyTime = now;
+    }
+  });
+
+  // Auto-focus the RFID input after the page loads, but only if
+  // the username field is already filled (i.e. someone not typing a password)
+  window.addEventListener('DOMContentLoaded', function () {
+    var usernameInput = document.getElementById('id_username');
+    if (!usernameInput || !usernameInput.value) {
+      // Leave focus on username so normal login still works by default
+    } else {
+      input.focus();
+    }
+  });
+
+  // Allow clicking the card widget to focus it
+  document.getElementById('rfid-login-section').addEventListener('click', function () {
+    input.focus();
+  });
+})();
+</script>
+{% endblock %}
