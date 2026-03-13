@@ -22,6 +22,7 @@ export type ScannedStudent = {
   batch: string | null
   department: string | null
   status: string
+  profile_image_url: string | null
 }
 
 export type LookupResult =
@@ -88,6 +89,7 @@ export type ScannedStaff = {
   department: string | null
   designation: string
   status: string
+  profile_image_url: string | null
 }
 
 export async function searchStaff(q: string): Promise<ScannedStaff[]> {

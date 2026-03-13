@@ -96,6 +96,10 @@ def _student_detail(sp: StudentProfile) -> dict:
         except Exception:
             pass
 
+    profile_image_url = None
+    if sp.profile_image:
+        profile_image_url = sp.profile_image.url
+
     return {
         "id": sp.pk,
         "reg_no": sp.reg_no,
@@ -105,6 +109,7 @@ def _student_detail(sp: StudentProfile) -> dict:
         "batch": batch_name,
         "department": dept_name,
         "status": getattr(sp, "status", None),
+        "profile_image_url": profile_image_url,
     }
 
 
@@ -115,6 +120,10 @@ def _staff_detail(sp: StaffProfile) -> dict:
     dept = getattr(sp, "current_department", None) or getattr(sp, "department", None)
     dept_name = getattr(dept, "name", None) if dept else None
 
+    profile_image_url = None
+    if sp.profile_image:
+        profile_image_url = sp.profile_image.url
+
     return {
         "id": sp.pk,
         "staff_id": sp.staff_id,
@@ -123,6 +132,7 @@ def _staff_detail(sp: StaffProfile) -> dict:
         "department": dept_name,
         "designation": getattr(sp, "designation", None),
         "status": getattr(sp, "status", None),
+        "profile_image_url": profile_image_url,
     }
 
 

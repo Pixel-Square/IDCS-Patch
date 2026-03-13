@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ScannedStudent, ScannedStaff,
   assignUID, assignStaffUID,
@@ -57,11 +57,19 @@ function StudentCard({ student, onClose }: { student: ScannedStudent; onClose: (
         {/* Green header */}
         <div className="bg-gradient-to-r from-green-500 to-emerald-400 px-6 py-5 text-white">
           <div className="flex items-center gap-3">
-            <div className="w-14 h-14 rounded-full bg-white/25 flex items-center justify-center flex-shrink-0">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
+            {student.profile_image_url ? (
+              <img
+                src={student.profile_image_url}
+                alt={student.name}
+                className="w-14 h-14 rounded-full object-cover border-2 border-white flex-shrink-0"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-white/25 flex items-center justify-center flex-shrink-0">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            )}
             <div className="min-w-0">
               <div className="text-xs font-semibold uppercase tracking-widest text-green-100">Card Recognised</div>
               <div className="text-xl font-bold truncate">{student.name}</div>
@@ -105,11 +113,19 @@ function StaffCard({ staff, onClose }: { staff: ScannedStaff; onClose: () => voi
         {/* Emerald header */}
         <div className="bg-gradient-to-r from-emerald-600 to-teal-500 px-6 py-5 text-white">
           <div className="flex items-center gap-3">
-            <div className="w-14 h-14 rounded-full bg-white/25 flex items-center justify-center flex-shrink-0">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
+            {staff.profile_image_url ? (
+              <img
+                src={staff.profile_image_url}
+                alt={staff.name}
+                className="w-14 h-14 rounded-full object-cover border-2 border-white flex-shrink-0"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-white/25 flex items-center justify-center flex-shrink-0">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            )}
             <div className="min-w-0">
               <div className="text-xs font-semibold uppercase tracking-widest text-emerald-100">Card Recognised</div>
               <div className="text-xl font-bold truncate">{staff.name}</div>
@@ -174,6 +190,7 @@ function AssignPopup({
   onAssigned: (kind: 'student' | 'staff', profile: ScannedStudent | ScannedStaff) => void
   onClose: () => void
 }) {
+  const inputRef                              = useRef<HTMLInputElement | null>(null)
   const [query, setQuery]                       = useState('')
   const [results, setResults]                   = useState<AssignCandidate[]>([])
   const [searching, setSearching]               = useState(false)
@@ -181,6 +198,16 @@ function AssignPopup({
   const [assigning, setAssigning]               = useState(false)
   const [error, setError]                       = useState<string | null>(null)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    // Make sure the search box is ready to type even when the popup opens due
+    // to an async serial read (some browsers ignore plain autoFocus then).
+    const t = setTimeout(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [uid])
 
   const doSearch = useCallback((q: string) => {
     if (debounce.current) clearTimeout(debounce.current)
@@ -287,6 +314,7 @@ function AssignPopup({
           {/* Search */}
           <div className="relative">
             <input
+              ref={inputRef}
               autoFocus
               type="text"
               value={query}
@@ -308,11 +336,23 @@ function AssignPopup({
                   <li
                     key={`${r.kind}:${r.id}`}
                     onClick={() => setSelected(r)}
-                    className={`px-4 py-2.5 cursor-pointer hover:bg-gray-50 transition flex items-center justify-between ${
+                    className={`px-4 py-2.5 cursor-pointer hover:bg-gray-50 transition flex items-center justify-between gap-3 ${
                       active ? 'bg-gray-100' : ''
                     }`}
                   >
-                    <div className="min-w-0">
+                    {/* Profile photo thumbnail */}
+                    {r.profile.profile_image_url ? (
+                      <img
+                        src={r.profile.profile_image_url}
+                        alt={r.title}
+                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-xs font-bold text-gray-600">
+                        {r.kind === 'student' ? '👤' : '👤'}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span
                           className={
