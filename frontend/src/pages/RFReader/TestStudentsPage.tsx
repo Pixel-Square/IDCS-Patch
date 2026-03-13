@@ -117,9 +117,17 @@ function StudentPopup({
         {/* Header */}
         <div className="bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 px-6 pt-5 pb-6">
           <div className="flex items-center gap-4 mb-4">
-            <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center text-3xl shadow">
-              🎓
-            </div>
+            {profile.profile_image_url ? (
+              <img
+                src={profile.profile_image_url}
+                alt={profile.name}
+                className="w-14 h-14 rounded-2xl object-cover border border-white/30 flex-shrink-0"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center text-3xl shadow">
+                🎓
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-2">
                 <p className="text-indigo-200 text-xs font-semibold uppercase tracking-widest mb-0.5">Student Card</p>
@@ -179,9 +187,17 @@ function StaffPopup({
         {/* Header */}
         <div className="bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700 px-6 pt-5 pb-6">
           <div className="flex items-center gap-4 mb-4">
-            <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center text-3xl shadow">
-              👔
-            </div>
+            {profile.profile_image_url ? (
+              <img
+                src={profile.profile_image_url}
+                alt={profile.name}
+                className="w-14 h-14 rounded-2xl object-cover border border-white/30 flex-shrink-0"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center text-3xl shadow">
+                👔
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-2">
                 <p className="text-emerald-200 text-xs font-semibold uppercase tracking-widest mb-0.5">Staff Card</p>
@@ -271,6 +287,7 @@ export default function RFReaderTestStudentsPage() {
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignResults, setAssignResults] = useState<AssignCandidate[]>([]);
   const [assignSelected, setAssignSelected] = useState<AssignCandidate | null>(null);
+  const assignInputRef = useRef<HTMLInputElement | null>(null);
 
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -524,6 +541,16 @@ export default function RFReaderTestStudentsPage() {
     }
   }, [closePopup, startDismissTimer]);
 
+  // When an unknown card is scanned, put the cursor in the assign box.
+  useEffect(() => {
+    if (!pendingUid) return;
+    const t = setTimeout(() => {
+      assignInputRef.current?.focus();
+      assignInputRef.current?.select();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [pendingUid]);
+
   // ── Assign selected profile to pendingUid ─────────────────────────────────
   const handleAssign = useCallback(async () => {
     if (!pendingUid || !assignSelected) return;
@@ -687,6 +714,7 @@ export default function RFReaderTestStudentsPage() {
               onChange={(e) => setAssignQuery(e.target.value)}
               disabled={!pendingUid}
               placeholder="Type Reg No / Student Name / Staff ID / Staff Name"
+              ref={assignInputRef}
               className="w-full border rounded-lg px-3 py-2 text-sm outline-none border-gray-200 disabled:bg-gray-50"
             />
 
@@ -710,27 +738,41 @@ export default function RFReaderTestStudentsPage() {
                     key={`${r.kind}:${r.id}`}
                     onClick={() => setAssignSelected(r)}
                     className={[
-                      'w-full text-left px-3 py-2 border-b last:border-b-0',
+                      'w-full text-left px-3 py-2 border-b last:border-b-0 flex items-center gap-2',
                       active ? 'bg-slate-100' : 'hover:bg-slate-50',
                     ].join(' ')}
                   >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={[
-                          'text-[10px] px-2 py-0.5 rounded-full border font-semibold',
-                          r.kind === 'student'
-                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
-                            : 'bg-emerald-50 border-emerald-200 text-emerald-700',
-                        ].join(' ')}
-                      >
-                        {r.kind === 'student' ? 'STUDENT' : 'STAFF'}
-                      </span>
-                      <div className="text-sm font-medium truncate">{r.title}</div>
+                    {/* Profile photo thumbnail */}
+                    {r.profile.profile_image_url ? (
+                      <img
+                        src={r.profile.profile_image_url}
+                        alt={r.title}
+                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-xs">
+                        👤
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={[
+                            'text-[10px] px-2 py-0.5 rounded-full border font-semibold',
+                            r.kind === 'student'
+                              ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                              : 'bg-emerald-50 border-emerald-200 text-emerald-700',
+                          ].join(' ')}
+                        >
+                          {r.kind === 'student' ? 'STUDENT' : 'STAFF'}
+                        </span>
+                        <div className="text-sm font-medium truncate">{r.title}</div>
+                      </div>
+                      {r.subtitle && <div className="text-xs opacity-70 mt-0.5">{r.subtitle}</div>}
                     </div>
-                    {r.subtitle && <div className="text-xs opacity-70 mt-0.5">{r.subtitle}</div>}
                   </button>
                 );
-              })}
+              }})
             </div>
 
             <div className="flex gap-2">
