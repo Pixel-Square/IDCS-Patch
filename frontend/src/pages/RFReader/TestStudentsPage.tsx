@@ -1,66 +1,770 @@
-import React, { useEffect, useState } from 'react';
-import { rfreaderFetchLastScan, type RFReaderLastScan } from '../../services/rfreader';
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  rfreaderFetchLastScan,
+  type RFReaderLastScan,
+} from '../../services/rfreader';
+import {
+  lookupAny,
+  assignUID,
+  assignStaffUID,
+  searchStudents,
+  searchStaff,
+  type ScannedStudent,
+  type ScannedStaff,
+} from '../../services/idscan';
+
+// ── USB serial device constants (same filters as IDCSScan/TestPage) ─────────
+
+const SERIAL_FILTERS = [
+  { usbVendorId: 0x1a86, usbProductId: 0x7523 }, // CH340  (NodeMCU clones)
+  { usbVendorId: 0x1a86, usbProductId: 0x5523 }, // CH341
+  { usbVendorId: 0x1a86, usbProductId: 0x55d4 }, // CH9102
+  { usbVendorId: 0x10c4, usbProductId: 0xea60 }, // CP2102 / CP2104
+  { usbVendorId: 0x0403, usbProductId: 0x6001 }, // FT232RL
+  { usbVendorId: 0x0403, usbProductId: 0x6015 }, // FT231XS
+  { usbVendorId: 0x2341, usbProductId: 0x0043 }, // Arduino Uno (R3)
+  { usbVendorId: 0x2341, usbProductId: 0x0001 }, // Arduino Uno (old)
+];
+
+const USB_NAMES: Record<string, string> = {
+  '1a86:7523': 'CH340 (NodeMCU)',
+  '1a86:5523': 'CH341 (NodeMCU)',
+  '1a86:55d4': 'CH9102 (NodeMCU)',
+  '10c4:ea60': 'CP210x USB to UART',
+  '0403:6001': 'FT232RL USB-Serial',
+  '0403:6015': 'FT231XS USB-Serial',
+  '2341:0043': 'Arduino Uno',
+  '2341:0001': 'Arduino Uno',
+};
+
+function getDeviceName(port: any): string {
+  try {
+    const info = port.getInfo?.();
+    if (!info?.usbVendorId) return 'USB Serial Device';
+    const vid = (info.usbVendorId as number).toString(16).padStart(4, '0');
+    const pid = ((info.usbProductId ?? 0) as number).toString(16).padStart(4, '0');
+    return USB_NAMES[`${vid}:${pid}`] ?? `USB Device (${vid.toUpperCase()}:${pid.toUpperCase()})`;
+  } catch {
+    return 'USB Serial Device';
+  }
+}
+
+// ── Popup discriminated union ──────────────────────────────────────────────
+
+type PopupState =
+  | { kind: 'student'; profile: ScannedStudent; uid: string }
+  | { kind: 'staff';   profile: ScannedStaff;   uid: string };
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const cls =
+    status === 'ACTIVE'
+      ? 'bg-green-100 text-green-700'
+      : status === 'INACTIVE'
+        ? 'bg-gray-100 text-gray-500'
+        : status === 'RESIGNED'
+          ? 'bg-red-100 text-red-600'
+          : 'bg-yellow-100 text-yellow-700';
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
+      {status}
+    </span>
+  );
+}
+
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between py-1">
+      <span className="text-sm text-white/60">{label}</span>
+      <span className={`text-sm font-semibold text-white ${mono ? 'font-mono tracking-wider' : ''}`}>{value}</span>
+    </div>
+  );
+}
+
+// ── Auto-dismiss progress bar ──────────────────────────────────────────────
+
+function AutoDismissBar({ progress, color }: { progress: number; color: string }) {
+  return (
+    <div className="h-1 w-full bg-white/20">
+      <div
+        className={`h-1 transition-all duration-100 ${color}`}
+        style={{ width: `${progress}%` }}
+      />
+    </div>
+  );
+}
+
+// ── Student Popup ──────────────────────────────────────────────────────────
+
+function StudentPopup({
+  profile,
+  uid,
+  progress,
+  onClose,
+}: {
+  profile: ScannedStudent;
+  uid: string;
+  progress: number;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-indigo-950/85 backdrop-blur-sm">
+      <div className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden ring-1 ring-white/10">
+        {/* auto-dismiss bar */}
+        <AutoDismissBar progress={progress} color="bg-indigo-400" />
+
+        {/* Header */}
+        <div className="bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 px-6 pt-5 pb-6">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center text-3xl shadow">
+              🎓
+            </div>
+            <div>
+              <p className="text-indigo-200 text-xs font-semibold uppercase tracking-widest mb-0.5">Student Card</p>
+              <h2 className="text-xl font-bold text-white leading-tight">{profile.name}</h2>
+            </div>
+          </div>
+          <div className="divide-y divide-white/10">
+            <Row label="Reg No"     value={profile.reg_no} mono />
+            <Row label="Section"    value={profile.section    || '—'} />
+            <Row label="Batch"      value={profile.batch      || '—'} />
+            <Row label="Department" value={profile.department || '—'} />
+            <div className="flex items-center justify-between py-1">
+              <span className="text-sm text-white/60">Status</span>
+              <StatusBadge status={profile.status} />
+            </div>
+            <Row label="Card UID"   value={uid} mono />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="bg-indigo-900/80 px-6 py-3 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-5 py-1.5 rounded-lg bg-white text-indigo-700 text-sm font-semibold hover:bg-indigo-50 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Staff Popup ────────────────────────────────────────────────────────────
+
+function StaffPopup({
+  profile,
+  uid,
+  progress,
+  onClose,
+}: {
+  profile: ScannedStaff;
+  uid: string;
+  progress: number;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/85 backdrop-blur-sm">
+      <div className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden ring-1 ring-white/10">
+        {/* auto-dismiss bar */}
+        <AutoDismissBar progress={progress} color="bg-emerald-400" />
+
+        {/* Header */}
+        <div className="bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700 px-6 pt-5 pb-6">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center text-3xl shadow">
+              👔
+            </div>
+            <div>
+              <p className="text-emerald-200 text-xs font-semibold uppercase tracking-widest mb-0.5">Staff Card</p>
+              <h2 className="text-xl font-bold text-white leading-tight">{profile.name}</h2>
+            </div>
+          </div>
+          <div className="divide-y divide-white/10">
+            <Row label="Staff ID"    value={profile.staff_id} mono />
+            <Row label="Department"  value={profile.department  || '—'} />
+            <Row label="Designation" value={profile.designation || '—'} />
+            <div className="flex items-center justify-between py-1">
+              <span className="text-sm text-white/60">Status</span>
+              <StatusBadge status={profile.status} />
+            </div>
+            <Row label="Card UID"    value={uid} mono />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="bg-emerald-900/80 px-6 py-3 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-5 py-1.5 rounded-lg bg-white text-emerald-700 text-sm font-semibold hover:bg-emerald-50 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Info grid cell ─────────────────────────────────────────────────────────
+
+function InfoCell({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) {
+  return (
+    <div className="bg-gray-50 rounded-lg px-3 py-2.5">
+      <p className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">{label}</p>
+      <p className={`text-sm font-semibold text-gray-800 truncate ${mono ? 'font-mono' : ''}`}>{value || '—'}</p>
+    </div>
+  );
+}
+
+// ── Main Page ──────────────────────────────────────────────────────────────
+
+const DISMISS_MS = 7000;
 
 export default function RFReaderTestStudentsPage() {
-  const [last, setLast] = useState<RFReaderLastScan | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [last, setLast]           = useState<RFReaderLastScan | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [popup, setPopup]         = useState<PopupState | null>(null);
+  const [progress, setProgress]   = useState(100);
+  const [pendingUid, setPendingUid] = useState<string | null>(null);
 
+  // ── WebSerial state ────────────────────────────────────────────────────────
+  const [port, setPort]         = useState<any | null>(null);
+  const [deviceName, setDeviceName] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [serialError, setSerialError] = useState<string | null>(null);
+  const readerRef    = useRef<ReadableStreamDefaultReader<string> | null>(null);
+  const bufferRef    = useRef('');
+  const lastScanRef  = useRef<{ uid: string; time: number }>({ uid: '', time: 0 });
+  const serialSupported = typeof (navigator as any).serial !== 'undefined';
+
+  // Assign panel state
+  const [assignTab, setAssignTab]         = useState<'student' | 'staff'>('student');
+  const [query, setQuery]                 = useState('');
+  const [studentResults, setStudentResults] = useState<ScannedStudent[]>([]);
+  const [staffResults, setStaffResults]   = useState<ScannedStaff[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [assignMsg, setAssignMsg]         = useState<{ ok: boolean; text: string } | null>(null);
+
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  const dismissTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Auto-dismiss timer ───────────────────────────────────────────────────
+  const startDismissTimer = useCallback(() => {
+    setProgress(100);
+    if (dismissTimerRef.current)    clearTimeout(dismissTimerRef.current);
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    const TICK = 80;
+    let elapsed = 0;
+    progressIntervalRef.current = setInterval(() => {
+      elapsed += TICK;
+      setProgress(Math.max(0, 100 - (elapsed / DISMISS_MS) * 100));
+    }, TICK);
+    dismissTimerRef.current = setTimeout(() => {
+      clearInterval(progressIntervalRef.current!);
+      setPopup(null);
+    }, DISMISS_MS);
+  }, []);
+
+  const closePopup = useCallback(() => {
+    if (dismissTimerRef.current)    clearTimeout(dismissTimerRef.current);
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    setPopup(null);
+  }, []);
+
+  // ── Poll last scan — only updates the Live Scan Info panel ──────────────
   useEffect(() => {
     let mounted = true;
     const tick = async () => {
       try {
-        setError(null);
         const data = await rfreaderFetchLastScan();
-        if (mounted) setLast(data);
+        if (!mounted) return;
+        setPollError(null);
+        setLast(data);
       } catch (e: any) {
-        if (mounted) setError(String(e?.message || e));
+        if (mounted) setPollError(String(e?.message ?? e));
       }
     };
-
     tick();
-    const id = window.setInterval(tick, 1000);
-    return () => {
-      mounted = false;
-      window.clearInterval(id);
-    };
+    const id = window.setInterval(tick, 3000);
+    return () => { mounted = false; window.clearInterval(id); };
   }, []);
 
+  // ── WebSerial: select port ───────────────────────────────────────────────
+  const handleSelectPort = async () => {
+    try {
+      let p: any;
+      try {
+        p = await (navigator as any).serial.requestPort({ filters: SERIAL_FILTERS });
+      } catch (err: any) {
+        if (err.name === 'NotAllowedError') return;
+        try {
+          p = await (navigator as any).serial.requestPort();
+        } catch (e2: any) {
+          if (e2.name !== 'NotAllowedError') setSerialError('Could not select port: ' + e2.message);
+          return;
+        }
+      }
+      setPort(p);
+      setDeviceName(getDeviceName(p));
+      setSerialError(null);
+    } catch (e: any) {
+      if (e.name !== 'NotAllowedError') setSerialError('Could not select port: ' + e.message);
+    }
+  };
+
+  // ── WebSerial: start scan loop ───────────────────────────────────────────
+  const handleStartScan = async () => {
+    if (!port) return;
+    setScanning(true);
+    setSerialError(null);
+
+    try {
+      try {
+        await port.open({ baudRate: 115200 });
+      } catch (openErr: any) {
+        // InvalidStateError = already open — that's fine, continue
+        if (openErr?.name !== 'InvalidStateError' && !openErr?.message?.toLowerCase().includes('already open')) {
+          throw openErr;
+        }
+      }
+
+      if (!port.readable) {
+        throw new Error('Port has no readable stream — try unplugging and re-selecting the device.');
+      }
+
+      const decoder = new TextDecoderStream();
+      port.readable.pipeTo(decoder.writable).catch(() => { /* closed by stop */ });
+      const reader = decoder.readable.getReader();
+      readerRef.current = reader;
+
+      (async () => {
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            bufferRef.current += value;
+            const lines = bufferRef.current.split('\n');
+            bufferRef.current = lines.pop() ?? '';
+            for (const raw of lines) {
+              const trimmed = raw.trim().toUpperCase();
+              // ── UID extraction ──────────────────────────────────────────
+              // Priority 1: spaced/colon byte pairs, e.g. "AF DF DE EC" or
+              //   "Card UID: AF DF DE EC" — grab first group of 4+ byte pairs
+              const spacedMatch = trimmed.match(/[0-9A-F]{2}(?:[: ][0-9A-F]{2}){3,}/);
+              let uid: string;
+              if (spacedMatch) {
+                uid = spacedMatch[0].replace(/[^0-9A-F]/g, '');
+              } else {
+                // Priority 2: compact run of 8+ hex chars, e.g. "AFDFDEEC"
+                const compactMatch = trimmed.match(/[0-9A-F]{8,}/);
+                uid = compactMatch ? compactMatch[0] : '';
+              }
+              if (uid.length < 8) continue;
+              // Debounce: ignore same card within 1.5 s
+              const now = Date.now();
+              if (uid === lastScanRef.current.uid && now - lastScanRef.current.time < 1500) continue;
+              lastScanRef.current = { uid, time: now };
+              processUID(uid);
+            }
+          }
+        } catch {
+          // reader cancelled / port closed — normal stop path
+        } finally {
+          setScanning(false);
+        }
+      })();
+    } catch (e: any) {
+      setScanning(false);
+      setSerialError('Could not start scan: ' + (e?.message ?? String(e)));
+    }
+  };
+
+  const handleStopScan = async () => {
+    try { await readerRef.current?.cancel(); } catch {}
+    try { await port?.close(); } catch {}
+    setScanning(false);
+  };
+
+  // ── processUID: lookup and show popup or assign panel ───────────────────
+  const processUID = useCallback(async (uid: string) => {
+    // Clear any existing popup immediately
+    closePopup();
+
+    try {
+      const result = await lookupAny(uid);
+      if (result.found && result.profile_type === 'student') {
+        setPopup({ kind: 'student', profile: result.profile, uid });
+        startDismissTimer();
+      } else if (result.found && result.profile_type === 'staff') {
+        setPopup({ kind: 'staff', profile: result.profile, uid });
+        startDismissTimer();
+      } else {
+        // Unknown card — show in assign panel
+        setPendingUid(uid);
+      }
+    } catch {
+      // Network error — still surface the UID so operator can act
+      setPendingUid(uid);
+    }
+  }, [closePopup, startDismissTimer]);
+
+  // ── Search debounce ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (query.length < 1) {
+      setStudentResults([]);
+      setStaffResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    setSearchError(null);
+    const t = setTimeout(async () => {
+      try {
+        if (assignTab === 'student') setStudentResults(await searchStudents(query));
+        else                         setStaffResults(await searchStaff(query));
+      } catch (e: any) {
+        setSearchError(e?.message ?? 'Search failed');
+      }
+      setSearchLoading(false);
+    }, 280);
+    return () => clearTimeout(t);
+  }, [query, assignTab]);
+
+  // ── Assign helpers ───────────────────────────────────────────────────────
+  const flash = (ok: boolean, text: string) => {
+    setAssignMsg({ ok, text });
+    setTimeout(() => setAssignMsg(null), 4000);
+  };
+
+  const handleAssignStudent = async (s: ScannedStudent) => {
+    if (!pendingUid || assignLoading) return;
+    setAssignLoading(true);
+    try {
+      await assignUID(s.id, pendingUid);
+      flash(true, `Assigned ${pendingUid} → ${s.name} (${s.reg_no})`);
+      setPendingUid(null);
+      setQuery('');
+      setStudentResults([]);
+    } catch (e: any) {
+      flash(false, e.message);
+    }
+    setAssignLoading(false);
+  };
+
+  const handleAssignStaff = async (s: ScannedStaff) => {
+    if (!pendingUid || assignLoading) return;
+    setAssignLoading(true);
+    try {
+      await assignStaffUID(s.id, pendingUid);
+      flash(true, `Assigned ${pendingUid} → ${s.name} (${s.staff_id})`);
+      setPendingUid(null);
+      setQuery('');
+      setStaffResults([]);
+    } catch (e: any) {
+      flash(false, e.message);
+    }
+    setAssignLoading(false);
+  };
+
+  const switchTab = (tab: 'student' | 'staff') => {
+    setAssignTab(tab);
+    setQuery('');
+    setStudentResults([]);
+    setStaffResults([]);
+    setSearchError(null);
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-semibold text-gray-900">RFReader · Test Students</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        This page polls the backend every second to show the latest scan received from the USB listener.
-      </p>
+    <div className="p-6 min-h-screen bg-gray-50">
+      {/* Page header */}
+      <div className="mb-5">
+        <h1 className="text-2xl font-bold text-gray-900">RF Reader · Test Station</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Connect the USB scanner below, then scan a card. Student and staff cards each get their own pop-up.
+          Unrecognised cards drop into the Assign panel.
+        </p>
+      </div>
 
-      <div className="mt-6 max-w-2xl rounded-lg border border-gray-200 bg-white p-4">
-        {error ? (
-          <div className="text-sm text-red-600">Error: {error}</div>
-        ) : null}
+      {/* ── USB Scanner ─────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 mb-5 overflow-hidden">
+        <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+          <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">1</span>
+          <span className="text-sm font-semibold text-gray-700">Connect USB Scanner</span>
+          {scanning && (
+            <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-100 border border-green-200 rounded-full px-3 py-1">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              Live
+            </span>
+          )}
+        </div>
 
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div className="text-gray-500">Gate</div>
-          <div className="text-gray-900">{last?.gate?.name || '—'}</div>
+        <div className="p-4 flex flex-wrap items-center gap-3">
+          {!serialSupported && (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 w-full">
+              ⚠️ Web Serial is not supported. Use <strong>Chrome</strong> or <strong>Edge</strong>.
+            </p>
+          )}
 
-          <div className="text-gray-500">Scanned At</div>
-          <div className="text-gray-900">{last?.scanned_at || '—'}</div>
+          {/* Select port */}
+          <button
+            onClick={handleSelectPort}
+            disabled={!serialSupported || scanning}
+            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg px-4 py-2 text-sm font-semibold transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 4v4m0 0l-2-2m2 2l2-2M8 8H5a1 1 0 00-1 1v6a1 1 0 001 1h3m8-8h3a1 1 0 011 1v6a1 1 0 01-1 1h-3m-8 0h8m-4 0v4" />
+            </svg>
+            {port ? 'Change Port' : 'Select USB Port'}
+          </button>
 
-          <div className="text-gray-500">UID</div>
-          <div className="text-gray-900">{last?.uid || '—'}</div>
+          {/* Connected device */}
+          {port && (
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs">
+              <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+              <span className="font-bold text-green-800">{deviceName || 'Device connected'}</span>
+              <span className="text-green-600">· 115200 baud</span>
+            </div>
+          )}
 
-          <div className="text-gray-500">Roll No</div>
-          <div className="text-gray-900">{last?.roll_no || '—'}</div>
+          {/* Start / Stop scan */}
+          {port && !scanning && (
+            <button
+              onClick={handleStartScan}
+              className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white rounded-lg px-4 py-2 text-sm font-semibold transition"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M14.752 11.168l-5.197-3.027A1 1 0 008 9v6a1 1 0 001.555.832l5.197-3.027a1 1 0 000-1.664z" />
+              </svg>
+              Start Scan
+            </button>
+          )}
+          {scanning && (
+            <button
+              onClick={handleStopScan}
+              className="inline-flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-semibold transition"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9 10h6v4H9z" />
+              </svg>
+              Stop Scan
+            </button>
+          )}
 
-          <div className="text-gray-500">Name</div>
-          <div className="text-gray-900">{last?.name || '—'}</div>
+          {/* Pending UID badge */}
+          {pendingUid && (
+            <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Unknown card: <span className="font-mono">{pendingUid}</span>
+            </span>
+          )}
+        </div>
 
-          <div className="text-gray-500">IMPRES</div>
-          <div className="text-gray-900">{last?.impres_code || '—'}</div>
+        {serialError && (
+          <div className="mx-4 mb-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-600">
+            {serialError}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* ── Assign panel ──────────────────────────────────────────────── */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden flex flex-col">
+          {/* Panel header */}
+          <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-800">Assign Card</h2>
+            {pendingUid ? (
+              <span className="font-mono text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-md px-2 py-0.5">
+                {pendingUid}
+              </span>
+            ) : (
+              <span className="text-xs text-gray-400 italic">Scan an unrecognised card first</span>
+            )}
+          </div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-gray-100">
+            {(['student', 'staff'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => switchTab(tab)}
+                className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                  assignTab === tab
+                    ? tab === 'student'
+                      ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/40'
+                      : 'text-emerald-600 border-b-2 border-emerald-500 bg-emerald-50/40'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                {tab === 'student' ? '🎓 Student' : '👔 Staff'}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-4 flex-1 flex flex-col gap-3">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={
+                assignTab === 'student'
+                  ? 'Search by reg no or name…'
+                  : 'Search by staff ID or name…'
+              }
+              className={`w-full border rounded-lg px-3 py-2 text-sm outline-none transition-shadow ${
+                assignTab === 'student'
+                  ? 'focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400'
+                  : 'focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400'
+              } border-gray-200`}
+            />
+
+            {searchLoading && (
+              <p className="text-center text-xs text-gray-400 py-2">Searching…</p>
+            )}
+
+            {searchError && !searchLoading && (
+              <p className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {searchError}
+              </p>
+            )}
+
+            {/* Student results */}
+            {assignTab === 'student' && !searchLoading && studentResults.length > 0 && (
+              <div className="space-y-1.5 overflow-y-auto max-h-64">
+                {studentResults.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 hover:border-indigo-200 hover:bg-indigo-50/50 transition-colors"
+                  >
+                    <div className="min-w-0 mr-2">
+                      <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                      <p className="text-xs text-gray-400 font-mono">
+                        {s.reg_no}
+                        {s.rfid_uid
+                          ? <span className="ml-1.5 text-amber-500" title="Already has a card">· UID: {s.rfid_uid}</span>
+                          : <span className="ml-1.5 text-gray-300">· No card</span>}
+                      </p>
+                    </div>
+                    <button
+                      disabled={!pendingUid || assignLoading}
+                      onClick={() => handleAssignStudent(s)}
+                      className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-md font-semibold transition-colors ${
+                        pendingUid && !assignLoading
+                          ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Assign
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Staff results */}
+            {assignTab === 'staff' && !searchLoading && staffResults.length > 0 && (
+              <div className="space-y-1.5 overflow-y-auto max-h-64">
+                {staffResults.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 hover:border-emerald-200 hover:bg-emerald-50/50 transition-colors"
+                  >
+                    <div className="min-w-0 mr-2">
+                      <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                      <p className="text-xs text-gray-400 font-mono">
+                        {s.staff_id}
+                        {s.designation && <span className="ml-1 not-font-mono text-gray-400">· {s.designation}</span>}
+                        {s.rfid_uid
+                          ? <span className="ml-1.5 text-amber-500">· UID: {s.rfid_uid}</span>
+                          : <span className="ml-1.5 text-gray-300">· No card</span>}
+                      </p>
+                    </div>
+                    <button
+                      disabled={!pendingUid || assignLoading}
+                      onClick={() => handleAssignStaff(s)}
+                      className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-md font-semibold transition-colors ${
+                        pendingUid && !assignLoading
+                          ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Assign
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Assign feedback */}
+            {assignMsg && (
+              <div
+                className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                  assignMsg.ok
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : 'bg-red-50 text-red-600 border border-red-200'
+                }`}
+              >
+                {assignMsg.ok ? '✓ ' : '✗ '}
+                {assignMsg.text}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Live scan info ─────────────────────────────────────────────── */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-800">Last DB Scan</h2>
+            {pollError && (
+              <span className="text-xs text-red-500">poll error</span>
+            )}
+          </div>
+          <div className="p-4 grid grid-cols-2 gap-3">
+            <InfoCell label="Gate"         value={last?.gate?.name} />
+            <InfoCell label="Card UID"     value={last?.uid} mono />
+            <InfoCell label="Scanned At"   value={last?.scanned_at ? new Date(last.scanned_at).toLocaleTimeString() : null} />
+            <InfoCell label="Profile Type" value={last?.profile_type ?? null} />
+            <InfoCell label="Roll No"      value={last?.roll_no} />
+            <InfoCell label="Name"         value={last?.name} />
+            <InfoCell label="IMPRES"       value={last?.impres_code} />
+          </div>
         </div>
       </div>
 
-      <div className="mt-4 text-xs text-gray-500">
-        USB listener tip: close Arduino Serial Monitor while the listener is running.
-      </div>
+      <p className="mt-4 text-xs text-gray-400">
+        💡 Close Arduino Serial Monitor before starting a scan. Use Chrome or Edge for Web Serial support.
+      </p>
+
+      {/* ── Popups ──────────────────────────────────────────────────────── */}
+      {popup?.kind === 'student' && (
+        <StudentPopup
+          profile={popup.profile}
+          uid={popup.uid}
+          progress={progress}
+          onClose={closePopup}
+        />
+      )}
+      {popup?.kind === 'staff' && (
+        <StaffPopup
+          profile={popup.profile}
+          uid={popup.uid}
+          progress={progress}
+          onClose={closePopup}
+        />
+      )}
     </div>
   );
 }

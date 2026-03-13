@@ -1,5 +1,10 @@
 import React, { useCallback, useRef, useState } from 'react'
-import { ScannedStudent, assignUID, lookupByUID, searchStudents } from '../../services/idscan'
+import {
+  ScannedStudent, ScannedStaff,
+  assignUID, assignStaffUID,
+  lookupByUID,
+  searchStudents, searchStaff,
+} from '../../services/idscan'
 
 // ─── USB device filtering & name lookup ──────────────────────────────────────
 // Filters shown to the browser's port-picker dialog — only USB-serial adapters
@@ -102,6 +107,8 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
 }
 
 // ─── Assign UID Popup ─────────────────────────────────────────────────────────
+type AssignTab = 'student' | 'staff'
+
 function AssignPopup({
   uid,
   onAssigned,
@@ -111,42 +118,87 @@ function AssignPopup({
   onAssigned: (student: ScannedStudent) => void
   onClose: () => void
 }) {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<ScannedStudent[]>([])
-  const [searching, setSearching] = useState(false)
-  const [selected, setSelected] = useState<ScannedStudent | null>(null)
-  const [assigning, setAssigning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [tab, setTab]                           = useState<AssignTab>('student')
+  const [query, setQuery]                       = useState('')
+  const [studentResults, setStudentResults]     = useState<ScannedStudent[]>([])
+  const [staffResults, setStaffResults]         = useState<ScannedStaff[]>([])
+  const [searching, setSearching]               = useState(false)
+  const [selectedStudent, setSelectedStudent]   = useState<ScannedStudent | null>(null)
+  const [selectedStaff, setSelectedStaff]       = useState<ScannedStaff | null>(null)
+  const [assigning, setAssigning]               = useState(false)
+  const [error, setError]                       = useState<string | null>(null)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const doSearch = useCallback((q: string) => {
+  const switchTab = (t: AssignTab) => {
+    setTab(t)
+    setQuery('')
+    setStudentResults([])
+    setStaffResults([])
+    setSelectedStudent(null)
+    setSelectedStaff(null)
+    setError(null)
+  }
+
+  const doSearch = useCallback((q: string, currentTab: AssignTab) => {
     if (debounce.current) clearTimeout(debounce.current)
-    if (q.length < 2) { setResults([]); return }
+    if (q.length < 1) {
+      setStudentResults([])
+      setStaffResults([])
+      setSearching(false)
+      return
+    }
+    setSearching(true)
     debounce.current = setTimeout(async () => {
-      setSearching(true)
       try {
-        setResults(await searchStudents(q))
-      } catch {
-        // ignore search errors silently
+        if (currentTab === 'student') setStudentResults(await searchStudents(q))
+        else                          setStaffResults(await searchStaff(q))
+      } catch (e: any) {
+        setError(e?.message || 'Search failed')
       } finally {
         setSearching(false)
       }
-    }, 300)
+    }, 280)
   }, [])
 
+  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const q = e.target.value
+    setQuery(q)
+    setError(null)
+    if (tab === 'student') setSelectedStudent(null)
+    else                   setSelectedStaff(null)
+    doSearch(q, tab)
+  }
+
+  const isStudent = tab === 'student'
+  const selectedId = isStudent ? selectedStudent?.id : selectedStaff?.id
+  const hasSelection = isStudent ? !!selectedStudent : !!selectedStaff
+
   const handleAssign = async () => {
-    if (!selected) return
     setAssigning(true)
     setError(null)
     try {
-      const res = await assignUID(selected.id, uid)
-      onAssigned(res.student)
+      if (isStudent && selectedStudent) {
+        const res = await assignUID(selectedStudent.id, uid)
+        onAssigned(res.student)
+      } else if (!isStudent && selectedStaff) {
+        await assignStaffUID(selectedStaff.id, uid)
+        onClose()
+      }
     } catch (e: any) {
       setError(e.message || 'Failed to assign UID')
     } finally {
       setAssigning(false)
     }
   }
+
+  const accentRing  = isStudent ? 'focus:ring-indigo-400'  : 'focus:ring-emerald-400'
+  const accentBg    = isStudent ? 'bg-indigo-600 hover:bg-indigo-700'  : 'bg-emerald-600 hover:bg-emerald-700'
+  const accentPrev  = isStudent ? 'bg-indigo-50 border-indigo-200'     : 'bg-emerald-50 border-emerald-200'
+  const accentText  = isStudent ? 'text-indigo-900'  : 'text-emerald-900'
+  const accentSub   = isStudent ? 'text-indigo-600'  : 'text-emerald-600'
+  const accentCheck = isStudent ? 'text-indigo-600'  : 'text-emerald-600'
+  const accentHover = isStudent ? 'hover:bg-indigo-50' : 'hover:bg-emerald-50'
+  const accentSel   = isStudent ? 'bg-indigo-100'      : 'bg-emerald-100'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -166,9 +218,28 @@ function AssignPopup({
           </button>
         </div>
 
+        {/* Tabs */}
+        <div className="flex border-b border-gray-100">
+          {(['student', 'staff'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => switchTab(t)}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                tab === t
+                  ? t === 'student'
+                    ? 'text-indigo-600 border-b-2 border-indigo-500'
+                    : 'text-emerald-600 border-b-2 border-emerald-500'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              {t === 'student' ? '🎓 Student' : '👔 Staff'}
+            </button>
+          ))}
+        </div>
+
         <div className="p-5 space-y-4">
           <p className="text-sm text-gray-600">
-            This UID is not assigned to any student. Search and assign below, scan another card, or skip.
+            This UID is not yet assigned. Search a {tab} below and assign the card.
           </p>
 
           {/* Search */}
@@ -177,30 +248,67 @@ function AssignPopup({
               autoFocus
               type="text"
               value={query}
-              onChange={(e) => { setQuery(e.target.value); doSearch(e.target.value) }}
-              placeholder="Search by name or reg. no…"
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              onChange={handleQueryChange}
+              placeholder={
+                isStudent
+                  ? 'Search by name or reg. no…'
+                  : 'Search by name or staff ID…'
+              }
+              className={`w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 ${accentRing}`}
             />
             {searching && (
               <div className="absolute right-3 top-2.5 w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
             )}
           </div>
 
-          {/* Results */}
-          {results.length > 0 && (
+          {/* Results — Students */}
+          {isStudent && studentResults.length > 0 && (
             <ul className="max-h-48 overflow-y-auto divide-y divide-gray-100 border rounded-lg text-sm">
-              {results.map((s) => (
+              {studentResults.map((s) => (
                 <li
                   key={s.id}
-                  onClick={() => setSelected(s)}
-                  className={`px-4 py-2.5 cursor-pointer hover:bg-indigo-50 transition flex items-center justify-between ${selected?.id === s.id ? 'bg-indigo-100' : ''}`}
+                  onClick={() => setSelectedStudent(s)}
+                  className={`px-4 py-2.5 cursor-pointer ${accentHover} transition flex items-center justify-between ${
+                    selectedId === s.id ? accentSel : ''
+                  }`}
                 >
                   <div>
                     <div className="font-semibold text-gray-800">{s.name}</div>
-                    <div className="text-xs text-gray-500">{s.reg_no}{s.section ? ` · ${s.section}` : ''}</div>
+                    <div className="text-xs text-gray-500 font-mono">
+                      {s.reg_no}{s.section ? ` · ${s.section}` : ''}
+                      {s.rfid_uid ? <span className="ml-1 text-amber-500"> · UID: {s.rfid_uid}</span> : ''}
+                    </div>
                   </div>
-                  {selected?.id === s.id && (
-                    <svg className="w-5 h-5 text-indigo-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {selectedId === s.id && (
+                    <svg className={`w-5 h-5 ${accentCheck} flex-shrink-0`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* Results — Staff */}
+          {!isStudent && staffResults.length > 0 && (
+            <ul className="max-h-48 overflow-y-auto divide-y divide-gray-100 border rounded-lg text-sm">
+              {staffResults.map((s) => (
+                <li
+                  key={s.id}
+                  onClick={() => setSelectedStaff(s)}
+                  className={`px-4 py-2.5 cursor-pointer ${accentHover} transition flex items-center justify-between ${
+                    selectedId === s.id ? accentSel : ''
+                  }`}
+                >
+                  <div>
+                    <div className="font-semibold text-gray-800">{s.name}</div>
+                    <div className="text-xs text-gray-500 font-mono">
+                      {s.staff_id}{s.designation ? ` · ${s.designation}` : ''}
+                      {s.rfid_uid ? <span className="ml-1 text-amber-500"> · UID: {s.rfid_uid}</span> : ''}
+                    </div>
+                  </div>
+                  {selectedId === s.id && (
+                    <svg className={`w-5 h-5 ${accentCheck} flex-shrink-0`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   )}
@@ -210,10 +318,20 @@ function AssignPopup({
           )}
 
           {/* Selected preview */}
-          {selected && (
-            <div className="rounded-lg bg-indigo-50 border border-indigo-200 px-4 py-3 text-sm">
-              <div className="font-semibold text-indigo-900">{selected.name}</div>
-              <div className="text-xs text-indigo-600">{selected.reg_no}{selected.department ? ` · ${selected.department}` : ''}</div>
+          {isStudent && selectedStudent && (
+            <div className={`rounded-lg ${accentPrev} border px-4 py-3 text-sm`}>
+              <div className={`font-semibold ${accentText}`}>{selectedStudent.name}</div>
+              <div className={`text-xs ${accentSub}`}>
+                {selectedStudent.reg_no}{selectedStudent.department ? ` · ${selectedStudent.department}` : ''}
+              </div>
+            </div>
+          )}
+          {!isStudent && selectedStaff && (
+            <div className={`rounded-lg ${accentPrev} border px-4 py-3 text-sm`}>
+              <div className={`font-semibold ${accentText}`}>{selectedStaff.name}</div>
+              <div className={`text-xs ${accentSub}`}>
+                {selectedStaff.staff_id}{selectedStaff.department ? ` · ${selectedStaff.department}` : ''}
+              </div>
             </div>
           )}
 
@@ -222,8 +340,8 @@ function AssignPopup({
           <div className="flex gap-3 pt-1">
             <button
               onClick={handleAssign}
-              disabled={!selected || assigning}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg px-4 py-2.5 text-sm font-semibold transition"
+              disabled={!hasSelection || assigning}
+              className={`flex-1 ${accentBg} disabled:opacity-50 text-white rounded-lg px-4 py-2.5 text-sm font-semibold transition`}
             >
               {assigning ? 'Assigning…' : 'Assign Card'}
             </button>

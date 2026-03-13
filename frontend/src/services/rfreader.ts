@@ -16,13 +16,35 @@ export type RFReaderStudent = {
   is_active: boolean;
 };
 
+export type StudentProfileDetail = {
+  id: number;
+  reg_no: string;
+  name: string;
+  section: string | null;
+  batch: string | null;
+  department: string | null;
+  status: string;
+};
+
+export type StaffProfileDetail = {
+  id: number;
+  staff_id: string;
+  name: string;
+  department: string | null;
+  designation: string;
+  status: string;
+};
+
 export type RFReaderLastScan = {
+  scan_id: number | null;
   scanned_at: string | null;
   uid: string | null;
   roll_no: string | null;
   name: string | null;
   impres_code: string | null;
   gate: { id: number; name: string } | null;
+  profile_type: 'student' | 'staff' | null;
+  profile: StudentProfileDetail | StaffProfileDetail | null;
 };
 
 export async function rfreaderCreateGate(payload: { name: string; description?: string }): Promise<RFReaderGate> {

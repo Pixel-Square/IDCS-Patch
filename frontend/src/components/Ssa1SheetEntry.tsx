@@ -29,6 +29,7 @@ import PublishLockOverlay from './PublishLockOverlay';
 import AssessmentContainer from './containers/AssessmentContainer';
 import { ModalPortal } from './ModalPortal';
 import { downloadTotalsWithPrompt } from '../utils/assessmentTotalsDownload';
+import { clearLocalDraftCache } from '../utils/obeDraftCache';
 
 type Props = { subjectId: string; teachingAssignmentId?: number; label?: string; assessmentKey?: 'ssa1' | 'review1' };
 
@@ -73,6 +74,14 @@ const DEFAULT_BTL_MAX_WHEN_VISIBLE = 10;
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function parseMarkInput(raw: string): number | null {
+  const s = String(raw ?? '').trim();
+  if (s === '') return null;
+  // Allow decimals like 4.5
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
 }
 
 function round1(n: number) {
@@ -231,7 +240,8 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
-  const [selectedBtls, setSelectedBtls] = useState<number[]>(() => (isReview ? [3, 4] : []));
+  const defaultSelectedBtls = isReview ? [3, 4] : [];
+  const [selectedBtls, setSelectedBtls] = useState<number[]>(() => defaultSelectedBtls);
 
   const [savingDraft, setSavingDraft] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -468,6 +478,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
         const draftSheet = (d as any)?.sheet;
         const draftBtls = (d as any)?.selectedBtls;
         if (draftSheet && typeof draftSheet === 'object' && Array.isArray((draftSheet as any).rows)) {
+          const clearWorkflowState = markLock?.exists === false;
           setSheet((prev) => ({
             ...prev,
             termLabel: String((draftSheet as any).termLabel || masterTermLabel || 'KRCT AY25-26'),
@@ -475,9 +486,13 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
             rows: (draftSheet as any).rows,
             coSplitMax: (draftSheet as any)?.coSplitMax ?? prev.coSplitMax ?? (isReview ? { co1: [], co2: [] } : undefined),
             // mark manager metadata from server draft (if present)
-            markManagerSnapshot: (draftSheet as any)?.markManagerSnapshot ?? prev.markManagerSnapshot ?? null,
-            markManagerApprovalUntil: (draftSheet as any)?.markManagerApprovalUntil ?? prev.markManagerApprovalUntil ?? null,
-            markManagerLocked: typeof (draftSheet as any)?.markManagerLocked === 'boolean' ? (draftSheet as any).markManagerLocked : Boolean((draftSheet as any)?.markManagerSnapshot ?? prev.markManagerSnapshot),
+            markManagerSnapshot: clearWorkflowState ? null : (draftSheet as any)?.markManagerSnapshot ?? prev.markManagerSnapshot ?? null,
+            markManagerApprovalUntil: clearWorkflowState ? null : (draftSheet as any)?.markManagerApprovalUntil ?? prev.markManagerApprovalUntil ?? null,
+            markManagerLocked: clearWorkflowState
+              ? false
+              : typeof (draftSheet as any)?.markManagerLocked === 'boolean'
+                ? (draftSheet as any).markManagerLocked
+                : Boolean((draftSheet as any)?.markManagerSnapshot ?? prev.markManagerSnapshot),
           }));
           // set saved metadata if backend provided it
           const updatedAt = (res as any)?.updated_at ?? null;
@@ -522,7 +537,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     return () => {
       mounted = false;
     };
-  }, [subjectId, masterTermLabel, assessmentKey, key]);
+  }, [subjectId, masterTermLabel, assessmentKey, key, isReview, markLock?.exists]);
 
   // Mark Manager workflow sync: keep local sheet lock state in sync with server lock/approval
   useEffect(() => {
@@ -562,17 +577,61 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     sheet.markManagerApprovalUntil,
   ]);
 
-  // When the lock row is deleted (e.g., after IQAC reset), clear local mark manager state
-  // so the UI reflects the unlocked/unconfirmed state immediately.
+  // When IQAC resets the course, the lock row disappears. Clear all publish /
+  // mark-manager workflow state so the assessment behaves like a fresh course.
   useEffect(() => {
     if (markLock == null) return; // still loading
     if (!markLock.exists) {
+      const hasWorkflowState = Boolean(
+        publishedAt ||
+          sheet.markManagerSnapshot != null ||
+          sheet.markManagerLocked ||
+          sheet.markManagerApprovalUntil ||
+          publishConsumedApprovals?.markEntryApprovalUntil ||
+          publishConsumedApprovals?.markManagerApprovalUntil,
+      );
+      if (!hasWorkflowState) return;
+
+      try {
+        clearLocalDraftCache(String(subjectId || ''), String(assessmentKey || ''), teachingAssignmentId ?? null);
+      } catch {
+        // ignore local reset cache errors
+      }
+
       setSheet((p) => {
-        if (p.markManagerSnapshot == null && !p.markManagerLocked) return p;
-        return { ...p, markManagerSnapshot: null, markManagerLocked: false };
+        if (p.markManagerSnapshot == null && !p.markManagerLocked && p.markManagerApprovalUntil == null) return p;
+        return { ...p, markManagerSnapshot: null, markManagerLocked: false, markManagerApprovalUntil: null };
       });
+      setSelectedBtls(defaultSelectedBtls);
+      setPublishedAt(null);
+      setPublishedViewSnapshot(null);
+      setPublishedViewError(null);
+      setViewMarksModalOpen(false);
+      setPublishedEditModalOpen(false);
+      setEditRequestReason('');
+      setEditRequestError(null);
+      setRequestReason('');
+      setRequestMessage(null);
+      setSaveError(null);
+      setMarkManagerModal(null);
+      setMarkManagerError(null);
+      setPublishConsumedApprovals(null);
+      setMarkEntryReqPendingUntilMs(0);
     }
-  }, [markLock?.exists]);
+  }, [
+    assessmentKey,
+    defaultSelectedBtls,
+    markLock,
+    publishConsumedApprovals?.markEntryApprovalUntil,
+    publishConsumedApprovals?.markManagerApprovalUntil,
+    publishedAt,
+    setMarkEntryReqPendingUntilMs,
+    sheet.markManagerApprovalUntil,
+    sheet.markManagerLocked,
+    sheet.markManagerSnapshot,
+    subjectId,
+    teachingAssignmentId,
+  ]);
 
 
   const mergeRosterIntoRows = (students: TeachingAssignmentRosterStudent[]) => {
@@ -774,14 +833,19 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
         if (draftSheet && typeof draftSheet === 'object' && Array.isArray((draftSheet as any).rows)) {
           const hasMarks = (draftSheet as any).rows.some((r: any) => r?.total !== '' && r?.total != null);
           if (hasMarks) {
+            const clearWorkflowState = markLock?.exists === false;
             setSheet((prevSheet) => ({
               ...prevSheet,
               termLabel: String((draftSheet as any).termLabel || masterTermLabel || 'KRCT AY25-26'),
               batchLabel: subjectId,
               rows: (draftSheet as any).rows,
-              markManagerSnapshot: (draftSheet as any)?.markManagerSnapshot ?? prevSheet.markManagerSnapshot ?? null,
-              markManagerApprovalUntil: (draftSheet as any)?.markManagerApprovalUntil ?? prevSheet.markManagerApprovalUntil ?? null,
-              markManagerLocked: typeof (draftSheet as any)?.markManagerLocked === 'boolean' ? (draftSheet as any).markManagerLocked : Boolean((draftSheet as any)?.markManagerSnapshot ?? prevSheet.markManagerSnapshot),
+              markManagerSnapshot: clearWorkflowState ? null : (draftSheet as any)?.markManagerSnapshot ?? prevSheet.markManagerSnapshot ?? null,
+              markManagerApprovalUntil: clearWorkflowState ? null : (draftSheet as any)?.markManagerApprovalUntil ?? prevSheet.markManagerApprovalUntil ?? null,
+              markManagerLocked: clearWorkflowState
+                ? false
+                : typeof (draftSheet as any)?.markManagerLocked === 'boolean'
+                  ? (draftSheet as any).markManagerLocked
+                  : Boolean((draftSheet as any)?.markManagerSnapshot ?? prevSheet.markManagerSnapshot),
             }));
             if (Array.isArray(draftBtls)) {
               setSelectedBtls(draftBtls.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)));
@@ -802,7 +866,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     return () => {
       mounted = false;
     };
-  }, [entryOpen, isPublished, subjectId, assessmentKey, masterTermLabel]);
+  }, [entryOpen, isPublished, subjectId, assessmentKey, masterTermLabel, markLock?.exists]);
 
   useEffect(() => {
     // While locked after publish, periodically check if IQAC updated the lock row.
@@ -2153,11 +2217,24 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
                       const reviewCo1Total = isReview ? sumSplit(reviewCo1Marks) : 0;
                       const reviewCo2Total = isReview ? sumSplit(reviewCo2Marks) : 0;
                       const reviewTotal = isReview ? clamp(round1(reviewCo1Total + reviewCo2Total), 0, MAX_ASMT1) : null;
-                      const totalRaw = isReview ? reviewTotal : typeof r.total === 'number' ? clamp(Number(r.total), 0, MAX_ASMT1) : null;
 
-                      // CO1/CO2: read from row fields; fall back to total/2 for old drafts without co1/co2
-                      const co1 = isReview ? null : typeof r.co1 === 'number' ? clamp(r.co1, 0, CO_MAX.co1) : (totalRaw != null ? clamp(round1(totalRaw / 2), 0, CO_MAX.co1) : null);
-                      const co2 = isReview ? null : typeof r.co2 === 'number' ? clamp(r.co2, 0, CO_MAX.co2) : (totalRaw != null ? clamp(round1(totalRaw / 2), 0, CO_MAX.co2) : null);
+                      // CO1/CO2 values must come from the row fields so inputs can be cleared.
+                      // (Falling back to total/2 breaks backspace + makes the fields feel "locked".)
+                      const co1 = isReview ? null : typeof r.co1 === 'number' ? clamp(r.co1, 0, CO_MAX.co1) : null;
+                      const co2 = isReview ? null : typeof r.co2 === 'number' ? clamp(r.co2, 0, CO_MAX.co2) : null;
+
+                      // Total: for SSA1, show sum of CO-1 and CO-2 (out of 20).
+                      // If both COs are empty, fall back to stored total (for legacy drafts).
+                      const derivedTotal = !isReview && (co1 != null || co2 != null)
+                        ? clamp(round1((co1 ?? 0) + (co2 ?? 0)), 0, MAX_ASMT1)
+                        : null;
+                      const totalRaw = isReview
+                        ? reviewTotal
+                        : (derivedTotal != null
+                          ? derivedTotal
+                          : typeof r.total === 'number'
+                            ? clamp(Number(r.total), 0, MAX_ASMT1)
+                            : null);
 
                       const visibleIndicesZeroBased = visibleBtlIndices.map((n) => n - 1);
                       const rawBtlMaxByIndex = [BTL_MAX.btl1, BTL_MAX.btl2, BTL_MAX.btl3, BTL_MAX.btl4, BTL_MAX.btl5, BTL_MAX.btl6];
@@ -2179,7 +2256,12 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
                           <td style={cellTd}>{shortenRegisterNo(r.registerNo)}</td>
                           <td style={cellTd}>{r.name}</td>
                           <td style={{ ...cellTd, width: 90, background: '#fff7ed' }}>
-                            <div style={inputStyle}>{totalRaw == null ? '' : round1(totalRaw)}</div>
+                            <input
+                              style={{ ...inputStyle, background: 'rgba(255,255,255,0.6)' }}
+                              readOnly
+                              tabIndex={-1}
+                              value={totalRaw == null ? '' : String(round1(totalRaw))}
+                            />
                           </td>
                           {showTotalColumn ? <td style={{ ...cellTd, textAlign: 'center' }}>{totalRaw ?? ''}</td> : null}
                           {isReview
@@ -2208,24 +2290,21 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
                                   ) : (
                                     <input
                                       style={inputStyle}
-                                      type="number"
-                                      min={0}
-                                      max={CO_MAX.co1}
-                                      value={typeof r.co1 === 'number' ? r.co1 : (co1 ?? '')}
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={typeof r.co1 === 'number' ? String(r.co1) : ''}
                                       onChange={(e) => {
                                         if (marksEditDisabled) return;
                                         const raw = e.target.value;
-                                        if (raw === '') return updateRow(idx, { co1: '' });
-                                        const next = Number(raw);
-                                        if (!Number.isFinite(next)) return updateRow(idx, { co1: '' });
-                                        if (next > CO_MAX.co1) {
-                                          e.currentTarget.setCustomValidity(`Max CO-1 mark is ${CO_MAX.co1}`);
-                                          e.currentTarget.reportValidity();
-                                          window.setTimeout(() => e.currentTarget.setCustomValidity(''), 0);
-                                          return;
-                                        }
-                                        e.currentTarget.setCustomValidity('');
-                                        updateRow(idx, { co1: clamp(next, 0, CO_MAX.co1) });
+                                        const parsed = parseMarkInput(raw);
+                                        if (parsed == null) return updateRow(idx, { co1: '' });
+                                        updateRow(idx, { co1: clamp(parsed, 0, CO_MAX.co1) });
+                                      }}
+                                      onBlur={(e) => {
+                                        // Normalize formatting on blur (e.g. trim, clamp).
+                                        const parsed = parseMarkInput(e.target.value);
+                                        if (parsed == null) return;
+                                        updateRow(idx, { co1: round1(clamp(parsed, 0, CO_MAX.co1)) });
                                       }}
                                     />
                                   )}
@@ -2258,24 +2337,20 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
                                   ) : (
                                     <input
                                       style={inputStyle}
-                                      type="number"
-                                      min={0}
-                                      max={CO_MAX.co2}
-                                      value={typeof r.co2 === 'number' ? r.co2 : (co2 ?? '')}
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={typeof r.co2 === 'number' ? String(r.co2) : ''}
                                       onChange={(e) => {
                                         if (marksEditDisabled) return;
                                         const raw = e.target.value;
-                                        if (raw === '') return updateRow(idx, { co2: '' });
-                                        const next = Number(raw);
-                                        if (!Number.isFinite(next)) return updateRow(idx, { co2: '' });
-                                        if (next > CO_MAX.co2) {
-                                          e.currentTarget.setCustomValidity(`Max CO-2 mark is ${CO_MAX.co2}`);
-                                          e.currentTarget.reportValidity();
-                                          window.setTimeout(() => e.currentTarget.setCustomValidity(''), 0);
-                                          return;
-                                        }
-                                        e.currentTarget.setCustomValidity('');
-                                        updateRow(idx, { co2: clamp(next, 0, CO_MAX.co2) });
+                                        const parsed = parseMarkInput(raw);
+                                        if (parsed == null) return updateRow(idx, { co2: '' });
+                                        updateRow(idx, { co2: clamp(parsed, 0, CO_MAX.co2) });
+                                      }}
+                                      onBlur={(e) => {
+                                        const parsed = parseMarkInput(e.target.value);
+                                        if (parsed == null) return;
+                                        updateRow(idx, { co2: round1(clamp(parsed, 0, CO_MAX.co2)) });
                                       }}
                                     />
                                   )}

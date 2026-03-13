@@ -461,6 +461,10 @@ class StudentProfile(models.Model):
     mobile_number = models.CharField(max_length=32, blank=True, default='')
     mobile_number_verified_at = models.DateTimeField(null=True, blank=True)
 
+    # RFID UID assigned via IDCSScan hardware scanner (for staff)
+    rfid_uid = models.CharField(max_length=32, blank=True, default='', db_index=True,
+                                help_text='RFID card UID (e.g. 539EA5BB) assigned by the physical scanner.')
+
     # RFID UID assigned via IDCSScan hardware scanner
     rfid_uid = models.CharField(max_length=32, blank=True, default='', db_index=True,
                                 help_text='RFID card UID (e.g. 539EA5BB) assigned by the physical scanner.')
@@ -656,6 +660,10 @@ class StaffProfile(models.Model):
     # Optional mobile number for OTP verification (kept on profile as requested)
     mobile_number = models.CharField(max_length=32, blank=True, default='')
     mobile_number_verified_at = models.DateTimeField(null=True, blank=True)
+
+    # RFID UID assigned via IDCSScan hardware scanner (for staff)
+    rfid_uid = models.CharField(max_length=32, blank=True, default='', db_index=True,
+                                help_text='RFID card UID (e.g. 539EA5BB) assigned by the physical scanner.')
 
     def __str__(self):
         return f"Staff {self.staff_id} ({self.user.username})"

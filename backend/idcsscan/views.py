@@ -7,6 +7,9 @@ Provides endpoints for the RFID hardware scanner integration:
   - POST /api/idscan/assign-uid/               assign RFID UID to a student
   - POST /api/idscan/unassign-uid/             remove RFID UID from a student
   - POST /api/idscan/gatepass-check/           check & lock a gatepass for a student
+  - GET  /api/idscan/search-staff/?q=<query>   search staff (staff_id / name)
+  - POST /api/idscan/assign-staff-uid/         assign RFID UID to a staff member
+  - POST /api/idscan/unassign-staff-uid/       remove RFID UID from a staff member
 
 All endpoints require authentication. Assign/unassign/gatepass-check require SECURITY role.
 """
@@ -18,8 +21,26 @@ from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q
 
-from academics.models import StudentProfile
+from academics.models import StudentProfile, StaffProfile
 from applications import models as app_models
+
+def _staff_detail(sp: StaffProfile) -> dict:
+    """Serialize a StaffProfile into a dict for the scanner UI."""
+    user = sp.user
+    full_name = f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}".strip()
+    display_name = full_name if full_name else user.username
+    dept = getattr(sp, 'current_department', None) or sp.department
+    return {
+        'id': sp.pk,
+        'staff_id': sp.staff_id,
+        'name': display_name,
+        'rfid_uid': sp.rfid_uid or None,
+        'department': dept.name if dept else None,
+        'designation': sp.designation,
+        'status': sp.status,
+    }
+
+
 from applications.services.approval_engine import _get_flow_for_application
 from applications.services import application_state
 
@@ -440,3 +461,136 @@ class GatepassCheckView(APIView):
             'student': student_data,
             'approval_timeline': [],
         }, status=status.HTTP_200_OK)
+
+
+# ── Staff endpoints ────────────────────────────────────────────────────────────
+
+
+class SearchStaffView(APIView):
+    """GET /api/idscan/search-staff/?q=<query> — search staff by staff_id or name."""
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        q = (request.query_params.get('q') or '').strip()
+        if len(q) < 1:
+            return Response([])
+
+        qs = StaffProfile.objects.select_related('user', 'department').filter(
+            Q(staff_id__icontains=q) |
+            Q(user__username__icontains=q) |
+            Q(user__first_name__icontains=q) |
+            Q(user__last_name__icontains=q)
+        ).order_by('staff_id')[:20]
+
+        return Response([_staff_detail(sp) for sp in qs])
+
+
+class AssignStaffUIDView(APIView):
+    """POST /api/idscan/assign-staff-uid/ — assign or re-assign a UID to a staff member.
+
+    Body: { staff_id: <int (pk)>, uid: <str> }
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        if not _has_scan_permission(request.user):
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        staff_pk = request.data.get('staff_id')
+        uid = (request.data.get('uid') or '').strip().upper()
+
+        if not staff_pk or not uid:
+            return Response({'error': 'staff_id and uid are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Prevent duplicate UID across staff
+        conflict_staff = StaffProfile.objects.filter(rfid_uid__iexact=uid).exclude(pk=staff_pk).first()
+        if conflict_staff:
+            return Response(
+                {'error': f'UID {uid} is already assigned to staff {conflict_staff.staff_id}.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Prevent duplicate UID across students
+        conflict_student = StudentProfile.objects.filter(rfid_uid__iexact=uid).first()
+        if conflict_student:
+            return Response(
+                {'error': f'UID {uid} is already assigned to student {conflict_student.reg_no}.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            sp = StaffProfile.objects.select_related('user', 'department').get(pk=staff_pk)
+        except StaffProfile.DoesNotExist:
+            return Response({'error': 'Staff not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        sp.rfid_uid = uid
+        sp.save(update_fields=['rfid_uid'])
+        return Response({'success': True, 'staff': _staff_detail(sp)})
+
+
+class UnassignStaffUIDView(APIView):
+    """POST /api/idscan/unassign-staff-uid/ — remove the RFID UID from a staff member.
+
+    Body: { staff_id: <int (pk)> }
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        if not _has_scan_permission(request.user):
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        staff_pk = request.data.get('staff_id')
+        if not staff_pk:
+            return Response({'error': 'staff_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            sp = StaffProfile.objects.select_related('user', 'department').get(pk=staff_pk)
+        except StaffProfile.DoesNotExist:
+            return Response({'error': 'Staff not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        sp.rfid_uid = ''
+        sp.save(update_fields=['rfid_uid'])
+        return Response({'success': True})
+
+
+class LookupAnyView(APIView):
+    """GET /api/idscan/lookup-any/?uid=<UID>
+
+    Resolves an RFID UID against *both* StudentProfile and StaffProfile tables
+    and returns whichever record matches first (student takes priority).
+    Used by the browser-side WebSerial scanner on TestStudentsPage.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        uid = (request.query_params.get('uid') or '').strip().upper()
+        if not uid:
+            return Response({'error': 'uid parameter required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Try student first
+        try:
+            sp = StudentProfile.objects.select_related(
+                'user', 'section__batch__course__department', 'home_department'
+            ).get(rfid_uid__iexact=uid)
+            return Response({
+                'found': True,
+                'uid': uid,
+                'profile_type': 'student',
+                'profile': _student_detail(sp),
+            })
+        except StudentProfile.DoesNotExist:
+            pass
+
+        # Try staff
+        try:
+            staff = StaffProfile.objects.select_related('user', 'department').get(rfid_uid__iexact=uid)
+            return Response({
+                'found': True,
+                'uid': uid,
+                'profile_type': 'staff',
+                'profile': _staff_detail(staff),
+            })
+        except StaffProfile.DoesNotExist:
+            pass
+
+        return Response({'found': False, 'uid': uid, 'profile_type': None, 'profile': None})
