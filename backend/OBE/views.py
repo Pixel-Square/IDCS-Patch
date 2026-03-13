@@ -184,7 +184,103 @@ def _get_students_for_teaching_assignment(ta):
     return students
 
 
-def _get_cia_questions_for_export(*, subject, assessment_key: str, class_type: str = '', question_paper_type: str = '') -> list[dict]:
+def _subject_teaching_assignment_q(subject_code: str):
+    code = str(subject_code or '').strip()
+    return (
+        Q(subject__code__iexact=code)
+        | Q(curriculum_row__course_code__iexact=code)
+        | Q(curriculum_row__master__course_code__iexact=code)
+    )
+
+
+def _has_parallel_teaching_assignments(*, subject_code: str, teaching_assignment=None) -> bool:
+    ta_id = getattr(teaching_assignment, 'id', None)
+    if ta_id is None:
+        return False
+    try:
+        qs = TeachingAssignment.objects.filter(is_active=True).filter(_subject_teaching_assignment_q(subject_code))
+        return qs.exclude(id=ta_id).exists()
+    except Exception:
+        return False
+
+
+def _strict_assignment_scope(*, subject_code: str, teaching_assignment=None) -> bool:
+    return teaching_assignment is not None and _has_parallel_teaching_assignments(
+        subject_code=subject_code,
+        teaching_assignment=teaching_assignment,
+    )
+
+
+def _get_teaching_assignment_student_ids(ta) -> list[int]:
+    ids: list[int] = []
+    for student in _get_students_for_teaching_assignment(ta):
+        student_id = getattr(student, 'id', None)
+        if isinstance(student_id, int):
+            ids.append(student_id)
+    return ids
+
+
+def _filter_marks_queryset_for_teaching_assignment(qs, ta):
+    if ta is None:
+        return qs
+    student_ids = _get_teaching_assignment_student_ids(ta)
+    if not student_ids:
+        return qs.none()
+    return qs.filter(student_id__in=student_ids)
+
+
+def _get_scoped_obe_json_row(model, *, subject, teaching_assignment=None, strict_scope: bool = False, assessment: str | None = None):
+    qs = model.objects.filter(subject=subject)
+    if assessment is not None:
+        qs = qs.filter(assessment=assessment)
+
+    has_ta_field = any(getattr(f, 'name', '') == 'teaching_assignment' for f in model._meta.get_fields())
+    if not has_ta_field:
+        return qs.order_by('-updated_at', '-pk').first()
+
+    if teaching_assignment is not None:
+        row = qs.filter(teaching_assignment=teaching_assignment).order_by('-updated_at', '-pk').first()
+        if row is not None:
+            return row
+        if strict_scope:
+            return None
+        row = qs.filter(teaching_assignment__isnull=True).order_by('-updated_at', '-pk').first()
+        if row is not None:
+            return row
+
+    return qs.filter(teaching_assignment__isnull=True).order_by('-updated_at', '-pk').first()
+
+
+def _upsert_scoped_obe_json_row(model, *, subject, defaults: dict, teaching_assignment=None, assessment: str | None = None):
+    lookup = {'subject': subject}
+    if assessment is not None:
+        lookup['assessment'] = assessment
+
+    has_ta_field = any(getattr(f, 'name', '') == 'teaching_assignment' for f in model._meta.get_fields())
+    if has_ta_field:
+        lookup['teaching_assignment'] = teaching_assignment
+
+    return model.objects.update_or_create(**lookup, defaults=defaults)
+
+
+def _delete_scoped_obe_json_rows(model, *, subject, teaching_assignment=None, strict_scope: bool = False, assessment: str | None = None) -> int:
+    qs = model.objects.filter(subject=subject)
+    if assessment is not None:
+        qs = qs.filter(assessment=assessment)
+
+    has_ta_field = any(getattr(f, 'name', '') == 'teaching_assignment' for f in model._meta.get_fields())
+    if not has_ta_field:
+        return int(qs.delete()[0] or 0)
+
+    if teaching_assignment is not None:
+        deleted = int(qs.filter(teaching_assignment=teaching_assignment).delete()[0] or 0)
+        if deleted or strict_scope:
+            return deleted
+
+    return int(qs.filter(teaching_assignment__isnull=True).delete()[0] or 0)
+
+
+def _get_cia_questions_for_export(*, subject, assessment_key: str, teaching_assignment=None, strict_scope: bool = False, class_type: str = '', question_paper_type: str = '') -> list[dict]:
     """Return question definitions for CIA export.
 
     Priority (most accurate first):
@@ -223,7 +319,13 @@ def _get_cia_questions_for_export(*, subject, assessment_key: str, class_type: s
     try:
         from .models import AssessmentDraft
 
-        d = AssessmentDraft.objects.filter(subject=subject, assessment=assessment_key).first()
+        d = _get_scoped_obe_json_row(
+            AssessmentDraft,
+            subject=subject,
+            teaching_assignment=teaching_assignment,
+            strict_scope=strict_scope,
+            assessment=assessment_key,
+        )
         if d and isinstance(getattr(d, 'data', None), dict):
             qs = d.data.get('questions')
             out = _coerce_questions(qs)
@@ -237,11 +339,21 @@ def _get_cia_questions_for_export(*, subject, assessment_key: str, class_type: s
         if assessment_key == 'cia1':
             from .models import Cia1PublishedSheet
 
-            row = Cia1PublishedSheet.objects.filter(subject=subject).first()
+            row = _get_scoped_obe_json_row(
+                Cia1PublishedSheet,
+                subject=subject,
+                teaching_assignment=teaching_assignment,
+                strict_scope=strict_scope,
+            )
         else:
             from .models import Cia2PublishedSheet
 
-            row = Cia2PublishedSheet.objects.filter(subject=subject).first()
+            row = _get_scoped_obe_json_row(
+                Cia2PublishedSheet,
+                subject=subject,
+                teaching_assignment=teaching_assignment,
+                strict_scope=strict_scope,
+            )
         data = row.data if row and isinstance(getattr(row, 'data', None), dict) else None
         if isinstance(data, dict):
             out = _coerce_questions(data.get('questions'))
@@ -298,7 +410,7 @@ def _get_cia_questions_for_export(*, subject, assessment_key: str, class_type: s
     return [{'key': f"q{i + 1}", 'label': f"Q{i + 1}", 'max': float(mx)} for i, mx in enumerate([2, 2, 2, 2, 2, 2, 16, 16, 16])]
 
 
-def _get_cia_sheet_rows_for_export(*, subject, assessment_key: str) -> dict:
+def _get_cia_sheet_rows_for_export(*, subject, assessment_key: str, teaching_assignment=None, strict_scope: bool = False) -> dict:
     """Return rowsByStudentId map for CIA sheet export.
 
     Priority:
@@ -311,7 +423,13 @@ def _get_cia_sheet_rows_for_export(*, subject, assessment_key: str) -> dict:
     try:
         from .models import AssessmentDraft
 
-        d = AssessmentDraft.objects.filter(subject=subject, assessment=assessment_key).first()
+        d = _get_scoped_obe_json_row(
+            AssessmentDraft,
+            subject=subject,
+            teaching_assignment=teaching_assignment,
+            strict_scope=strict_scope,
+            assessment=assessment_key,
+        )
         if d and isinstance(getattr(d, 'data', None), dict):
             rows_by = d.data.get('rowsByStudentId')
             if isinstance(rows_by, dict):
@@ -324,11 +442,21 @@ def _get_cia_sheet_rows_for_export(*, subject, assessment_key: str) -> dict:
         if assessment_key == 'cia1':
             from .models import Cia1PublishedSheet
 
-            row = Cia1PublishedSheet.objects.filter(subject=subject).first()
+            row = _get_scoped_obe_json_row(
+                Cia1PublishedSheet,
+                subject=subject,
+                teaching_assignment=teaching_assignment,
+                strict_scope=strict_scope,
+            )
         else:
             from .models import Cia2PublishedSheet
 
-            row = Cia2PublishedSheet.objects.filter(subject=subject).first()
+            row = _get_scoped_obe_json_row(
+                Cia2PublishedSheet,
+                subject=subject,
+                teaching_assignment=teaching_assignment,
+                strict_scope=strict_scope,
+            )
         data = row.data if row and isinstance(getattr(row, 'data', None), dict) else None
         if isinstance(data, dict):
             rows_by = data.get('rowsByStudentId')
@@ -370,6 +498,7 @@ def cia_export_template_xlsx(request, assessment: str, subject_id: str):
         return gate
 
     ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+    strict_scope = _strict_assignment_scope(subject_code=subject.code, teaching_assignment=ta)
     row = _resolve_curriculum_row_for_subject(request, subject_code=subject.code, teaching_assignment_id=ta_id)
 
     class_type = str(getattr(row, 'class_type', '') or '').strip().upper() if row else ''
@@ -388,8 +517,20 @@ def cia_export_template_xlsx(request, assessment: str, subject_id: str):
     except Exception:
         pass
 
-    q_defs = _get_cia_questions_for_export(subject=subject, assessment_key=assessment_key, class_type=class_type, question_paper_type=qp_type)
-    rows_by_student_id = _get_cia_sheet_rows_for_export(subject=subject, assessment_key=assessment_key)
+    q_defs = _get_cia_questions_for_export(
+        subject=subject,
+        assessment_key=assessment_key,
+        teaching_assignment=ta,
+        strict_scope=strict_scope,
+        class_type=class_type,
+        question_paper_type=qp_type,
+    )
+    rows_by_student_id = _get_cia_sheet_rows_for_export(
+        subject=subject,
+        assessment_key=assessment_key,
+        teaching_assignment=ta,
+        strict_scope=strict_scope,
+    )
 
     # QP2-specific Excel-only tweak:
     # Split the last question (typically Q9 out of 16) into two columns Q9 and Q10
@@ -1562,48 +1703,113 @@ def iqac_reset_assessment(request, assessment: str, subject_id: str):
         'published': 0,
         'lock': 0,
     }
+    strict_scope = _strict_assignment_scope(subject_code=subject.code, teaching_assignment=ta)
+    student_ids = _get_teaching_assignment_student_ids(ta)
 
     with transaction.atomic():
         # Draft
         try:
-            deleted['draft'] = int(AssessmentDraft.objects.filter(subject=subject, assessment=assessment_key).delete()[0] or 0)
+            deleted['draft'] = _delete_scoped_obe_json_rows(
+                AssessmentDraft,
+                subject=subject,
+                teaching_assignment=ta,
+                strict_scope=strict_scope,
+                assessment=assessment_key,
+            )
         except Exception:
             deleted['draft'] = 0
 
         # Published
         try:
             if assessment_key == 'ssa1':
-                deleted['published'] += int(Ssa1Mark.objects.filter(subject=subject).delete()[0] or 0)
+                deleted['published'] += int(Ssa1Mark.objects.filter(subject=subject, student_id__in=student_ids).delete()[0] or 0)
             elif assessment_key == 'review1':
-                deleted['published'] += int(Review1Mark.objects.filter(subject=subject).delete()[0] or 0)
-                deleted['published'] += int(LabPublishedSheet.objects.filter(subject=subject, assessment='review1').delete()[0] or 0)
+                deleted['published'] += int(Review1Mark.objects.filter(subject=subject, student_id__in=student_ids).delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    LabPublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                    assessment='review1',
+                )
             elif assessment_key == 'ssa2':
-                deleted['published'] += int(Ssa2Mark.objects.filter(subject=subject).delete()[0] or 0)
+                deleted['published'] += int(Ssa2Mark.objects.filter(subject=subject, student_id__in=student_ids).delete()[0] or 0)
             elif assessment_key == 'review2':
-                deleted['published'] += int(Review2Mark.objects.filter(subject=subject).delete()[0] or 0)
-                deleted['published'] += int(LabPublishedSheet.objects.filter(subject=subject, assessment='review2').delete()[0] or 0)
+                deleted['published'] += int(Review2Mark.objects.filter(subject=subject, student_id__in=student_ids).delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    LabPublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                    assessment='review2',
+                )
             elif assessment_key == 'formative1':
-                deleted['published'] += int(Formative1Mark.objects.filter(subject=subject).delete()[0] or 0)
-                deleted['published'] += int(LabPublishedSheet.objects.filter(subject=subject, assessment='formative1').delete()[0] or 0)
+                deleted['published'] += int(Formative1Mark.objects.filter(subject=subject, student_id__in=student_ids).delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    LabPublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                    assessment='formative1',
+                )
             elif assessment_key == 'formative2':
-                deleted['published'] += int(Formative2Mark.objects.filter(subject=subject).delete()[0] or 0)
-                deleted['published'] += int(LabPublishedSheet.objects.filter(subject=subject, assessment='formative2').delete()[0] or 0)
+                deleted['published'] += int(Formative2Mark.objects.filter(subject=subject, student_id__in=student_ids).delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    LabPublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                    assessment='formative2',
+                )
             elif assessment_key == 'cia1':
-                deleted['published'] += int(Cia1PublishedSheet.objects.filter(subject=subject).delete()[0] or 0)
-                deleted['published'] += int(Cia1Mark.objects.filter(subject=subject).delete()[0] or 0)
-                deleted['published'] += int(LabPublishedSheet.objects.filter(subject=subject, assessment='cia1').delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    Cia1PublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                )
+                deleted['published'] += int(Cia1Mark.objects.filter(subject=subject, student_id__in=student_ids).delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    LabPublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                    assessment='cia1',
+                )
             elif assessment_key == 'cia2':
-                deleted['published'] += int(Cia2PublishedSheet.objects.filter(subject=subject).delete()[0] or 0)
-                deleted['published'] += int(Cia2Mark.objects.filter(subject=subject).delete()[0] or 0)
-                deleted['published'] += int(LabPublishedSheet.objects.filter(subject=subject, assessment='cia2').delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    Cia2PublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                )
+                deleted['published'] += int(Cia2Mark.objects.filter(subject=subject, student_id__in=student_ids).delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    LabPublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                    assessment='cia2',
+                )
             elif assessment_key == 'model':
                 # Delete both theory MODEL published snapshot (ModelPublishedSheet) and any lab MODEL snapshots
                 try:
                     from .models import ModelPublishedSheet
-                    deleted['published'] += int(ModelPublishedSheet.objects.filter(subject=subject).delete()[0] or 0)
+                    deleted['published'] += _delete_scoped_obe_json_rows(
+                        ModelPublishedSheet,
+                        subject=subject,
+                        teaching_assignment=ta,
+                        strict_scope=strict_scope,
+                    )
                 except Exception:
                     pass
-                deleted['published'] += int(LabPublishedSheet.objects.filter(subject=subject, assessment='model').delete()[0] or 0)
+                deleted['published'] += _delete_scoped_obe_json_rows(
+                    LabPublishedSheet,
+                    subject=subject,
+                    teaching_assignment=ta,
+                    strict_scope=strict_scope,
+                    assessment='model',
+                )
         except Exception:
             pass
 
@@ -2034,6 +2240,7 @@ def _auto_publish_from_draft_if_due(request, *, subject, assessment_key: str, te
     ta = info.get('teaching_assignment')
     academic_year = info.get('academic_year')
     section_name = _resolve_section_name_from_ta(ta)
+    strict_scope = _strict_assignment_scope(subject_code=getattr(subject, 'code', ''), teaching_assignment=ta)
     lock = _get_mark_table_lock_if_exists(
         staff_user=getattr(request, 'user', None),
         subject_code=str(getattr(subject, 'code', '') or ''),
@@ -2060,7 +2267,13 @@ def _auto_publish_from_draft_if_due(request, *, subject, assessment_key: str, te
         Ssa2Mark,
     )
 
-    draft = AssessmentDraft.objects.filter(subject=subject, assessment=assessment_key).first()
+    draft = _get_scoped_obe_json_row(
+        AssessmentDraft,
+        subject=subject,
+        teaching_assignment=ta,
+        strict_scope=strict_scope,
+        assessment=assessment_key,
+    )
     data = getattr(draft, 'data', None) if draft else None
     if not isinstance(data, dict):
         return False
@@ -2153,8 +2366,10 @@ def _auto_publish_from_draft_if_due(request, *, subject, assessment_key: str, te
                 pub_model = Cia2PublishedSheet
                 mark_model = Cia2Mark
 
-            pub_model.objects.update_or_create(
+            _upsert_scoped_obe_json_row(
+                pub_model,
                 subject=subject,
+                teaching_assignment=ta,
                 defaults={'data': payload, 'updated_by': getattr(getattr(request, 'user', None), 'id', None)},
             )
             questions = payload.get('questions', [])
@@ -2190,8 +2405,10 @@ def _auto_publish_from_draft_if_due(request, *, subject, assessment_key: str, te
                     mark_model.objects.update_or_create(subject=subject, student=student, defaults={'mark': total_dec})
 
         elif assessment_key == 'model':
-            ModelPublishedSheet.objects.update_or_create(
+            _upsert_scoped_obe_json_row(
+                ModelPublishedSheet,
                 subject=subject,
+                teaching_assignment=ta,
                 defaults={'data': payload, 'updated_by': getattr(getattr(request, 'user', None), 'id', None)},
             )
         else:
@@ -2595,8 +2812,10 @@ def assessment_draft(request, assessment: str, subject_id: str):
         return Response({'detail': 'Invalid assessment.'}, status=status.HTTP_400_BAD_REQUEST)
 
     subject = _get_subject(subject_id, request)
-
     ta_id = _get_teaching_assignment_id_from_request(request, request.data if request.method == 'PUT' else None)
+    ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+    strict_scope = _strict_assignment_scope(subject_code=subject.code, teaching_assignment=ta)
+
     gate = _enforce_assessment_enabled_for_course(request, subject_code=subject.code, assessment=assessment, teaching_assignment_id=ta_id)
     if gate is not None:
         return gate
@@ -2615,14 +2834,22 @@ def assessment_draft(request, assessment: str, subject_id: str):
         if not isinstance(data, (dict, list)):
             return Response({'detail': 'Invalid draft data.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        AssessmentDraft.objects.update_or_create(
+        _upsert_scoped_obe_json_row(
+            AssessmentDraft,
             subject=subject,
+            teaching_assignment=ta,
             assessment=assessment,
             defaults={'data': data, 'updated_by': getattr(request.user, 'id', None)},
         )
         return Response({'status': 'draft_saved'})
 
-    draft = AssessmentDraft.objects.filter(subject=subject, assessment=assessment).first()
+    draft = _get_scoped_obe_json_row(
+        AssessmentDraft,
+        subject=subject,
+        teaching_assignment=ta,
+        strict_scope=strict_scope,
+        assessment=assessment,
+    )
     draft_data = draft.data if draft else None
     updated_at = draft.updated_at.isoformat() if draft and getattr(draft, 'updated_at', None) else None
     updated_by = None
@@ -2654,7 +2881,8 @@ def ssa1_published(request, subject_id: str):
         return gate
     from .models import Ssa1Mark
     try:
-        rows = Ssa1Mark.objects.filter(subject=subject)
+        ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+        rows = _filter_marks_queryset_for_teaching_assignment(Ssa1Mark.objects.filter(subject=subject), ta)
         marks = {str(r.student_id): (str(r.mark) if r.mark is not None else None) for r in rows}
     except OperationalError:
         marks = {}
@@ -2753,7 +2981,8 @@ def review1_published(request, subject_id: str):
         return gate
     from .models import Review1Mark
     try:
-        rows = Review1Mark.objects.filter(subject=subject)
+        ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+        rows = _filter_marks_queryset_for_teaching_assignment(Review1Mark.objects.filter(subject=subject), ta)
         marks = {str(r.student_id): (str(r.mark) if r.mark is not None else None) for r in rows}
     except OperationalError:
         marks = {}
@@ -2852,7 +3081,8 @@ def ssa2_published(request, subject_id: str):
         return gate
     from .models import Ssa2Mark
     try:
-        rows = Ssa2Mark.objects.filter(subject=subject)
+        ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+        rows = _filter_marks_queryset_for_teaching_assignment(Ssa2Mark.objects.filter(subject=subject), ta)
         marks = {str(r.student_id): (str(r.mark) if r.mark is not None else None) for r in rows}
     except OperationalError:
         marks = {}
@@ -2951,7 +3181,8 @@ def review2_published(request, subject_id: str):
         return gate
     from .models import Review2Mark
     try:
-        rows = Review2Mark.objects.filter(subject=subject)
+        ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+        rows = _filter_marks_queryset_for_teaching_assignment(Review2Mark.objects.filter(subject=subject), ta)
         marks = {str(r.student_id): (str(r.mark) if r.mark is not None else None) for r in rows}
     except OperationalError:
         marks = {}
@@ -3050,7 +3281,8 @@ def formative1_published(request, subject_id: str):
         return gate
     from .models import Formative1Mark
     try:
-        rows = Formative1Mark.objects.filter(subject=subject)
+        ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+        rows = _filter_marks_queryset_for_teaching_assignment(Formative1Mark.objects.filter(subject=subject), ta)
         marks = {
             str(r.student_id): {
                 'skill1': str(r.skill1) if r.skill1 is not None else None,
@@ -3165,7 +3397,8 @@ def formative2_published(request, subject_id: str):
         return gate
     from .models import Formative2Mark
     try:
-        rows = Formative2Mark.objects.filter(subject=subject)
+        ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+        rows = _filter_marks_queryset_for_teaching_assignment(Formative2Mark.objects.filter(subject=subject), ta)
         marks = {
             str(r.student_id): {
                 'skill1': str(r.skill1) if r.skill1 is not None else None,
@@ -3284,7 +3517,14 @@ def cia1_published_sheet(request, subject_id: str):
     if gate is not None:
         return gate
     from .models import Cia1PublishedSheet
-    row = Cia1PublishedSheet.objects.filter(subject=subject).first()
+    ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+    strict_scope = _strict_assignment_scope(subject_code=subject.code, teaching_assignment=ta)
+    row = _get_scoped_obe_json_row(
+        Cia1PublishedSheet,
+        subject=subject,
+        teaching_assignment=ta,
+        strict_scope=strict_scope,
+    )
     return Response({'subject': {'code': subject.code, 'name': subject.name}, 'data': row.data if row else None})
 
 
@@ -3319,9 +3559,12 @@ def cia1_publish_sheet(request, subject_id: str):
 
     from .models import Cia1PublishedSheet, Cia1Mark
 
-    # Save the snapshot
-    Cia1PublishedSheet.objects.update_or_create(
+    ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+
+    _upsert_scoped_obe_json_row(
+        Cia1PublishedSheet,
         subject=subject,
+        teaching_assignment=ta,
         defaults={'data': data, 'updated_by': getattr(request.user, 'id', None)},
     )
 
@@ -3396,9 +3639,16 @@ def model_published_sheet(request, subject_id: str):
     subject = _get_subject(subject_id, request)
 
     ta_id = _get_teaching_assignment_id_from_request(request)
+    ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+    strict_scope = _strict_assignment_scope(subject_code=subject.code, teaching_assignment=ta)
     # No special gating here; mirror CIA1 behaviour
     from .models import ModelPublishedSheet
-    row = ModelPublishedSheet.objects.filter(subject=subject).first()
+    row = _get_scoped_obe_json_row(
+        ModelPublishedSheet,
+        subject=subject,
+        teaching_assignment=ta,
+        strict_scope=strict_scope,
+    )
     return Response({'subject': {'code': subject.code, 'name': subject.name}, 'data': row.data if row else None})
 
 
@@ -3433,9 +3683,12 @@ def model_publish_sheet(request, subject_id: str):
 
     from .models import ModelPublishedSheet
 
-    # Save the snapshot
-    ModelPublishedSheet.objects.update_or_create(
+    ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+
+    _upsert_scoped_obe_json_row(
+        ModelPublishedSheet,
         subject=subject,
+        teaching_assignment=ta,
         defaults={'data': data, 'updated_by': getattr(request.user, 'id', None)},
     )
 
@@ -3474,7 +3727,14 @@ def cia2_published_sheet(request, subject_id: str):
         return gate
     from .models import Cia2PublishedSheet
     try:
-        row = Cia2PublishedSheet.objects.filter(subject=subject).first()
+        ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+        strict_scope = _strict_assignment_scope(subject_code=subject.code, teaching_assignment=ta)
+        row = _get_scoped_obe_json_row(
+            Cia2PublishedSheet,
+            subject=subject,
+            teaching_assignment=ta,
+            strict_scope=strict_scope,
+        )
         data = row.data if row else None
     except OperationalError:
         data = None
@@ -3512,9 +3772,12 @@ def cia2_publish_sheet(request, subject_id: str):
 
     from .models import Cia2PublishedSheet, Cia2Mark
 
-    # Save the snapshot
-    Cia2PublishedSheet.objects.update_or_create(
+    ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+
+    _upsert_scoped_obe_json_row(
+        Cia2PublishedSheet,
         subject=subject,
+        teaching_assignment=ta,
         defaults={'data': data, 'updated_by': getattr(request.user, 'id', None)},
     )
 
@@ -3592,7 +3855,16 @@ def lab_published_sheet(request, assessment: str, subject_id: str):
     subject = _get_subject(subject_id, request)
     from .models import LabPublishedSheet
     try:
-        row = LabPublishedSheet.objects.filter(subject=subject, assessment=assessment).first()
+        ta_id = _get_teaching_assignment_id_from_request(request)
+        ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+        strict_scope = _strict_assignment_scope(subject_code=subject.code, teaching_assignment=ta)
+        row = _get_scoped_obe_json_row(
+            LabPublishedSheet,
+            subject=subject,
+            teaching_assignment=ta,
+            strict_scope=strict_scope,
+            assessment=assessment,
+        )
         data = row.data if row else None
     except OperationalError:
         data = None
@@ -4084,7 +4356,12 @@ def obe_progress_overview(request):
             elif assessment_key == 'model':
                 # MODEL snapshot: treat presence of a published sheet as fully filled
                 try:
-                    has_sheet = ModelPublishedSheet.objects.filter(subject=subject).exists()
+                    has_sheet = _get_scoped_obe_json_row(
+                        ModelPublishedSheet,
+                        subject=subject,
+                        teaching_assignment=ta,
+                        strict_scope=_strict_assignment_scope(subject_code=getattr(subject, 'code', ''), teaching_assignment=ta),
+                    ) is not None
                 except Exception:
                     has_sheet = False
                 rows_filled = total_students if has_sheet else 0
@@ -4427,8 +4704,12 @@ def lab_publish_sheet(request, assessment: str, subject_id: str):
 
     from .models import LabPublishedSheet
 
-    LabPublishedSheet.objects.update_or_create(
+    ta = _resolve_staff_teaching_assignment(request, subject_code=subject.code, teaching_assignment_id=ta_id)
+
+    _upsert_scoped_obe_json_row(
+        LabPublishedSheet,
         subject=subject,
+        teaching_assignment=ta,
         assessment=assessment,
         defaults={'data': data, 'updated_by': getattr(request.user, 'id', None)},
     )

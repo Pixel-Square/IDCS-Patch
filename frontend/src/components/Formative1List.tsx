@@ -161,8 +161,8 @@ function compareStudentName(a: { name?: string; reg_no?: string }, b: { name?: s
 
 type FormativeKey = 'formative1' | 'formative2';
 
-function storageKey(assessmentKey: FormativeKey, subjectId: string) {
-  return `${assessmentKey}_sheet_${subjectId}`;
+function storageKey(assessmentKey: FormativeKey, subjectId: string, teachingAssignmentId?: number) {
+  return `${assessmentKey}_sheet_${subjectId}_ta_${String(teachingAssignmentId ?? 'none')}`;
 }
 
 function downloadCsv(filename: string, rows: Array<Record<string, string | number>>) {
@@ -277,6 +277,19 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     }
     if (next !== (publishedAt || '')) setPublishedAt(next);
   }, [markLock?.is_published, markLock?.updated_at, publishedAt]);
+
+  // When the lock row is deleted (e.g., after IQAC reset), clear local mark manager state
+  // so the UI reflects the unlocked/unconfirmed state immediately.
+  useEffect(() => {
+    if (markLock == null) return; // still loading
+    if (!markLock.exists) {
+      setSheet((p) => {
+        if (p.markManagerSnapshot == null && !p.markManagerLocked) return p;
+        return { ...p, markManagerSnapshot: null, markManagerLocked: false };
+      });
+    }
+  }, [markLock?.exists]);
+
   const markEntryApprovalUntil = markEntryEditWindow?.approval_until ? String(markEntryEditWindow.approval_until) : null;
   const markManagerApprovalUntil = markManagerEditWindow?.approval_until ? String(markManagerEditWindow.approval_until) : null;
   const markEntryApprovedFresh =
@@ -364,7 +377,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
       setPublishedViewLoading(true);
     }
     try {
-      const pub = await fetchPublishedFormative(assessmentKey, subjectId as string);
+      const pub = await fetchPublishedFormative(assessmentKey, subjectId as string, teachingAssignmentId);
       const marks = pub && (pub as any).marks && typeof (pub as any).marks === 'object' ? ((pub as any).marks as Record<string, any>) : null;
       if (marks && Object.keys(marks).length) {
         setPublishedViewSnapshot(marks);
@@ -402,7 +415,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     let mounted = true;
     (async () => {
       try {
-        const res = await fetchDraft<F1DraftPayload>(assessmentKey, String(subjectId));
+        const res = await fetchDraft<F1DraftPayload>(assessmentKey, String(subjectId), teachingAssignmentId);
         if (!mounted) return;
         const d = res?.draft as any;
         const draftSheet = d?.sheet;
@@ -607,7 +620,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     };
   }, [subjectId]);
 
-  const key = useMemo(() => (subjectId ? storageKey(assessmentKey, subjectId) : ''), [assessmentKey, subjectId]);
+  const key = useMemo(() => (subjectId ? storageKey(assessmentKey, subjectId, teachingAssignmentId) : ''), [assessmentKey, subjectId, teachingAssignmentId]);
 
   const parts = useMemo(
     () => [
@@ -679,7 +692,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
       const draft: F1DraftPayload = { sheet: nextSheet, partBtl, markManagerLocked: nextSheet.markManagerLocked, markManagerSnapshot: nextSheet.markManagerSnapshot, markManagerApprovalUntil: nextSheet.markManagerApprovalUntil } as any;
       setSheet(nextSheet);
       setMarkManagerModal(null);
-      await saveDraft(assessmentKey, String(subjectId), draft);
+      await saveDraft(assessmentKey, String(subjectId), draft, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
       try {
         await confirmMarkManagerLock(assessmentKey as any, String(subjectId), teachingAssignmentId);
@@ -786,7 +799,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     const tid = setTimeout(async () => {
       try {
         const payload: F1DraftPayload = { sheet, partBtl } as any;
-        await saveDraft(assessmentKey, subjectId, payload);
+        await saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId);
         try {
           if (key) lsSet(key, { termLabel: sheet.termLabel, batchLabel: sheet.batchLabel, rowsByStudentId: sheet.rowsByStudentId });
         } catch {}
@@ -808,7 +821,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     (async () => {
       if (!subjectId) return;
       try {
-        const res = await fetchDraft<F1DraftPayload>(assessmentKey, subjectId);
+        const res = await fetchDraft<F1DraftPayload>(assessmentKey, subjectId, teachingAssignmentId);
         if (!mounted) return;
         const d = res?.draft as any;
         const draftSheet = d?.sheet;
@@ -949,7 +962,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
         // Try published formative first (published should take precedence over draft/local)
         let publishedMarks: Record<string, any> | null = null;
         try {
-          const pub = await fetchPublishedFormative(assessmentKey, subjectId as string);
+          const pub = await fetchPublishedFormative(assessmentKey, subjectId as string, teachingAssignmentId);
           if (pub && pub.marks && typeof pub.marks === 'object' && Object.keys(pub.marks || {}).length) {
             publishedMarks = pub.marks as Record<string, any>;
             setPublishedAt(new Date().toLocaleString());
@@ -1048,7 +1061,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     setError(null);
     try {
       const payload: F1DraftPayload = { sheet, partBtl } as any;
-      await saveDraft(assessmentKey, subjectId, payload);
+      await saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId);
       setSavedAt(new Date().toLocaleString());
     } catch (e: any) {
       setError(e?.message || `Failed to save ${assessmentLabel} draft`);
@@ -1066,7 +1079,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     const handler = () => {
       if (!subjectId || students.length === 0) return;
       const payload: F1DraftPayload = { sheet: sheetRef.current, partBtl: partBtlRef.current } as any;
-      saveDraft(assessmentKey, subjectId, payload).catch(() => {});
+      saveDraft(assessmentKey, subjectId, payload, teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);

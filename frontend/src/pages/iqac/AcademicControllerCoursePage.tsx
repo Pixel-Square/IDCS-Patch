@@ -82,7 +82,7 @@ export default function AcademicControllerCoursePage(): JSX.Element {
           await iqacResetAssessment(a, code, teachingAssignmentId);
 
           // Clear local cached drafts too (helps IQAC verify reset immediately)
-          clearLocalDraftCache(code, a);
+          clearLocalDraftCache(code, a, teachingAssignmentId);
         } catch (e) {
           // continue resetting others
           // eslint-disable-next-line no-console

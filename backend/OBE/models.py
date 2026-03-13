@@ -202,6 +202,13 @@ class AssessmentDraft(models.Model):
     )
 
     subject = models.ForeignKey('academics.Subject', on_delete=models.CASCADE, related_name='obe_drafts')
+    teaching_assignment = models.ForeignKey(
+        'academics.TeachingAssignment',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='obe_drafts',
+    )
     assessment = models.CharField(max_length=20, choices=ASSESSMENT_CHOICES)
     data = models.JSONField(default=dict)
     updated_by = models.IntegerField(null=True, blank=True)
@@ -209,7 +216,16 @@ class AssessmentDraft(models.Model):
 
     class Meta:
         constraints = [
-            UniqueConstraint(fields=['subject', 'assessment'], name='unique_obe_draft_per_subject_assessment'),
+            UniqueConstraint(
+                fields=['subject', 'assessment', 'teaching_assignment'],
+                condition=Q(teaching_assignment__isnull=False),
+                name='unique_obe_draft_per_subject_assessment_ta',
+            ),
+            UniqueConstraint(
+                fields=['subject', 'assessment'],
+                condition=Q(teaching_assignment__isnull=True),
+                name='unique_obe_draft_per_subject_assessment_legacy',
+            ),
         ]
 
 
@@ -319,19 +335,61 @@ class Cia2Mark(models.Model):
 class Cia1PublishedSheet(models.Model):
     """Published CIA1 sheet snapshot (question-wise) used for CO attainment calculations."""
 
-    subject = models.OneToOneField('academics.Subject', on_delete=models.CASCADE, related_name='cia1_published_sheet')
+    subject = models.ForeignKey('academics.Subject', on_delete=models.CASCADE, related_name='cia1_published_sheet')
+    teaching_assignment = models.ForeignKey(
+        'academics.TeachingAssignment',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='cia1_published_sheets',
+    )
     data = models.JSONField(default=dict)
     updated_by = models.IntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(
+                fields=['subject', 'teaching_assignment'],
+                condition=Q(teaching_assignment__isnull=False),
+                name='unique_cia1_published_sheet_subject_ta',
+            ),
+            UniqueConstraint(
+                fields=['subject'],
+                condition=Q(teaching_assignment__isnull=True),
+                name='unique_cia1_published_sheet_subject_legacy',
+            ),
+        ]
 
 
 class Cia2PublishedSheet(models.Model):
     """Published CIA2 sheet snapshot (question-wise) used for CO attainment calculations."""
 
-    subject = models.OneToOneField('academics.Subject', on_delete=models.CASCADE, related_name='cia2_published_sheet')
+    subject = models.ForeignKey('academics.Subject', on_delete=models.CASCADE, related_name='cia2_published_sheet')
+    teaching_assignment = models.ForeignKey(
+        'academics.TeachingAssignment',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='cia2_published_sheets',
+    )
     data = models.JSONField(default=dict)
     updated_by = models.IntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(
+                fields=['subject', 'teaching_assignment'],
+                condition=Q(teaching_assignment__isnull=False),
+                name='unique_cia2_published_sheet_subject_ta',
+            ),
+            UniqueConstraint(
+                fields=['subject'],
+                condition=Q(teaching_assignment__isnull=True),
+                name='unique_cia2_published_sheet_subject_legacy',
+            ),
+        ]
 
 
 class ModelPublishedSheet(models.Model):
@@ -340,10 +398,31 @@ class ModelPublishedSheet(models.Model):
     Stored separately from LabPublishedSheet so THEORY MODEL snapshots mirror CIA snapshots.
     """
 
-    subject = models.OneToOneField('academics.Subject', on_delete=models.CASCADE, related_name='model_published_sheet')
+    subject = models.ForeignKey('academics.Subject', on_delete=models.CASCADE, related_name='model_published_sheet')
+    teaching_assignment = models.ForeignKey(
+        'academics.TeachingAssignment',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='model_published_sheets',
+    )
     data = models.JSONField(default=dict)
     updated_by = models.IntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(
+                fields=['subject', 'teaching_assignment'],
+                condition=Q(teaching_assignment__isnull=False),
+                name='unique_model_published_sheet_subject_ta',
+            ),
+            UniqueConstraint(
+                fields=['subject'],
+                condition=Q(teaching_assignment__isnull=True),
+                name='unique_model_published_sheet_subject_legacy',
+            ),
+        ]
 
 
 class LabPublishedSheet(models.Model):
@@ -360,6 +439,13 @@ class LabPublishedSheet(models.Model):
     )
 
     subject = models.ForeignKey('academics.Subject', on_delete=models.CASCADE, related_name='lab_published_sheets')
+    teaching_assignment = models.ForeignKey(
+        'academics.TeachingAssignment',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='lab_published_sheets',
+    )
     assessment = models.CharField(max_length=20, choices=ASSESSMENT_CHOICES)
     data = models.JSONField(default=dict)
     updated_by = models.IntegerField(null=True, blank=True)
@@ -367,7 +453,16 @@ class LabPublishedSheet(models.Model):
 
     class Meta:
         constraints = [
-            UniqueConstraint(fields=['subject', 'assessment'], name='unique_lab_published_sheet_per_subject_assessment'),
+            UniqueConstraint(
+                fields=['subject', 'assessment', 'teaching_assignment'],
+                condition=Q(teaching_assignment__isnull=False),
+                name='unique_lab_published_sheet_per_subject_assessment_ta',
+            ),
+            UniqueConstraint(
+                fields=['subject', 'assessment'],
+                condition=Q(teaching_assignment__isnull=True),
+                name='unique_lab_published_sheet_per_subject_assessment_legacy',
+            ),
         ]
 
 

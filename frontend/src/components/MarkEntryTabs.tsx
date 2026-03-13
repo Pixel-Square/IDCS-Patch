@@ -696,7 +696,7 @@ export default function MarkEntryTabs({
       `model_theory_sheet_${subjectId}_${taId}`,
       `model_tcpl_sheet_${subjectId}_${taId}`,
       `model_tcpr_sheet_${subjectId}_${taId}`,
-      `model_sheet_${subjectId}`,
+      `model_sheet_${subjectId}_ta_${taId}`,
     ];
 
     return (visibleTabs || [])
@@ -716,7 +716,7 @@ export default function MarkEntryTabs({
         let denom = rosterTotal || 0;
 
         if (t.key === 'cia1' || t.key === 'cia2') {
-          const local = lsGet<any>(`${t.key}_sheet_${subjectId}`);
+          const local = lsGet<any>(`${t.key}_sheet_${subjectId}_ta_${taId}`);
           const rowsByStudentId = local?.rowsByStudentId;
           entered = getCiaEnteredCount(rowsByStudentId);
           if (!denom) denom = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
@@ -727,12 +727,12 @@ export default function MarkEntryTabs({
           entered = getModelEnteredCount(sheet);
           if (!denom) denom = sheet && typeof sheet === 'object' ? Object.keys(sheet).length : 0;
         } else if (t.key === 'formative1' || t.key === 'formative2') {
-          const local = lsGet<any>(`${t.key}_sheet_${subjectId}`);
+          const local = lsGet<any>(`${t.key}_sheet_${subjectId}_ta_${taId}`);
           const rowsByStudentId = local?.rowsByStudentId;
           entered = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
           if (!denom) denom = entered;
         } else {
-          const local = lsGet<any>(`${t.key}_sheet_${subjectId}`);
+          const local = lsGet<any>(`${t.key}_sheet_${subjectId}_ta_${taId}`);
           const rows = local?.rows;
           entered = Array.isArray(rows) ? rows.length : 0;
           if (!denom) denom = entered;
@@ -873,59 +873,60 @@ export default function MarkEntryTabs({
 
   const counts = useMemo(() => {
     if (!subjectId) return {} as Record<string, number>;
+    const taId = selectedTaId != null ? String(selectedTaId) : 'none';
     const map: Record<string, number> = {};
     for (const t of visibleTabs) {
       if (t.key === 'dashboard' || String(t.key).startsWith('cqi_')) continue;
       if (t.key === 'ssa1') {
-        const ssa1 = lsGet<{ rows?: unknown }>(`ssa1_sheet_${subjectId}`);
+        const ssa1 = lsGet<{ rows?: unknown }>(`ssa1_sheet_${subjectId}_ta_${taId}`);
         const ssa1Rows = (ssa1 as any)?.rows;
         map[t.key] = Array.isArray(ssa1Rows) ? ssa1Rows.length : 0;
         continue;
       }
       if (t.key === 'review1') {
-        const review1 = lsGet<{ rows?: unknown }>(`review1_sheet_${subjectId}`);
+        const review1 = lsGet<{ rows?: unknown }>(`review1_sheet_${subjectId}_ta_${taId}`);
         const review1Rows = (review1 as any)?.rows;
         map[t.key] = Array.isArray(review1Rows) ? review1Rows.length : 0;
         continue;
       }
       if (t.key === 'ssa2') {
-        const ssa2 = lsGet<{ rows?: unknown }>(`ssa2_sheet_${subjectId}`);
+        const ssa2 = lsGet<{ rows?: unknown }>(`ssa2_sheet_${subjectId}_ta_${taId}`);
         const ssa2Rows = (ssa2 as any)?.rows;
         map[t.key] = Array.isArray(ssa2Rows) ? ssa2Rows.length : 0;
         continue;
       }
       if (t.key === 'review2') {
-        const review2 = lsGet<{ rows?: unknown }>(`review2_sheet_${subjectId}`);
+        const review2 = lsGet<{ rows?: unknown }>(`review2_sheet_${subjectId}_ta_${taId}`);
         const review2Rows = (review2 as any)?.rows;
         map[t.key] = Array.isArray(review2Rows) ? review2Rows.length : 0;
         continue;
       }
       if (t.key === 'formative1') {
-        const f1 = lsGet<{ rowsByStudentId?: unknown }>(`formative1_sheet_${subjectId}`);
+        const f1 = lsGet<{ rowsByStudentId?: unknown }>(`formative1_sheet_${subjectId}_ta_${taId}`);
         const rowsByStudentId = (f1 as any)?.rowsByStudentId;
         map[t.key] = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
         continue;
       }
       if (t.key === 'formative2') {
-        const f2 = lsGet<{ rowsByStudentId?: unknown }>(`formative2_sheet_${subjectId}`);
+        const f2 = lsGet<{ rowsByStudentId?: unknown }>(`formative2_sheet_${subjectId}_ta_${taId}`);
         const rowsByStudentId = (f2 as any)?.rowsByStudentId;
         map[t.key] = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
         continue;
       }
       if (t.key === 'cia1') {
-        const c1 = lsGet<{ rowsByStudentId?: unknown }>(`cia1_sheet_${subjectId}`);
+        const c1 = lsGet<{ rowsByStudentId?: unknown }>(`cia1_sheet_${subjectId}_ta_${taId}`);
         const rowsByStudentId = (c1 as any)?.rowsByStudentId;
         map[t.key] = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
         continue;
       }
       if (t.key === 'cia2') {
-        const c2 = lsGet<{ rowsByStudentId?: unknown }>(`cia2_sheet_${subjectId}`);
+        const c2 = lsGet<{ rowsByStudentId?: unknown }>(`cia2_sheet_${subjectId}_ta_${taId}`);
         const rowsByStudentId = (c2 as any)?.rowsByStudentId;
         map[t.key] = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
         continue;
       }
       if (t.key === 'model') {
-        const m = lsGet<{ rowsByStudentId?: unknown }>(`model_sheet_${subjectId}`);
+        const m = lsGet<{ rowsByStudentId?: unknown }>(`model_sheet_${subjectId}_ta_${taId}`);
         const rowsByStudentId = (m as any)?.rowsByStudentId;
         map[t.key] = rowsByStudentId && typeof rowsByStudentId === 'object' ? Object.keys(rowsByStudentId).length : 0;
         continue;
@@ -934,7 +935,7 @@ export default function MarkEntryTabs({
       map[t.key] = Array.isArray(rows) ? rows.length : 0;
     }
     return map;
-  }, [subjectId, active, visibleTabs, refreshKey]);
+  }, [subjectId, selectedTaId, active, visibleTabs, refreshKey]);
 
   return (
     <div>
@@ -1020,7 +1021,7 @@ export default function MarkEntryTabs({
                 await iqacResetAssessment(assessment, String(subjectId), Number(selectedTaId));
 
                 // Clear local cached drafts so UI doesn't keep showing old marks
-                clearLocalDraftCache(String(subjectId), String(assessment));
+                clearLocalDraftCache(String(subjectId), String(assessment), selectedTaId ?? null);
 
                 setRefreshKey((k) => k + 1);
                 alert('Reset completed.');
