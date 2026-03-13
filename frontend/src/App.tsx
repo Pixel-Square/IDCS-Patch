@@ -76,6 +76,7 @@ import ApplicationFormPage from './pages/applications/ApplicationFormPage';
 import ApplicationDetailPage from './pages/applications/ApplicationDetailPage';
 import IDCSScanTestPage from './pages/IDCSScan/TestPage';
 import IDCSScanGatepassPage from './pages/IDCSScan/GatepassPage';
+import RFReaderAssignCardsPage from './pages/RFReader/AssignCardsPage';
 import RFReaderCreateGatePage from './pages/RFReader/CreateGatePage';
 import RFReaderTestStudentsPage from './pages/RFReader/TestStudentsPage';
 import RFReaderAddStudentsRFPage from './pages/RFReader/AddStudentsRFPage';
@@ -348,6 +349,10 @@ export default function App() {
                 <Route
                   path="/idscan/test"
                   element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<IDCSScanTestPage />} />}
+                />
+                <Route
+                  path="/idscan/assign-cards"
+                  element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<RFReaderAssignCardsPage />} />}
                 />
                 <Route
                   path="/idscan/gatepass"
