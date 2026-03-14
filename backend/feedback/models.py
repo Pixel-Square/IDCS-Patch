@@ -234,3 +234,39 @@ class FeedbackResponse(models.Model):
         if self.teaching_assignment:
             return f"Response by {self.user.username} to Q{self.question.id} for {self.teaching_assignment}"
         return f"Response by {self.user.username} to Q{self.question.id}"
+
+
+class FeedbackFormSubmission(models.Model):
+    """Tracks per-user completion status for a feedback form."""
+
+    STATUS_CHOICES = (
+        ('PENDING', 'Pending'),
+        ('SUBMITTED', 'Submitted'),
+    )
+
+    feedback_form = models.ForeignKey(
+        FeedbackForm,
+        on_delete=models.CASCADE,
+        related_name='submission_statuses',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='feedback_form_submissions',
+    )
+    submission_status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default='PENDING',
+    )
+    total_subjects = models.PositiveIntegerField(default=0)
+    responded_subjects = models.PositiveIntegerField(default=0)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'feedback_form_submissions'
+        unique_together = ('feedback_form', 'user')
+
+    def __str__(self):
+        return f"Form #{self.feedback_form_id} / {self.user.username} - {self.submission_status}"

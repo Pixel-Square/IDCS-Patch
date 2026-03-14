@@ -10,6 +10,7 @@ from .views import (
     UpdateFeedbackFormView,
     GetResponseStatisticsView,
     GetResponseListView,
+    ExportFeedbackResponsesExcelView,
     GetStudentSubjectsView,
     GetSubjectsByYearView,
     DeleteFeedbackFormView,
@@ -46,6 +47,9 @@ urlpatterns = [
     
     # API 8: Get Response List (HOD)
     path('<int:form_id>/responses/', GetResponseListView.as_view(), name='feedback-responses'),
+
+    # API: Export Responses Excel (HOD)
+    path('<int:form_id>/export-excel/', ExportFeedbackResponsesExcelView.as_view(), name='feedback-export-excel'),
     
     # API 9: Get Student Subjects for Subject Feedback
     path('<int:form_id>/subjects/', GetStudentSubjectsView.as_view(), name='feedback-subjects'),

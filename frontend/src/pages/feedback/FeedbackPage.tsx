@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, PlusCircle, FileText, Users, Loader2, AlertCircle, X, Trash2, Star, Send, CheckCircle, ChevronDown, ChevronLeft, Pencil } from 'lucide-react';
+import { MessageSquare, PlusCircle, FileText, Users, Loader2, AlertCircle, X, Trash2, Star, Send, CheckCircle, ChevronDown, ChevronLeft, Pencil, Download } from 'lucide-react';
 import { getCachedMe } from '../../services/auth';
 import fetchWithAuth from '../../services/fetchAuth';
 
@@ -15,11 +15,15 @@ type User = {
 
 type Question = {
   id?: number;
+  question_id?: number;
   ui_id?: string;
   question: string;
+  question_text?: string;
   answer_type?: 'STAR' | 'TEXT' | 'BOTH';  // Legacy field for backward compatibility
   allow_rating: boolean;
   allow_comment: boolean;
+  rating_scale?: string | null;
+  comment_required?: boolean;
   order: number;
 };
 
@@ -49,6 +53,47 @@ const buildDefaultQuestions = (): Question[] => {
       allow_rating: true,
       allow_comment: true,
       order: 3,
+    },
+  ];
+};
+
+const buildIqacStudentDefaultQuestions = (): Question[] => {
+  const seed = Date.now();
+  return [
+    {
+      ui_id: `iqac-student-${seed}-1`,
+      question: 'QUALITY OF ASSESSMENTS (SUMMATIVE AND FORMATIVE)\nTeacher is very effective in creating challenging, innovative and interesting assessments in summative, formative and laboratory components.',
+      allow_rating: true,
+      allow_comment: true,
+      order: 1,
+    },
+    {
+      ui_id: `iqac-student-${seed}-2`,
+      question: 'QUALITY OF TEACHING\nTeacher effectively transfers expertise through classroom and laboratory engagement, nurturing knowledge, skills and attitude of learners and encouraging project-based and co-curricular learning.',
+      allow_rating: true,
+      allow_comment: true,
+      order: 2,
+    },
+    {
+      ui_id: `iqac-student-${seed}-3`,
+      question: 'TECHNICAL EXPERTISE IN THE COURSE\nTeacher demonstrates thorough in-depth knowledge and strong technical expertise in the course.',
+      allow_rating: true,
+      allow_comment: true,
+      order: 3,
+    },
+    {
+      ui_id: `iqac-student-${seed}-4`,
+      question: 'ENGLISH COMMUNICATION SKILLS\nTeacher teaches effectively in English and encourages students to communicate in English.',
+      allow_rating: true,
+      allow_comment: true,
+      order: 4,
+    },
+    {
+      ui_id: `iqac-student-${seed}-5`,
+      question: 'GOAL SETTING FOR THE COURSE\nTeacher sets clear module-wise objectives and ensures learning outcomes are achieved through structured course delivery and assessment planning.',
+      allow_rating: true,
+      allow_comment: true,
+      order: 5,
     },
   ];
 };
@@ -286,6 +331,8 @@ export default function FeedbackPage() {
   const [departmentData, setDepartmentData] = useState<DepartmentResponse | null>(null);
   const [activeDepartment, setActiveDepartment] = useState<Department | null>(null);
   const [selectedDepartments, setSelectedDepartments] = useState<number[]>([]); // For multi-select during form creation
+  const [allDepartmentsSelected, setAllDepartmentsSelected] = useState(false);
+  const [departmentDropdownOpen, setDepartmentDropdownOpen] = useState(false);
   const [departmentLoading, setDepartmentLoading] = useState(true);
   const [departmentError, setDepartmentError] = useState<string | null>(null);
 
@@ -315,17 +362,20 @@ export default function FeedbackPage() {
   const [loadingStudentSubjects, setLoadingStudentSubjects] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState<StudentSubject | null>(null);
   const [currentSubjectResponses, setCurrentSubjectResponses] = useState<Record<number, FeedbackResponse>>({});
+  const [commentValidationErrors, setCommentValidationErrors] = useState<Record<number, boolean>>({});
 
   // HOD response view states
   const [responseStats, setResponseStats] = useState<Record<number, ResponseStatistics>>({});
   const [selectedResponseView, setSelectedResponseView] = useState<ResponseListData | null>(null);
   const [loadingResponseView, setLoadingResponseView] = useState(false);
   const [responseViewError, setResponseViewError] = useState<string | null>(null);
+  const [exportingFormId, setExportingFormId] = useState<number | null>(null);
   
   // Deactivated forms accordion state
   const [showDeactivatedForms, setShowDeactivatedForms] = useState(false);
 
   // Ref for dropdowns
+  const departmentDropdownRef = useRef<HTMLDivElement>(null);
   const yearDropdownRef = useRef<HTMLDivElement>(null);
   const sectionDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -385,11 +435,17 @@ export default function FeedbackPage() {
 
   // Check permissions
   const permissions = (user?.permissions || []).map(p => p.toLowerCase());
+  const roleNamesUpper = (user?.roles || []).map(r => String(r).toUpperCase());
+  const isIQACUser = roleNamesUpper.includes('IQAC');
   const canCreateFeedback = permissions.includes('feedback.create');
   const canReplyFeedback = permissions.includes('feedback.reply');
 
   // Helper function to get available sections based on selected years
   const getAvailableSections = (): ClassOption[] => {
+    if (isIQACUser) {
+      return (classOptions.sections || []).sort((a, b) => (a.display_name || a.label).localeCompare(b.display_name || b.label));
+    }
+
     if (formData.years.length === 0) {
       return classOptions.sections || [];
     }
@@ -416,6 +472,9 @@ export default function FeedbackPage() {
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      if (departmentDropdownRef.current && !departmentDropdownRef.current.contains(event.target as Node)) {
+        setDepartmentDropdownOpen(false);
+      }
       if (yearDropdownRef.current && !yearDropdownRef.current.contains(event.target as Node)) {
         setYearDropdownOpen(false);
       }
@@ -513,8 +572,17 @@ export default function FeedbackPage() {
       if (editingFormId) {
         if (formData.department) {
           setSelectedDepartments([formData.department]);
+          setAllDepartmentsSelected(false);
           fetchClassOptions([formData.department], formData.years);
         }
+        return;
+      }
+
+      if (isIQACUser) {
+        const allDeptIds = departmentData.departments.map(d => d.id);
+        setSelectedDepartments(allDeptIds);
+        setAllDepartmentsSelected(true);
+        fetchClassOptions(undefined);
         return;
       }
 
@@ -522,17 +590,20 @@ export default function FeedbackPage() {
         // For multi-department HODs, default to all departments selected
         const allDeptIds = departmentData.departments.map(d => d.id);
         setSelectedDepartments(allDeptIds);
+        setAllDepartmentsSelected(false);
         // Fetch class options for all departments
         fetchClassOptions(allDeptIds);
       } else {
         // Single department - set to that department
         setSelectedDepartments(activeDepartment ? [activeDepartment.id] : []);
+        setAllDepartmentsSelected(false);
       }
     } else if (!showCreateForm) {
       // Reset when form is closed
       setSelectedDepartments([]);
+      setAllDepartmentsSelected(false);
     }
-  }, [showCreateForm, departmentData, editingFormId, formData.department, formData.years]);
+  }, [showCreateForm, departmentData, editingFormId, formData.department, formData.years, isIQACUser]);
 
   // Fetch class options function (extracted for reuse)
   const fetchClassOptions = async (deptIds?: number[], selectedYears?: number[]) => {
@@ -592,32 +663,37 @@ export default function FeedbackPage() {
       return;
     }
 
-    const deptIds = selectedDepartments.length > 0
-      ? selectedDepartments
-      : activeDepartment
-        ? [activeDepartment.id]
-        : undefined;
+    const deptIds = (isIQACUser && allDepartmentsSelected)
+      ? undefined
+      : selectedDepartments.length > 0
+        ? selectedDepartments
+        : activeDepartment
+          ? [activeDepartment.id]
+          : undefined;
 
     fetchClassOptions(deptIds, formData.years);
-  }, [showCreateForm, canCreateFeedback, formData.target_type, formData.years, selectedDepartments, activeDepartment]);
+  }, [showCreateForm, canCreateFeedback, formData.target_type, formData.years, selectedDepartments, activeDepartment, isIQACUser, allDepartmentsSelected]);
 
   // Fetch subjects by year when creating Subject Feedback
   useEffect(() => {
     const fetchSubjectsByYear = async () => {
+      const iqacSingleDepartmentSelected = isIQACUser && !allDepartmentsSelected && selectedDepartments.length === 1;
+      const iqacYears = formData.years;
+
       if (
         canCreateFeedback && 
         formData.type === 'SUBJECT_FEEDBACK' && 
-        formData.years.length > 0 &&
-        activeDepartment
+        ((isIQACUser && iqacSingleDepartmentSelected && iqacYears.length > 0) || (!isIQACUser && formData.years.length > 0 && activeDepartment))
       ) {
         try {
           setLoadingSubjects(true);
           
           // Fetch subjects for ALL selected years (comma-separated)
-          const yearsParam = formData.years.join(',');
+          const yearsParam = isIQACUser ? iqacYears.join(',') : formData.years.join(',');
+          const previewDepartmentId = isIQACUser ? selectedDepartments[0] : activeDepartment?.id;
           const queryParams = new URLSearchParams({
             years: yearsParam,
-            department_id: activeDepartment.id.toString(),
+            department_id: String(previewDepartmentId),
             preview_only: '1',
             include_electives: '1'
           });
@@ -653,12 +729,15 @@ export default function FeedbackPage() {
         console.log('  formData.type:', formData.type);
         console.log('  formData.years.length:', formData.years.length);
         console.log('  activeDepartment:', activeDepartment);
+        console.log('  isIQACUser:', isIQACUser);
+        console.log('  selectedDepartments:', selectedDepartments);
+        console.log('  allDepartmentsSelected:', allDepartmentsSelected);
         setSubjectsByYear(null);
       }
     };
 
     fetchSubjectsByYear();
-  }, [canCreateFeedback, formData.type, formData.years, formData.sections, activeDepartment]);
+  }, [canCreateFeedback, formData.type, formData.years, formData.sections, activeDepartment, isIQACUser, selectedDepartments, allDepartmentsSelected, classOptions.sections, classOptions.year_sections]);
 
   // Fetch feedback forms for HOD, staff, and students
   useEffect(() => {
@@ -673,11 +752,31 @@ export default function FeedbackPage() {
       const response = await fetchWithAuth('/api/feedback/forms/');
       if (response.ok) {
         const data = await response.json();
-        setFeedbackForms(data);
+        const normalizeQuestions = (questions: any[] = []): Question[] => {
+          return questions.map((q: any, idx: number) => ({
+            id: q.id ?? q.question_id,
+            question_id: q.question_id,
+            question: q.question ?? q.question_text ?? '',
+            question_text: q.question_text,
+            answer_type: q.answer_type,
+            allow_rating: typeof q.allow_rating === 'boolean' ? q.allow_rating : Boolean(q.rating_scale),
+            allow_comment: typeof q.allow_comment === 'boolean' ? q.allow_comment : Boolean(q.comment_required),
+            rating_scale: q.rating_scale ?? null,
+            comment_required: q.comment_required,
+            order: q.order ?? idx + 1,
+          }));
+        };
+
+        const normalizedForms = (data || []).map((form: any) => ({
+          ...form,
+          questions: normalizeQuestions(form.questions || []),
+        }));
+
+        setFeedbackForms(normalizedForms);
         
         // If HOD, fetch response statistics for each form
         if (canCreateFeedback) {
-          fetchAllResponseStatistics(data);
+          fetchAllResponseStatistics(normalizedForms);
         }
       }
     } catch (error) {
@@ -819,6 +918,43 @@ export default function FeedbackPage() {
     }
   };
 
+  const handleExportResponsesExcel = async (formId: number) => {
+    setExportingFormId(formId);
+    try {
+      const response = await fetchWithAuth(`/api/feedback/${formId}/export-excel/`);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to export feedback responses';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData?.detail || errorMessage;
+        } catch {
+          // Keep fallback error message.
+        }
+        throw new Error(errorMessage);
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get('Content-Disposition') || '';
+      const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || `Feedback_${formId}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('[Feedback] Export Excel failed:', error);
+      alert(error?.message || 'Failed to export feedback responses');
+    } finally {
+      setExportingFormId(null);
+    }
+  };
+
   // Get department from user profile (for HOD)
   const getDepartmentId = (): number | null => {
     if (user?.profile && user.profile.department_id) {
@@ -829,9 +965,11 @@ export default function FeedbackPage() {
 
   const handleAddQuestion = () => {
     if (!newQuestion.trim()) return;
+
+    const isIqacStudentMode = isIQACUser && formData.target_type === 'STUDENT';
     
     // Ensure at least one answer method is selected
-    if (!allowRating && !allowComment) {
+    if (!isIqacStudentMode && !allowRating && !allowComment) {
       alert('Please select at least one answer method (Rating or Comment)');
       return;
     }
@@ -839,8 +977,8 @@ export default function FeedbackPage() {
     const question: Question = {
       ui_id: `new-${Date.now()}-${formData.questions.length + 1}`,
       question: newQuestion.trim(),
-      allow_rating: allowRating,
-      allow_comment: allowComment,
+      allow_rating: isIqacStudentMode ? true : allowRating,
+      allow_comment: isIqacStudentMode ? true : allowComment,
       order: formData.questions.length + 1
     };
 
@@ -879,6 +1017,18 @@ export default function FeedbackPage() {
     field: 'allow_rating' | 'allow_comment',
     checked: boolean
   ) => {
+    // For IQAC student feedback creation, keep both response modes enabled.
+    if (isIQACUser && formData.target_type === 'STUDENT') {
+      const forcedQuestions = [...formData.questions];
+      forcedQuestions[index] = {
+        ...forcedQuestions[index],
+        allow_rating: true,
+        allow_comment: true,
+      };
+      setFormData({ ...formData, questions: forcedQuestions });
+      return;
+    }
+
     const updatedQuestions = [...formData.questions];
     const next = { ...updatedQuestions[index], [field]: checked };
 
@@ -967,7 +1117,7 @@ export default function FeedbackPage() {
 
     // Validate department selection for multi-department HODs
     if (departmentData && departmentData.has_multiple_departments) {
-      if (selectedDepartments.length === 0) {
+      if (!allDepartmentsSelected && selectedDepartments.length === 0) {
         setSubmitError('Please select at least one department');
         return;
       }
@@ -985,7 +1135,9 @@ export default function FeedbackPage() {
     try {
       // Determine departments to send
       let departmentsToSend: number[] = [];
-      if (departmentData && departmentData.has_multiple_departments) {
+      if (isIQACUser && allDepartmentsSelected) {
+        departmentsToSend = [];
+      } else if (departmentData && departmentData.has_multiple_departments) {
         // Multi-department HOD - use selected departments
         departmentsToSend = selectedDepartments;
       } else if (activeDepartment) {
@@ -997,6 +1149,8 @@ export default function FeedbackPage() {
         target_type: formData.target_type,
         type: formData.type,
         departments: departmentsToSend,  // Send array of departments
+        department_ids: departmentsToSend,
+        all_departments: isIQACUser && allDepartmentsSelected,
         department: formData.department,
         status: formData.status,
         questions: formData.questions,
@@ -1006,7 +1160,7 @@ export default function FeedbackPage() {
         regulation: formData.target_type === 'STUDENT' ? formData.regulation : null,
         years: formData.target_type === 'STUDENT' ? formData.years : [],
         semesters: formData.target_type === 'STUDENT' ? formData.semesters : [],
-        sections: formData.target_type === 'STUDENT' ? formData.sections : []
+        sections: formData.target_type === 'STUDENT' ? ((isIQACUser && allDepartmentsSelected) ? [] : formData.sections) : []
       };
 
       const endpoint = editingFormId
@@ -1090,7 +1244,29 @@ export default function FeedbackPage() {
         }
       }));
     }
+
+    if (type === 'TEXT' && String(value).trim()) {
+      setCommentValidationErrors(prev => {
+        if (!prev[questionId]) return prev;
+        const next = { ...prev };
+        delete next[questionId];
+        return next;
+      });
+    }
   };
+
+  const getMissingCommentQuestionIds = () => {
+    if (!selectedForm) return [] as number[];
+    const currentResponses = selectedSubject ? currentSubjectResponses : responses;
+    return selectedForm.questions
+      .filter((question) => {
+        const comment = currentResponses[question.id!]?.answer_text;
+        return !comment || !comment.trim();
+      })
+      .map((question) => question.id!);
+  };
+
+  const hasAllMandatoryComments = selectedForm ? getMissingCommentQuestionIds().length === 0 : false;
 
   // Submit feedback response
   const handleSubmitResponse = async () => {
@@ -1101,6 +1277,17 @@ export default function FeedbackPage() {
 
     // Validate all questions are answered appropriately
     const validationErrors: string[] = [];
+
+    const missingCommentIds = getMissingCommentQuestionIds();
+    if (missingCommentIds.length > 0) {
+      const nextErrors: Record<number, boolean> = {};
+      for (const questionId of missingCommentIds) {
+        nextErrors[questionId] = true;
+      }
+      setCommentValidationErrors(nextErrors);
+      setResponseError('Please complete all required fields before submitting');
+      return;
+    }
     
     for (const question of selectedForm.questions) {
       const response = currentResponses[question.id!];
@@ -1112,12 +1299,9 @@ export default function FeedbackPage() {
           validationErrors.push(`Question ${question.id}: Rating is required`);
         }
       } else if (question.allow_comment && !question.allow_rating) {
-        // Only comment required
-        if (!response || !response.answer_text || !response.answer_text.trim()) {
-          validationErrors.push(`Question ${question.id}: Comment is required`);
-        }
+        // Comment already validated above for all questions.
       } else if (question.allow_rating && question.allow_comment) {
-        // Both allowed - rating is required, comment is optional
+        // Both allowed - rating is required.
         if (!response || response.answer_star === undefined) {
           validationErrors.push(`Question ${question.id}: Rating is required`);
         }
@@ -1131,6 +1315,7 @@ export default function FeedbackPage() {
 
     setSubmittingResponse(true);
     setResponseError(null);
+    setCommentValidationErrors({});
 
     try {
       // Prepare payload - teaching_assignment_id goes at top level, not in each response
@@ -1179,22 +1364,26 @@ export default function FeedbackPage() {
 
       // Success
       console.log('Feedback submitted successfully');
+      const submissionStatus = (data?.submission_status || '').toUpperCase();
       
       if (selectedSubject) {
         // For subject feedback, refresh the subject list and go back
         await fetchStudentSubjects(selectedForm.id);
         setSelectedSubject(null);
         setCurrentSubjectResponses({});
+        setCommentValidationErrors({});
         setResponseError(null);
-        // Show success message briefly
-        const successMessage = `Feedback for ${selectedSubject.subject_name} submitted successfully!`;
-        setResponseError(null);
-        // You could add a success state here if needed
+
+        if (submissionStatus === 'SUBMITTED') {
+          setResponseSuccess(true);
+          fetchFeedbackForms();
+        }
       } else {
         // For open feedback, close the modal and show success
         setResponseSuccess(true);
         setSelectedForm(null);
         setResponses({});
+        setCommentValidationErrors({});
         
         // Refresh forms list
         fetchFeedbackForms();
@@ -1218,6 +1407,7 @@ export default function FeedbackPage() {
     setStudentSubjects(null);
     setSelectedSubject(null);
     setCurrentSubjectResponses({});
+    setCommentValidationErrors({});
   };
 
   // Handle department switching for HODs with multiple departments
@@ -1234,7 +1424,7 @@ export default function FeedbackPage() {
         fetchClassOptions();
         
         // Reload subjects if currently viewing subject feedback
-        if (formData.type === 'SUBJECT_FEEDBACK' && formData.years.length > 0) {
+        if (formData.type === 'SUBJECT_FEEDBACK') {
           setSubjectsByYear(null); // Will trigger re-fetch via useEffect
         }
       }
@@ -1382,38 +1572,116 @@ export default function FeedbackPage() {
                         Select Department(s) <span className="text-red-500">*</span>
                       </label>
                     </div>
-                    <div className="space-y-2">
-                      {departmentData.departments.map((dept) => (
-                        <label
-                          key={dept.id}
-                          className="flex items-center gap-3 p-3 bg-white border border-indigo-200 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors"
+                    {isIQACUser ? (
+                      <div className="relative" ref={departmentDropdownRef}>
+                        <button
+                          type="button"
+                          onClick={() => setDepartmentDropdownOpen(!departmentDropdownOpen)}
+                          className="w-full px-4 py-2 text-left border border-indigo-300 rounded-lg bg-white hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center justify-between"
                         >
-                          <input
-                            type="checkbox"
-                            checked={selectedDepartments.includes(dept.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                const newSelected = [...selectedDepartments, dept.id];
-                                setSelectedDepartments(newSelected);
-                                // Reload class options for selected departments
-                                fetchClassOptions(newSelected);
-                              } else {
-                                const newSelected = selectedDepartments.filter(id => id !== dept.id);
-                                setSelectedDepartments(newSelected);
-                                // Reload class options for selected departments
-                                fetchClassOptions(newSelected.length > 0 ? newSelected : undefined);
-                              }
-                            }}
-                            className="w-4 h-4 text-indigo-600 border-indigo-300 rounded focus:ring-indigo-500"
-                          />
-                          <span className="text-sm font-medium text-slate-900">{dept.name}</span>
-                          <span className="text-xs text-slate-500">({dept.code})</span>
-                        </label>
-                      ))}
-                    </div>
-                    {selectedDepartments.length > 0 && (
+                          <span className="text-sm text-slate-700 truncate">
+                            {allDepartmentsSelected
+                              ? 'All Departments'
+                              : selectedDepartments.length === 0
+                                ? 'Select Departments...'
+                                : selectedDepartments
+                                    .map((id) => departmentData.departments.find((dept) => dept.id === id)?.name)
+                                    .filter(Boolean)
+                                    .join(', ')}
+                          </span>
+                          <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform flex-shrink-0 ml-2 ${departmentDropdownOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {departmentDropdownOpen && (
+                          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                            <div className="p-2 space-y-1">
+                              <label className="flex items-center gap-2 p-2 hover:bg-indigo-50 rounded cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={allDepartmentsSelected}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setAllDepartmentsSelected(checked);
+                                    if (checked) {
+                                      const allDeptIds = departmentData.departments.map((dept) => dept.id);
+                                      setSelectedDepartments(allDeptIds);
+                                      setFormData({ ...formData, years: [], sections: [] });
+                                      fetchClassOptions(undefined);
+                                    } else {
+                                      setSelectedDepartments([]);
+                                      fetchClassOptions(undefined);
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                                />
+                                <span className="text-sm font-medium text-slate-900">All Departments</span>
+                              </label>
+
+                              {departmentData.departments.map((dept) => (
+                                <label key={dept.id} className="flex items-center gap-2 p-2 hover:bg-indigo-50 rounded cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedDepartments.includes(dept.id)}
+                                    disabled={allDepartmentsSelected}
+                                    onChange={(e) => {
+                                      setAllDepartmentsSelected(false);
+                                      if (e.target.checked) {
+                                        const newSelected = [...selectedDepartments, dept.id];
+                                        setSelectedDepartments(newSelected);
+                                        fetchClassOptions(newSelected, formData.years);
+                                      } else {
+                                        const newSelected = selectedDepartments.filter((id) => id !== dept.id);
+                                        setSelectedDepartments(newSelected);
+                                        fetchClassOptions(newSelected.length > 0 ? newSelected : undefined, formData.years);
+                                      }
+                                    }}
+                                    className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                                  />
+                                  <span className="text-sm text-slate-900">{dept.name}</span>
+                                  <span className="text-xs text-slate-500">({dept.code})</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {departmentData.departments.map((dept) => (
+                          <label
+                            key={dept.id}
+                            className="flex items-center gap-3 p-3 bg-white border border-indigo-200 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedDepartments.includes(dept.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  const newSelected = [...selectedDepartments, dept.id];
+                                  setSelectedDepartments(newSelected);
+                                  // Reload class options for selected departments
+                                  fetchClassOptions(newSelected, formData.years);
+                                } else {
+                                  const newSelected = selectedDepartments.filter(id => id !== dept.id);
+                                  setSelectedDepartments(newSelected);
+                                  // Reload class options for selected departments
+                                  fetchClassOptions(newSelected.length > 0 ? newSelected : undefined, formData.years);
+                                }
+                              }}
+                              className="w-4 h-4 text-indigo-600 border-indigo-300 rounded focus:ring-indigo-500"
+                            />
+                            <span className="text-sm font-medium text-slate-900">{dept.name}</span>
+                            <span className="text-xs text-slate-500">({dept.code})</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+
+                    {(allDepartmentsSelected || selectedDepartments.length > 0) && (
                       <p className="text-xs text-indigo-700 mt-3">
-                        Selected: <span className="font-semibold">{selectedDepartments.length} department(s)</span>
+                        {allDepartmentsSelected
+                          ? 'Selected: All Departments'
+                          : <><span>Selected: </span><span className="font-semibold">{selectedDepartments.length} department(s)</span></>}
                       </p>
                     )}
                   </div>
@@ -1451,7 +1719,20 @@ export default function FeedbackPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, target_type: 'STUDENT', type: '' })}
+                      onClick={() => {
+                        if (isIQACUser && !editingFormId) {
+                          setAllowRating(true);
+                          setAllowComment(true);
+                          setFormData({
+                            ...formData,
+                            target_type: 'STUDENT',
+                            type: '',
+                            questions: buildIqacStudentDefaultQuestions(),
+                          });
+                          return;
+                        }
+                        setFormData({ ...formData, target_type: 'STUDENT', type: '' });
+                      }}
                       className={`p-4 rounded-lg border-2 transition-all ${
                         formData.target_type === 'STUDENT'
                           ? 'border-indigo-600 bg-indigo-50'
@@ -1529,7 +1810,7 @@ export default function FeedbackPage() {
 
                     {/* Form fields */}
                     {!loadingClassOptions && !classOptionsError && (
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Years - Dropdown with checkboxes */}
                         <div>
                           <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -1594,20 +1875,24 @@ export default function FeedbackPage() {
                             Sections (Optional)
                           </label>
                           <p className="text-xs text-slate-500 mb-2">
-                            If not selected, feedback applies to all sections in the selected year(s).
+                            {isIQACUser
+                              ? 'If not selected, feedback applies to all sections in the selected department(s) and year(s).'
+                              : 'If not selected, feedback applies to all sections in the selected year(s).'}
                           </p>
                           <div className="relative" ref={sectionDropdownRef}>
                             <button
                               type="button"
                               onClick={() => setSectionDropdownOpen(!sectionDropdownOpen)}
-                              disabled={formData.years.length === 0}
+                              disabled={(isIQACUser && allDepartmentsSelected) || formData.years.length === 0}
                               className={`w-full px-4 py-2 text-left border border-slate-300 rounded-lg bg-white hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center justify-between ${
-                                formData.years.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                                ((isIQACUser && allDepartmentsSelected) || formData.years.length === 0) ? 'opacity-50 cursor-not-allowed' : ''
                               }`}
                             >
                               <span className="text-sm text-slate-700 truncate">
-                                {formData.years.length === 0
-                                  ? 'Select a year first...'
+                                {(isIQACUser && allDepartmentsSelected)
+                                  ? 'All Departments selected (sections disabled)'
+                                  : (formData.years.length === 0)
+                                  ? 'Select year(s) first...'
                                   : formData.sections.length === 0
                                   ? 'Select Sections...'
                                       : formData.sections
@@ -1621,7 +1906,7 @@ export default function FeedbackPage() {
                               <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform flex-shrink-0 ml-2 ${sectionDropdownOpen ? 'rotate-180' : ''}`} />
                             </button>
 
-                            {sectionDropdownOpen && formData.years.length > 0 && (
+                            {sectionDropdownOpen && !((isIQACUser && allDepartmentsSelected) || formData.years.length === 0) && (
                               <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                                 <div className="p-2 space-y-1">
                                   {getAvailableSections().map((sec) => (
@@ -1651,7 +1936,7 @@ export default function FeedbackPage() {
                 )}
 
                 {/* Subjects Preview (for Subject Feedback) */}
-                {formData.type === 'SUBJECT_FEEDBACK' && formData.years.length > 0 && (
+                {formData.type === 'SUBJECT_FEEDBACK' && ((!isIQACUser && formData.years.length > 0) || (isIQACUser && !allDepartmentsSelected && selectedDepartments.length === 1)) && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <h3 className="text-base font-semibold text-slate-800 mb-2 flex items-center gap-2">
                       <FileText className="w-4 h-4 text-blue-600" />
@@ -1852,6 +2137,7 @@ export default function FeedbackPage() {
                                   <input
                                     type="checkbox"
                                     checked={q.allow_rating}
+                                    disabled={isIQACUser && formData.target_type === 'STUDENT'}
                                     onChange={(e) => handleUpdateQuestionType(index, 'allow_rating', e.target.checked)}
                                     className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-2 focus:ring-indigo-500"
                                   />
@@ -1864,6 +2150,7 @@ export default function FeedbackPage() {
                                   <input
                                     type="checkbox"
                                     checked={q.allow_comment}
+                                    disabled={isIQACUser && formData.target_type === 'STUDENT'}
                                     onChange={(e) => handleUpdateQuestionType(index, 'allow_comment', e.target.checked)}
                                     className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-2 focus:ring-indigo-500"
                                   />
@@ -1906,6 +2193,7 @@ export default function FeedbackPage() {
                             <input
                               type="checkbox"
                               checked={allowRating}
+                              disabled={isIQACUser && formData.target_type === 'STUDENT'}
                               onChange={(e) => setAllowRating(e.target.checked)}
                               className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-2 focus:ring-indigo-500"
                             />
@@ -1918,6 +2206,7 @@ export default function FeedbackPage() {
                             <input
                               type="checkbox"
                               checked={allowComment}
+                              disabled={isIQACUser && formData.target_type === 'STUDENT'}
                               onChange={(e) => setAllowComment(e.target.checked)}
                               className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-2 focus:ring-indigo-500"
                             />
@@ -1929,7 +2218,7 @@ export default function FeedbackPage() {
                           <button
                             type="button"
                             onClick={handleAddQuestion}
-                            disabled={!newQuestion.trim() || (!allowRating && !allowComment)}
+                            disabled={!newQuestion.trim() || (!(isIQACUser && formData.target_type === 'STUDENT') && !allowRating && !allowComment)}
                             className="ml-auto px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             Add Question
@@ -2162,6 +2451,22 @@ export default function FeedbackPage() {
                                       </button>
                                     )}
 
+                                    {/* Export Responses (published forms only) */}
+                                    {!isDraft && (
+                                      <button
+                                        onClick={() => handleExportResponsesExcel(form.id)}
+                                        disabled={exportingFormId === form.id}
+                                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {exportingFormId === form.id ? (
+                                          <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                          <Download className="w-4 h-4" />
+                                        )}
+                                        {exportingFormId === form.id ? 'Exporting...' : 'Export'}
+                                      </button>
+                                    )}
+
                                     {/* For deactivated forms, show View Responses but with muted styling */}
                                     {!isDraft && !form.active && (
                                       <button
@@ -2297,6 +2602,19 @@ export default function FeedbackPage() {
                                           )}
                                           {loadingResponseView ? 'Loading...' : 'View Responses'}
                                         </button>
+
+                                          <button
+                                            onClick={() => handleExportResponsesExcel(form.id)}
+                                            disabled={exportingFormId === form.id}
+                                            className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          >
+                                            {exportingFormId === form.id ? (
+                                              <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                              <Download className="w-4 h-4" />
+                                            )}
+                                            {exportingFormId === form.id ? 'Exporting...' : 'Export'}
+                                          </button>
 
                                         <button
                                           onClick={() => handleToggleActive(form.id)}
@@ -2644,7 +2962,7 @@ export default function FeedbackPage() {
         {responseSuccess && (
           <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
             <CheckCircle className="w-8 h-8 text-green-600" />
-            <span className="text-green-800 font-medium">Feedback submitted successfully!</span>
+            <span className="text-green-800 font-medium">Feedback Submitted Successfully</span>
           </div>
         )}
 
@@ -2681,6 +2999,7 @@ export default function FeedbackPage() {
                       if (!form.is_submitted) {
                         console.log('Opening feedback form:', form);
                         setSelectedForm(form);
+                        setCommentValidationErrors({});
                       }
                     }}
                   >
@@ -2696,6 +3015,11 @@ export default function FeedbackPage() {
                               : 'bg-blue-100 text-blue-800'
                           }`}>
                             {form.type === 'SUBJECT_FEEDBACK' ? 'About Subjects' : 'General'}
+                          </span>
+                          <span className={`text-xs px-2 py-1 rounded-full ${
+                            form.is_submitted ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {form.is_submitted ? 'Responded' : 'Pending'}
                           </span>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-slate-600">
@@ -2722,13 +3046,14 @@ export default function FeedbackPage() {
                       {form.is_submitted ? (
                         <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
                           <CheckCircle className="w-5 h-5" />
-                          <span className="font-medium">Submitted</span>
+                          <span className="font-medium">Responded</span>
                         </div>
                       ) : (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedForm(form);
+                            setCommentValidationErrors({});
                           }}
                           className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
                         >
@@ -2752,7 +3077,10 @@ export default function FeedbackPage() {
                   {/* Back button when viewing subject questions */}
                   {selectedSubject && (
                     <button
-                      onClick={() => setSelectedSubject(null)}
+                      onClick={() => {
+                        setSelectedSubject(null);
+                        setCommentValidationErrors({});
+                      }}
                       className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
                       title="Back to subjects"
                     >
@@ -2818,9 +3146,9 @@ export default function FeedbackPage() {
                             </div>
                             <div className="text-right">
                               <p className="text-2xl font-bold text-indigo-900">
-                                {studentSubjects.completed_subjects} / {studentSubjects.total_subjects}
+                                {studentSubjects.completed_subjects} / {studentSubjects.total_subjects} Subjects Completed
                               </p>
-                              <p className="text-sm text-indigo-700">Completed</p>
+                              <p className="text-sm text-indigo-700">Completion Status</p>
                             </div>
                           </div>
                         </div>
@@ -2833,6 +3161,7 @@ export default function FeedbackPage() {
                               onClick={() => {
                                 setSelectedSubject(subject);
                                 setCurrentSubjectResponses({});
+                                setCommentValidationErrors({});
                               }}
                               className={`p-4 rounded-lg border-2 transition-all text-left ${
                                 subject.is_completed
@@ -2945,21 +3274,25 @@ export default function FeedbackPage() {
                       )}
 
                       {/* Text Comment Input */}
-                      {question.allow_comment && (
-                        <div>
-                          <p className="text-sm font-medium text-slate-700 mb-2">
-                            Comment {question.allow_rating && <span className="text-slate-500">(Optional)</span>}
-                          </p>
-                          <textarea
-                            value={(selectedSubject ? currentSubjectResponses : responses)[question.id!]?.answer_text || ''}
-                            onChange={(e) => handleResponseChange(question.id!, 'TEXT', e.target.value)}
-                            onInput={handleTextareaInput}
-                            placeholder={question.allow_rating ? "Add your comments here (optional)..." : "Type your response here..."}
-                            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none overflow-hidden"
-                            rows={4}
-                          />
-                        </div>
-                      )}
+                      <div>
+                        <p className="text-sm font-medium text-slate-700 mb-2">
+                          Comment <span className="text-red-500">*</span>
+                        </p>
+                        <textarea
+                          value={(selectedSubject ? currentSubjectResponses : responses)[question.id!]?.answer_text || ''}
+                          onChange={(e) => handleResponseChange(question.id!, 'TEXT', e.target.value)}
+                          onInput={handleTextareaInput}
+                          placeholder="Add your comments here..."
+                          required
+                          className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 resize-none overflow-hidden ${
+                            commentValidationErrors[question.id!] ? 'border-red-400 focus:ring-red-500' : 'border-slate-300 focus:ring-indigo-500'
+                          }`}
+                          rows={4}
+                        />
+                        {commentValidationErrors[question.id!] && (
+                          <p className="text-xs text-red-600 mt-2">Comment is required</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2969,7 +3302,7 @@ export default function FeedbackPage() {
                   <div className="flex items-center gap-3 pt-4 border-t border-slate-200">
                     <button
                       onClick={handleSubmitResponse}
-                      disabled={submittingResponse}
+                      disabled={submittingResponse || !hasAllMandatoryComments}
                       className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md font-medium"
                     >
                       {submittingResponse ? (
@@ -2985,7 +3318,10 @@ export default function FeedbackPage() {
                       )}
                     </button>
                     <button
-                      onClick={selectedSubject ? () => setSelectedSubject(null) : handleCloseForm}
+                      onClick={selectedSubject ? () => {
+                        setSelectedSubject(null);
+                        setCommentValidationErrors({});
+                      } : handleCloseForm}
                       disabled={submittingResponse}
                       className="px-6 py-3 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors disabled:opacity-50"
                     >
@@ -3059,7 +3395,7 @@ export default function FeedbackPage() {
               <Users className="w-5 h-5 text-orange-500" />
             </div>
             <p className="text-3xl font-bold text-slate-800">
-              {canCreateFeedback ? 'HOD' : canReplyFeedback ? user?.profile_type || 'User' : 'Viewer'}
+              {(user as any)?.role || (isIQACUser ? 'IQAC' : canCreateFeedback ? 'HOD' : canReplyFeedback ? (user?.profile_type || 'User') : 'Viewer')}
             </p>
             <p className="text-sm text-slate-500 mt-1">Current access level</p>
           </div>

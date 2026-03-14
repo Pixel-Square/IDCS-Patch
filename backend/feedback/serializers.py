@@ -1,11 +1,106 @@
 from rest_framework import serializers
 from django.db import transaction
 from django.db.models import Q
-from .models import FeedbackForm, FeedbackQuestion, FeedbackResponse
+from .models import FeedbackForm, FeedbackQuestion, FeedbackResponse, FeedbackFormSubmission
 from academics.models import Department
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
+
+
+def get_subject_feedback_completion(feedback_form, user):
+    """Return mapped-subject completion counts for a student in a subject feedback form."""
+    from academics.models import StudentProfile, TeachingAssignment
+    from curriculum.models import ElectiveChoice
+
+    try:
+        student_profile = StudentProfile.objects.get(user=user)
+        section = student_profile.section
+        if not section:
+            return {'total_subjects': 0, 'responded_subjects': 0, 'all_completed': False}
+
+        batch = section.batch
+        batch_regulation = batch.regulation if batch else None
+        regulation_code = getattr(batch_regulation, 'code', None)
+        regulation_active_semester_id = getattr(batch_regulation, 'current_active_semester_id', None) if batch_regulation else None
+        effective_semester_id = regulation_active_semester_id or section.semester_id
+
+        all_section_tas = TeachingAssignment.objects.filter(
+            section=section,
+            academic_year__is_active=True,
+            is_active=True,
+        )
+
+        if regulation_code:
+            all_section_tas = all_section_tas.filter(
+                Q(curriculum_row__regulation=regulation_code)
+                | Q(elective_subject__regulation=regulation_code)
+                | Q(curriculum_row__isnull=True, elective_subject__isnull=True)
+            )
+
+        if effective_semester_id:
+            all_section_tas = all_section_tas.filter(
+                Q(curriculum_row__semester_id=effective_semester_id)
+                | Q(elective_subject__semester_id=effective_semester_id)
+                | Q(section__semester_id=effective_semester_id)
+            )
+
+        all_section_tas = all_section_tas.select_related('elective_subject')
+
+        student_elective_ids = set(
+            ElectiveChoice.objects.filter(
+                student=student_profile,
+                academic_year__is_active=True,
+                is_active=True,
+            ).filter(
+                Q(elective_subject__regulation=regulation_code) if regulation_code else Q()
+            ).filter(
+                Q(elective_subject__semester_id=effective_semester_id) if effective_semester_id else Q()
+            ).values_list('elective_subject_id', flat=True)
+        )
+
+        eligible_assignment_ids = set()
+        section_elective_ids = set()
+        for ta in all_section_tas:
+            if ta.elective_subject_id:
+                section_elective_ids.add(ta.elective_subject_id)
+                if ta.elective_subject_id in student_elective_ids:
+                    eligible_assignment_ids.add(ta.id)
+            else:
+                eligible_assignment_ids.add(ta.id)
+
+        if student_elective_ids:
+            missing_elective_ids = student_elective_ids - section_elective_ids
+            if missing_elective_ids:
+                fallback_tas = TeachingAssignment.objects.filter(
+                    academic_year__is_active=True,
+                    is_active=True,
+                    elective_subject_id__in=missing_elective_ids,
+                )
+                if regulation_code:
+                    fallback_tas = fallback_tas.filter(elective_subject__regulation=regulation_code)
+                if effective_semester_id:
+                    fallback_tas = fallback_tas.filter(elective_subject__semester_id=effective_semester_id)
+                eligible_assignment_ids.update(fallback_tas.values_list('id', flat=True))
+
+        total_subjects = len(eligible_assignment_ids)
+        responded_subjects = 0
+        if total_subjects > 0:
+            responded_subjects = FeedbackResponse.objects.filter(
+                feedback_form=feedback_form,
+                user=user,
+                teaching_assignment_id__in=eligible_assignment_ids,
+            ).values('teaching_assignment_id').distinct().count()
+
+        return {
+            'total_subjects': total_subjects,
+            'responded_subjects': responded_subjects,
+            'all_completed': total_subjects > 0 and responded_subjects >= total_subjects,
+        }
+    except StudentProfile.DoesNotExist:
+        return {'total_subjects': 0, 'responded_subjects': 0, 'all_completed': False}
+    except Exception:
+        return {'total_subjects': 0, 'responded_subjects': 0, 'all_completed': False}
 
 
 class FeedbackQuestionSerializer(serializers.ModelSerializer):
@@ -40,7 +135,7 @@ class FeedbackQuestionSerializer(serializers.ModelSerializer):
 class FeedbackFormSerializer(serializers.ModelSerializer):
     """Serializer for FeedbackForm with nested questions."""
     
-    questions = FeedbackQuestionSerializer(many=True, read_only=True)
+    questions = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     
     # Class information fields (legacy)
@@ -70,6 +165,29 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
             'target_display', 'context_display', 'class_context_display', 'is_submitted'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+    def get_questions(self, obj):
+        """Return role-appropriate question payload.
+
+        - Creator-facing flows (HOD/IQAC edit/create views): full question shape.
+        - Staff/Student response flows: minimal neutral shape with no origin metadata.
+        """
+        request = self.context.get('request')
+        questions_qs = obj.questions.all().order_by('order', 'id')
+
+        is_creator_view = bool(request and request.user and request.user.is_authenticated and obj.created_by_id == request.user.id)
+        if is_creator_view:
+            return FeedbackQuestionSerializer(questions_qs, many=True).data
+
+        return [
+            {
+                'question_id': q.id,
+                'question_text': q.question,
+                'rating_scale': '1-5' if q.allow_rating else None,
+                'comment_required': bool(q.allow_comment),
+            }
+            for q in questions_qs
+        ]
 
     def _get_section_display_entries(self, obj):
         """Build unique and ordered section display entries: Dept - Yx - Section A."""
@@ -274,105 +392,17 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
         
         # For SUBJECT_FEEDBACK, check if all subjects are completed
         elif obj.type == 'SUBJECT_FEEDBACK':
-            # Get student's teaching assignments
             try:
-                from academics.models import StudentProfile, TeachingAssignment, AcademicYear
-                from curriculum.models import ElectiveChoice
-                
-                student_profile = StudentProfile.objects.get(user=request.user)
-                section = student_profile.section
-                
-                if not section:
-                    return False
-
-                batch = section.batch
-                batch_regulation = batch.regulation if batch else None
-                regulation_code = getattr(batch_regulation, 'code', None)
-                regulation_active_semester_id = getattr(batch_regulation, 'current_active_semester_id', None) if batch_regulation else None
-                effective_semester_id = regulation_active_semester_id or section.semester_id
-                
-                current_ay = AcademicYear.objects.filter(is_active=True).first()
-                
-                # Get all teaching assignments for student's section
-                all_section_tas = TeachingAssignment.objects.filter(
-                    section=section,
-                    academic_year__is_active=True,
-                    is_active=True
-                )
-
-                if regulation_code:
-                    all_section_tas = all_section_tas.filter(
-                        Q(curriculum_row__regulation=regulation_code)
-                        | Q(elective_subject__regulation=regulation_code)
-                        | Q(curriculum_row__isnull=True, elective_subject__isnull=True)
-                    )
-
-                if effective_semester_id:
-                    all_section_tas = all_section_tas.filter(
-                        Q(curriculum_row__semester_id=effective_semester_id)
-                        | Q(elective_subject__semester_id=effective_semester_id)
-                        | Q(section__semester_id=effective_semester_id)
-                    )
-                
-                # Get student's elective choices
-                student_elective_ids = set(
-                    ElectiveChoice.objects.filter(
-                        student=student_profile,
-                        academic_year=current_ay,
-                        is_active=True
-                    ).filter(
-                        Q(elective_subject__regulation=regulation_code) if regulation_code else Q()
-                    ).filter(
-                        Q(elective_subject__semester_id=effective_semester_id) if effective_semester_id else Q()
-                    ).values_list('elective_subject_id', flat=True)
-                )
-                
-                # Count subjects student should complete:
-                # Core subjects + student's chosen electives
-                total_assignments = 0
-                for ta in all_section_tas:
-                    is_elective = ta.elective_subject is not None
-                    if is_elective:
-                        # Only count if student chose this elective
-                        if ta.elective_subject.id in student_elective_ids:
-                            total_assignments += 1
-                    else:
-                        # Core subject - always count
-                        total_assignments += 1
-                
-                # Also check for electives taught department-wide (not in section)
-                if student_elective_ids:
-                    section_elective_ids = set(
-                        all_section_tas.filter(elective_subject__isnull=False)
-                        .values_list('elective_subject_id', flat=True)
-                    )
-                    missing_elective_ids = student_elective_ids - section_elective_ids
-                    total_assignments += len(missing_elective_ids)
-                
-                print(f"[is_submitted] Total assignments for student: {total_assignments}")
-                
-                if total_assignments == 0:
-                    # No teaching assignments, so nothing to submit
-                    return False
-                
-                # Count unique teaching assignments the student has submitted feedback for
-                completed_assignments = FeedbackResponse.objects.filter(
+                tracking = FeedbackFormSubmission.objects.filter(
                     feedback_form=obj,
                     user=request.user,
-                    teaching_assignment__isnull=False
-                ).values('teaching_assignment_id').distinct().count()
-                
-                # Debug logging
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug(f"[is_submitted] Form #{obj.id}, User: {request.user.username}, "
-                           f"Completed: {completed_assignments}/{total_assignments}")
-                
-                # Return True only if all subjects are completed
-                return completed_assignments >= total_assignments
-                
-            except StudentProfile.DoesNotExist:
-                return False
+                    submission_status='SUBMITTED',
+                ).first()
+                if tracking:
+                    return True
+
+                completion = get_subject_feedback_completion(obj, request.user)
+                return completion['all_completed']
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -556,6 +586,11 @@ class FeedbackSubmissionSerializer(serializers.Serializer):
             allow_comment = question_info['allow_comment']
             answer_star = response.get('answer_star')
             answer_text = response.get('answer_text')
+
+            # Comment is mandatory for every question across all feedback forms.
+            if not answer_text or not str(answer_text).strip():
+                errors.append('Comment is mandatory for all feedback questions.')
+                continue
             
             # Validate based on what's allowed
             if allow_rating and not allow_comment:
@@ -566,15 +601,13 @@ class FeedbackSubmissionSerializer(serializers.Serializer):
                     errors.append(f'Question {question_id}: Star rating must be between 1 and 5')
             elif allow_comment and not allow_rating:
                 # Only comment allowed
-                if not answer_text or not str(answer_text).strip():
-                    errors.append(f'Question {question_id} requires a text answer')
+                pass
             elif allow_rating and allow_comment:
-                # Both allowed - rating is required, comment is optional
+                # Both allowed - rating and comment are required.
                 if answer_star is None:
                     errors.append(f'Question {question_id} requires a star rating (1-5)')
                 elif not isinstance(answer_star, int) or answer_star < 1 or answer_star > 5:
                     errors.append(f'Question {question_id}: Star rating must be between 1 and 5')
-                # Comment is optional, so no validation needed
         
         if errors:
             raise serializers.ValidationError({
@@ -607,7 +640,7 @@ class FeedbackSubmissionSerializer(serializers.Serializer):
                     user=user,
                     question_id=response_data['question'],
                     answer_star=response_data.get('answer_star'),
-                    answer_text=response_data.get('answer_text', ''),
+                    answer_text=str(response_data.get('answer_text', '')).strip(),
                     teaching_assignment=teaching_assignment
                 )
         
