@@ -449,7 +449,8 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
   useEffect(() => {
     if (!subjectId) return;
     try {
-      const sk = `${assessmentKey}_selected_btls_${subjectId}`;
+      const taSuffix = teachingAssignmentId == null ? '' : `_ta_${teachingAssignmentId}`;
+      const sk = `${assessmentKey}_selected_btls_${subjectId}${taSuffix}`;
       lsSet(sk, selectedBtls);
     } catch {}
 
@@ -471,7 +472,7 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
       cancelled = true;
       clearTimeout(tid);
     };
-  }, [selectedBtls, subjectId, sheet, key, assessmentKey]);
+  }, [selectedBtls, subjectId, sheet, key, assessmentKey, teachingAssignmentId]);
 
   useEffect(() => {
     if (!subjectId) return;
@@ -556,7 +557,8 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
           const next = draftBtls.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n));
           setSelectedBtls(next);
           try {
-            const sk = `${assessmentKey}_selected_btls_${subjectId}`;
+            const taSuffix = teachingAssignmentId == null ? '' : `_ta_${teachingAssignmentId}`;
+            const sk = `${assessmentKey}_selected_btls_${subjectId}${taSuffix}`;
             lsSet(sk, next);
           } catch {
             // ignore
@@ -570,7 +572,7 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
     return () => {
       mounted = false;
     };
-  }, [subjectId, masterTermLabel, key, assessmentKey, isReview, markLock?.exists]);
+  }, [subjectId, masterTermLabel, key, assessmentKey, isReview, markLock?.exists, teachingAssignmentId]);
 
   // Mark Manager workflow sync: keep local sheet lock state in sync with server lock/approval
   useEffect(() => {

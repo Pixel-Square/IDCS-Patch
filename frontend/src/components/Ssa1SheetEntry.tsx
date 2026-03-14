@@ -442,7 +442,8 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     if (!subjectId) return;
     if (!draftLoadedRef.current) return;
     try {
-      const sk = `${assessmentKey}_selected_btls_${subjectId}`;
+      const taSuffix = teachingAssignmentId == null ? '' : `_ta_${teachingAssignmentId}`;
+      const sk = `${assessmentKey}_selected_btls_${subjectId}${taSuffix}`;
       lsSet(sk, selectedBtls);
     } catch {}
 
@@ -463,7 +464,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
       cancelled = true;
       clearTimeout(tid);
     };
-  }, [selectedBtls, subjectId, sheet, assessmentKey, key]);
+  }, [selectedBtls, subjectId, sheet, assessmentKey, key, teachingAssignmentId]);
 
   useEffect(() => {
     if (!subjectId) return;
@@ -538,7 +539,8 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
         if (Array.isArray(draftBtls)) {
           setSelectedBtls(draftBtls.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)));
           try {
-            const sk = `${assessmentKey}_selected_btls_${subjectId}`;
+            const taSuffix = teachingAssignmentId == null ? '' : `_ta_${teachingAssignmentId}`;
+            const sk = `${assessmentKey}_selected_btls_${subjectId}${taSuffix}`;
             lsSet(sk, draftBtls.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)));
           } catch {
             // ignore
@@ -552,7 +554,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     return () => {
       mounted = false;
     };
-  }, [subjectId, masterTermLabel, assessmentKey, key, isReview, markLock?.exists]);
+  }, [subjectId, masterTermLabel, assessmentKey, key, isReview, markLock?.exists, teachingAssignmentId]);
 
   // Mark Manager workflow sync: keep local sheet lock state in sync with server lock/approval
   useEffect(() => {
