@@ -63,6 +63,12 @@ function normalizeMobileForUi(raw: unknown): string {
   return normalizeMobileForApi(s) || s;
 }
 
+function getDisplayName(me: Me | null | undefined): string {
+  const first = String(me?.first_name || '').trim();
+  const last = String(me?.last_name || '').trim();
+  return String(`${first} ${last}`).trim();
+}
+
 export default function ProfilePage({ user: initialUser }: { user?: Me | null }) {
   const [user, setUser] = useState<Me | null | undefined>(initialUser === undefined ? null : initialUser);
   const [loading, setLoading] = useState(initialUser ? false : true);
@@ -99,13 +105,11 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
   const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [changePasswordSuccess, setChangePasswordSuccess] = useState(false);
 
-  // One-time edit states for name + email
-  const [editingNameEmail, setEditingNameEmail] = useState(false);
-  const [nameDraft, setNameDraft] = useState({ first: '', last: '' });
+  // One-time edit state for name using a single source of truth for UI sync.
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [profile, setProfile] = useState({ name: '', email: '', nameEdited: false });
   const [nameEmailEditError, setNameEmailEditError] = useState<string | null>(null);
   const [nameEmailSaving, setNameEmailSaving] = useState(false);
-  const [nameEmailEditLocked, setNameEmailEditLocked] = useState(false);
-  const [emailDraft, setEmailDraft] = useState('');
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [avatarCandidateIndex, setAvatarCandidateIndex] = useState(0);
@@ -195,18 +199,13 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
 
   useEffect(() => {
     const edited = Boolean((user as any)?.profileEdited ?? (user as any)?.name_email_edited);
-    setNameEmailEditLocked(edited);
-    if (edited) {
-      setEditingNameEmail(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    setNameDraft({
-      first: user?.first_name || '',
-      last: user?.last_name || '',
+    setProfile({
+      name: getDisplayName(user),
+      email: String(user?.email || ''),
+      nameEdited: edited,
     });
-  }, [user?.first_name, user?.last_name]);
+    if (edited) setIsEditingName(false);
+  }, [user]);
 
   if (loading) return (
     <DashboardLayout>
@@ -478,16 +477,22 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
     }
   }
 
-  async function handleSaveNameEmail() {
+  async function handleSaveName() {
     setNameEmailEditError(null);
-    const firstName = String(nameDraft.first || '').trim();
-    const lastName = String(nameDraft.last || '').trim();
-    const email = String(emailDraft || '').trim();
+    const fullName = String(profile.name || '').trim();
+    const parts = fullName.split(/\s+/).filter(Boolean);
+    const firstName = String(parts.shift() || '').trim();
+    const lastName = String(parts.join(' ')).trim();
 
     const confirmEdit = window.confirm(
-      'This is a one-time edit. After saving you cannot edit your Name or Email again. Continue?'
+      'This is a one-time edit. After saving you cannot change your name again.'
     );
     if (!confirmEdit) return;
+
+    if (!firstName) {
+      setNameEmailEditError('Name cannot be empty.');
+      return;
+    }
 
     try {
       setNameEmailSaving(true);
@@ -497,7 +502,6 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
         body: JSON.stringify({
           first_name: firstName,
           last_name: lastName,
-          email,
           profileEdited: true,
         })
       });
@@ -511,11 +515,16 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
       console.debug('[profile] uploaded avatar, API returned profile_image:', (updated as any)?.profile_image || (updated as any)?.profile?.profile_image || '');
       const normalized = {
         ...updated,
+        profileEdited: true,
         roles: Array.isArray(updated.roles) ? updated.roles.map((role: any) => (typeof role === 'string' ? role : role.name)) : [],
       } as Me;
       setUser(normalized);
-      setEditingNameEmail(false);
-      setNameEmailEditLocked(true);
+      setProfile({
+        name: getDisplayName(normalized),
+        email: String(normalized.email || ''),
+        nameEdited: true,
+      });
+      setIsEditingName(false);
     } catch (e: any) {
       setNameEmailEditError(String(e?.message || e || 'Failed to update profile'));
     } finally {
@@ -523,23 +532,16 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
     }
   }
 
-  function startEditingNameEmail() {
-    if (nameEmailEditLocked) return;
-    setNameDraft({
-      first: user?.first_name || '',
-      last: user?.last_name || '',
-    });
-    setEmailDraft(user?.email || '');
-    setEditingNameEmail(true);
+  function startEditingName() {
+    if (profile.nameEdited) return;
+    setProfile((prev) => ({ ...prev, name: getDisplayName(user) }));
+    setIsEditingName(true);
     setNameEmailEditError(null);
   }
 
-  function cancelEditingNameEmail() {
-    setNameDraft({
-      first: user?.first_name || '',
-      last: user?.last_name || '',
-    });
-    setEditingNameEmail(false);
+  function cancelEditingName() {
+    setProfile((prev) => ({ ...prev, name: getDisplayName(user) }));
+    setIsEditingName(false);
     setNameEmailEditError(null);
   }
 
@@ -690,38 +692,28 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold text-gray-500 mb-1">Name</div>
-                  {editingNameEmail ? (
+                  {isEditingName ? (
                     <div className="space-y-2">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-gray-500 w-20">Name:</span>
                           <span className="text-gray-900 font-medium">
-                            {String(`${nameDraft.first || ''} ${nameDraft.last || ''}`).trim() || '—'}
+                            {profile.name || '—'}
                           </span>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          value={nameDraft.first}
-                          onChange={(e) => setNameDraft((prev) => ({ ...prev, first: e.target.value }))}
-                          placeholder="First Name"
-                          className="w-full px-2 py-1 border rounded text-sm"
-                          disabled={nameEmailSaving}
-                        />
-                        <input
-                          type="text"
-                          value={nameDraft.last}
-                          onChange={(e) => setNameDraft((prev) => ({ ...prev, last: e.target.value }))}
-                          placeholder="Last Name"
-                          className="w-full px-2 py-1 border rounded text-sm"
-                          disabled={nameEmailSaving}
-                        />
-                      </div>
+                      <input
+                        type="text"
+                        value={profile.name}
+                        onChange={(e) => setProfile((prev) => ({ ...prev, name: e.target.value }))}
+                        placeholder="Name"
+                        className="w-full px-2 py-1 border rounded text-sm"
+                        disabled={!isEditingName || nameEmailSaving}
+                      />
                       {nameEmailEditError && <div className="text-xs text-red-600">{nameEmailEditError}</div>}
                       <div className="flex gap-2">
                         <button
-                          onClick={handleSaveNameEmail}
+                          onClick={handleSaveName}
                           disabled={nameEmailSaving}
                           className="flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
                         >
@@ -729,7 +721,7 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                           {nameEmailSaving ? 'Saving...' : 'Save'}
                         </button>
                         <button
-                          onClick={cancelEditingNameEmail}
+                          onClick={cancelEditingName}
                           disabled={nameEmailSaving}
                           className="flex items-center gap-1 px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300"
                         >
@@ -744,13 +736,21 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-gray-500 w-20">Name:</span>
                           <span className="text-gray-900 font-medium">
-                            {String(`${nameDraft.first || ''} ${nameDraft.last || ''}`).trim() || '—'}
+                            {profile.name || '—'}
                           </span>
                         </div>
                       </div>
-                      {!nameEmailEditLocked && (
+                      <input
+                        type="text"
+                        value={profile.name}
+                        onChange={(e) => setProfile((prev) => ({ ...prev, name: e.target.value }))}
+                        placeholder="Name"
+                        className="mt-2 w-full px-2 py-1 border rounded text-sm"
+                        disabled={!isEditingName || nameEmailSaving}
+                      />
+                      {!profile.nameEdited && (
                         <button
-                          onClick={startEditingNameEmail}
+                          onClick={startEditingName}
                           className="mt-2 flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
                         >
                           <Edit2 className="w-3 h-3" />
@@ -771,50 +771,7 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold text-gray-500 mb-1">Email</div>
-                  {editingNameEmail ? (
-                    <div className="space-y-2">
-                      <input
-                        type="email"
-                        value={emailDraft}
-                        onChange={(e) => setEmailDraft(e.target.value)}
-                        placeholder="Email"
-                        className="w-full px-2 py-1 border rounded text-sm"
-                        disabled={nameEmailSaving}
-                      />
-                      {nameEmailEditError && <div className="text-xs text-red-600">{nameEmailEditError}</div>}
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleSaveNameEmail}
-                          disabled={nameEmailSaving}
-                          className="flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
-                        >
-                          <Save className="w-3 h-3" />
-                          {nameEmailSaving ? 'Saving...' : 'Save'}
-                        </button>
-                        <button
-                          onClick={cancelEditingNameEmail}
-                          disabled={nameEmailSaving}
-                          className="flex items-center gap-1 px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300"
-                        >
-                          <X className="w-3 h-3" />
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="text-gray-900 font-medium truncate">{user.email || '—'}</div>
-                      {!nameEmailEditLocked && (
-                        <button
-                          onClick={startEditingNameEmail}
-                          className="mt-2 flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                          Edit
-                        </button>
-                      )}
-                    </div>
-                  )}
+                  <div className="text-gray-900 font-medium truncate">{profile.email || '—'}</div>
                 </div>
               </div>
             </div>
