@@ -2,6 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from django.db import transaction
 from django.db.models import Q, Case, When, Value, IntegerField
 from django.shortcuts import get_object_or_404
 
@@ -13,6 +14,86 @@ from .serializers import (
 )
 from accounts.utils import get_user_permissions
 from academics.models import StaffProfile
+
+
+def _get_target_sections_for_department(department_id, selected_section_ids=None, years=None, active_ay=None):
+    """Resolve sections for a target department from explicit sections or selected years."""
+    from academics.models import Section
+
+    base_qs = Section.objects.select_related(
+        'semester',
+        'managing_department',
+        'batch__regulation',
+        'batch__course__department',
+        'batch__department'
+    ).distinct()
+
+    selected_section_ids = selected_section_ids or []
+    if selected_section_ids:
+        return base_qs.filter(id__in=selected_section_ids)
+
+    if not department_id:
+        return base_qs.none()
+
+    section_filters = (
+        Q(managing_department_id=department_id)
+        | Q(batch__course__department_id=department_id)
+        | Q(batch__department_id=department_id)
+    )
+
+    years = years or []
+    if years and active_ay:
+        try:
+            acad_start = int(str(active_ay.name).split('-')[0])
+            batch_start_years = [acad_start - int(year) + 1 for year in years]
+            section_filters &= Q(batch__start_year__in=batch_start_years)
+        except Exception:
+            pass
+
+    return base_qs.filter(section_filters)
+
+
+def _derive_regulation_semester_context(sections):
+    """Derive regulation and active-semester context from section->batch->regulation.
+
+    Primary semester source: regulation.current_active_semester_id (if available).
+    Backward-compatible fallback: section.semester_id.
+    """
+    from academics.models import Semester
+
+    regulation_ids = set()
+    regulation_codes = set()
+    semester_ids = set()
+
+    for sec in sections:
+        reg = getattr(getattr(sec, 'batch', None), 'regulation', None)
+        reg_active_semester_id = getattr(reg, 'current_active_semester_id', None) if reg else None
+
+        if reg:
+            if reg.id:
+                regulation_ids.add(reg.id)
+            if reg.code:
+                regulation_codes.add(reg.code)
+
+        if reg_active_semester_id:
+            semester_ids.add(reg_active_semester_id)
+        elif sec.semester_id:
+            semester_ids.add(sec.semester_id)
+
+    semester_number_map = {}
+    if semester_ids:
+        semester_number_map = {
+            sem.id: sem.number for sem in Semester.objects.filter(id__in=semester_ids)
+        }
+
+    semester_numbers = sorted(set(semester_number_map.values())) if semester_number_map else []
+
+    return {
+        'regulation_ids': sorted(regulation_ids),
+        'regulation_codes': sorted(regulation_codes),
+        'semester_ids': sorted(semester_ids),
+        'semester_numbers': semester_numbers,
+    }
 
 
 class CreateFeedbackFormView(APIView):
@@ -43,7 +124,7 @@ class CreateFeedbackFormView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             # Determine active department for HOD
-            from academics.models import AcademicYear, Semester, DepartmentRole
+            from academics.models import AcademicYear, DepartmentRole
             
             active_ay = AcademicYear.objects.filter(is_active=True).first()
             if not active_ay:
@@ -96,41 +177,92 @@ class CreateFeedbackFormView(APIView):
                         'detail': 'No department assigned to your profile.'
                     }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Automatically determine current semester(s) based on academic year parity
             years = request.data.get('years', [])
-            semesters_to_use = []
-            
-            if active_ay and active_ay.parity and years:
-                # Parity: ODD = semesters 1,3,5,7 | EVEN = semesters 2,4,6,8
-                is_odd_semester = active_ay.parity.upper() == 'ODD'
-                
-                for year in years:
-                    # Year 1 → Sem 1 or 2, Year 2 → Sem 3 or 4, Year 3 → Sem 5 or 6, Year 4 → Sem 7 or 8
-                    base_semester = (year - 1) * 2 + 1  # Odd semester for this year
-                    current_semester_num = base_semester if is_odd_semester else base_semester + 1
-                    
-                    # Get the Semester model instance with this number
-                    try:
-                        semester = Semester.objects.get(number=current_semester_num)
-                        semesters_to_use.append(semester.id)
-                    except Semester.DoesNotExist:
-                        pass
             
             # Create feedback forms for each selected department
             created_forms = []
             errors = []
             
             for dept_id in selected_department_ids:
-                # Update request data with automatically determined semesters and current department
+                # Update request data with resolved class targeting and current department
                 mutable_data = request.data.copy()
-                mutable_data['semesters'] = semesters_to_use
                 mutable_data['department'] = dept_id
+
+                # Validate that selected sections belong to this target department.
+                selected_section_ids = mutable_data.get('sections', []) or []
+                if selected_section_ids:
+                    from academics.models import Section
+
+                    # Map each section to its effective department.
+                    sections_qs = Section.objects.filter(id__in=selected_section_ids).select_related(
+                        'managing_department',
+                        'batch__course__department',
+                        'batch__department'
+                    )
+
+                    found_ids = {sec.id for sec in sections_qs}
+                    missing_ids = [sid for sid in selected_section_ids if sid not in found_ids]
+                    if missing_ids:
+                        errors.append({
+                            'department_id': dept_id,
+                            'errors': {
+                                'sections': [f'Invalid section id(s): {missing_ids}']
+                            }
+                        })
+                        continue
+
+                    invalid_sections = []
+                    for sec in sections_qs:
+                        effective_department_id = (
+                            sec.managing_department_id
+                            or (sec.batch.course.department_id if sec.batch and sec.batch.course_id else None)
+                            or (sec.batch.department_id if sec.batch else None)
+                        )
+                        if effective_department_id != dept_id:
+                            invalid_sections.append(sec.id)
+
+                    if invalid_sections:
+                        errors.append({
+                            'department_id': dept_id,
+                            'errors': {
+                                'sections': [
+                                    'Selected sections must belong to the same department as the feedback form. '
+                                    f'Invalid section id(s) for this department: {invalid_sections}'
+                                ]
+                            }
+                        })
+                        continue
+
+                target_sections = _get_target_sections_for_department(
+                    dept_id,
+                    selected_section_ids=selected_section_ids,
+                    years=mutable_data.get('years', []) or [],
+                    active_ay=active_ay,
+                )
+                context = _derive_regulation_semester_context(target_sections)
+                mutable_data['semesters'] = context['semester_ids']
+
+                # For subject feedback, keep form-level regulation only when there is exactly one.
+                # Multi-regulation targeting is allowed; subject fetching uses per-section context.
+                if mutable_data.get('type') == 'SUBJECT_FEEDBACK':
+                    mutable_data['regulation'] = context['regulation_ids'][0] if len(context['regulation_ids']) == 1 else None
+                else:
+                    mutable_data['regulation'] = None
                 
                 serializer = FeedbackFormCreateSerializer(data=mutable_data)
                 if serializer.is_valid():
-                    # Set the created_by field to current user
-                    feedback_form = serializer.save(created_by=request.user)
-                    created_forms.append(feedback_form)
+                    try:
+                        with transaction.atomic():
+                            # Set the created_by field to current user
+                            feedback_form = serializer.save(created_by=request.user)
+                            created_forms.append(feedback_form)
+                    except Exception as e:
+                        errors.append({
+                            'department_id': dept_id,
+                            'errors': {
+                                'non_field_errors': [str(e)]
+                            }
+                        })
                 else:
                     errors.append({
                         'department_id': dept_id,
@@ -140,8 +272,21 @@ class CreateFeedbackFormView(APIView):
             # Check results
             if len(created_forms) == 0:
                 # All failed
+                first_error = None
+                if errors and isinstance(errors[0], dict):
+                    error_block = errors[0].get('errors', {})
+                    if isinstance(error_block, dict):
+                        for _, value in error_block.items():
+                            if isinstance(value, list) and value:
+                                first_error = str(value[0])
+                                break
+                            if value:
+                                first_error = str(value)
+                                break
+
                 return Response({
-                    'detail': 'Failed to create feedback forms.',
+                    'detail': first_error or 'Validation failed while creating feedback forms.',
+                    'error': first_error or 'Validation failed while creating feedback forms.',
                     'errors': errors
                 }, status=status.HTTP_400_BAD_REQUEST)
             elif len(errors) > 0:
@@ -255,11 +400,7 @@ class GetFeedbackFormsView(APIView):
                     department_id = batch.course.department_id if batch.course else batch.department_id
                     
                     # For students: filter by target_type, department, and class info
-                    # Include forms where:
-                    # - all_classes=True, OR
-                    # - year matches (either in years list or legacy year field) AND
-                    #   (semester is null/empty OR semester matches) AND
-                    #   (section is null/empty OR section matches)
+                    # Include forms where year matches AND section matches
                     from django.db.models import Q
                     
                     # Build query filters
@@ -269,9 +410,6 @@ class GetFeedbackFormsView(APIView):
                         status='ACTIVE',
                         active=True  # Only show active forms to students
                     )
-                    
-                    # All classes filter
-                    all_classes_filter = Q(all_classes=True)
                     
                     # Specific class filter - check both multi-class and legacy fields
                     class_filter = Q()
@@ -303,8 +441,8 @@ class GetFeedbackFormsView(APIView):
                         )
                         class_filter &= section_filter
                     
-                    # Combine filters
-                    filters = base_filter & (all_classes_filter | class_filter)
+                    # Combine filters - only use class_filter, no more all_classes option
+                    filters = base_filter & class_filter
                     
                     forms = FeedbackForm.objects.filter(filters).order_by('-created_at')
                     
@@ -588,6 +726,14 @@ class GetClassOptionsView(APIView):
     def get(self, request):
         try:
             from academics.models import Semester, Section, AcademicYear
+
+            # Optional years filter from UI (supports years[]=2&years[]=3 or years=2,3)
+            selected_years = request.GET.getlist('years[]')
+            if not selected_years:
+                years_param = request.GET.get('years')
+                if years_param:
+                    selected_years = [y.strip() for y in years_param.split(',') if y.strip()]
+            selected_years = {int(y) for y in selected_years if str(y).isdigit()}
             
             # Get distinct years (2-4 only, excluding 1st year from subject feedback)
             years = [
@@ -658,8 +804,10 @@ class GetClassOptionsView(APIView):
                         user_departments = [staff_profile.department]
                 
                 if user_departments:
-                    # Filter sections by selected departments (now supports multiple)
-                    sections_filter['batch__course__department__in'] = user_departments
+                    # Filter sections by selected departments (supports course-based,
+                    # direct department batches, and managing department overrides).
+                    department_ids = [dept.id for dept in user_departments]
+                    sections_filter['department_ids'] = department_ids
             except StaffProfile.DoesNotExist:
                 pass
             
@@ -677,7 +825,19 @@ class GetClassOptionsView(APIView):
             sections_all = []
             seen_section_ids = set()
             
-            sections_qs = Section.objects.filter(**sections_filter).select_related('batch').order_by('name')
+            sections_qs = Section.objects.select_related(
+                'managing_department',
+                'batch__course__department',
+                'batch__department'
+            ).order_by('name')
+
+            department_ids = sections_filter.get('department_ids')
+            if department_ids:
+                sections_qs = sections_qs.filter(
+                    Q(managing_department_id__in=department_ids)
+                    | Q(batch__course__department_id__in=department_ids)
+                    | Q(batch__department_id__in=department_ids)
+                )
             
             for sec in sections_qs:
                 if sec.id in seen_section_ids:
@@ -694,11 +854,30 @@ class GetClassOptionsView(APIView):
                     # Only include years 2-4 for subject feedback
                     if student_year < 2 or student_year > 4:
                         continue  # Skip 1st year and invalid years
+
+                # If UI requested specific years, only include matching ones.
+                if selected_years and student_year not in selected_years:
+                    continue
                 
+                department_obj = (
+                    sec.managing_department
+                    or (sec.batch.course.department if sec.batch and sec.batch.course_id else None)
+                    or (sec.batch.department if sec.batch else None)
+                )
+                department_label = None
+                if department_obj:
+                    department_label = department_obj.short_name or department_obj.code or department_obj.name
+
                 section_data = {
                     "value": sec.id,
                     "label": f"Section {sec.name}",
+                    "display_name": (
+                        f"{department_label or 'Department'} - Y{student_year} - Section {sec.name}"
+                        if student_year else f"{department_label or 'Department'} - Section {sec.name}"
+                    ),
                     "name": sec.name,
+                    "department_id": department_obj.id if department_obj else None,
+                    "department_label": department_label,
                     "year": student_year
                 }
                 
@@ -707,6 +886,17 @@ class GetClassOptionsView(APIView):
                 # Add to year mapping
                 if student_year and student_year in year_sections:
                     year_sections[student_year].append(section_data)
+
+            # Enforce deterministic ordering: Year -> Department -> Section.
+            def section_sort_key(item):
+                year_key = item.get('year') if item.get('year') is not None else 99
+                dept_key = item.get('department_label') or ''
+                section_key = item.get('name') or ''
+                return (year_key, dept_key, section_key)
+
+            sections_all.sort(key=section_sort_key)
+            for year_key in year_sections.keys():
+                year_sections[year_key].sort(key=section_sort_key)
             
             return Response({
                 'years': years,
@@ -802,6 +992,200 @@ class PublishFeedbackFormView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+class UpdateFeedbackFormView(APIView):
+    """
+    API: Update Draft Feedback Form
+    PUT /api/feedback/<id>/update/
+
+    Allows HOD to edit only draft forms. Published forms cannot be edited.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, form_id):
+        user_permissions = get_user_permissions(request.user)
+        if 'feedback.create' not in user_permissions:
+            return Response({
+                'detail': 'You do not have permission to edit feedback forms.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        feedback_form = get_object_or_404(FeedbackForm, id=form_id)
+
+        if feedback_form.created_by != request.user:
+            return Response({
+                'detail': 'You can only edit forms you created.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if feedback_form.status != 'DRAFT':
+            return Response({
+                'error': 'Published forms cannot be edited'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        incoming_questions = request.data.get('questions', [])
+        if not isinstance(incoming_questions, list) or len(incoming_questions) == 0:
+            return Response({
+                'error': 'At least one question is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Keep update behavior aligned with creation behavior using section->regulation semester context.
+        from academics.models import AcademicYear, Section
+
+        mutable_data = request.data.copy()
+        years_payload = mutable_data.get('years', []) or []
+        active_ay = AcademicYear.objects.filter(is_active=True).first()
+
+        selected_section_ids = mutable_data.get('sections', []) or []
+        if selected_section_ids:
+            sections_qs = Section.objects.filter(id__in=selected_section_ids).select_related(
+                'managing_department',
+                'batch__course__department',
+                'batch__department',
+                'batch__regulation'
+            )
+
+            found_ids = {sec.id for sec in sections_qs}
+            missing_ids = [sid for sid in selected_section_ids if sid not in found_ids]
+            if missing_ids:
+                return Response({
+                    'error': f'Invalid section id(s): {missing_ids}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            invalid_sections = []
+            for sec in sections_qs:
+                effective_department_id = (
+                    sec.managing_department_id
+                    or (sec.batch.course.department_id if sec.batch and sec.batch.course_id else None)
+                    or (sec.batch.department_id if sec.batch else None)
+                )
+                if effective_department_id != feedback_form.department_id:
+                    invalid_sections.append(sec.id)
+
+            if invalid_sections:
+                return Response({
+                    'error': (
+                        'Selected sections must belong to the same department as the feedback form. '
+                        f'Invalid section id(s): {invalid_sections}'
+                    )
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        target_sections = _get_target_sections_for_department(
+            feedback_form.department_id,
+            selected_section_ids=selected_section_ids,
+            years=years_payload,
+            active_ay=active_ay,
+        )
+        context = _derive_regulation_semester_context(target_sections)
+        mutable_data['semesters'] = context['semester_ids']
+
+        if mutable_data.get('type') == 'SUBJECT_FEEDBACK':
+            mutable_data['regulation'] = context['regulation_ids'][0] if len(context['regulation_ids']) == 1 else None
+        else:
+            mutable_data['regulation'] = None
+
+        with transaction.atomic():
+            # Update draft form metadata / targeting details
+            feedback_form.target_type = mutable_data.get('target_type', feedback_form.target_type)
+            feedback_form.type = mutable_data.get('type', feedback_form.type)
+            feedback_form.is_subject_based = feedback_form.type == 'SUBJECT_FEEDBACK'
+            feedback_form.year = mutable_data.get('year')
+            feedback_form.semester_id = mutable_data.get('semester')
+            feedback_form.section_id = mutable_data.get('section')
+            feedback_form.regulation_id = mutable_data.get('regulation')
+            feedback_form.years = mutable_data.get('years', []) or []
+            feedback_form.semesters = mutable_data.get('semesters', []) or []
+            feedback_form.sections = list(dict.fromkeys(mutable_data.get('sections', []) or []))
+
+            requested_status = mutable_data.get('status', 'DRAFT')
+            feedback_form.status = requested_status if requested_status in ['DRAFT', 'ACTIVE'] else 'DRAFT'
+            feedback_form.save()
+
+            existing_questions = {
+                q.id: q for q in FeedbackQuestion.objects.filter(feedback_form=feedback_form)
+            }
+            kept_question_ids = set()
+
+            for idx, q in enumerate(incoming_questions):
+                question_text = (q.get('question') or '').strip()
+                if not question_text:
+                    return Response({
+                        'error': f'Question {idx + 1} cannot be empty.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                allow_rating = q.get('allow_rating', True)
+                allow_comment = q.get('allow_comment', True)
+                if not allow_rating and not allow_comment:
+                    return Response({
+                        'error': f'Question {idx + 1} must allow rating or comment.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                if allow_rating and allow_comment:
+                    answer_type = 'BOTH'
+                elif allow_rating:
+                    answer_type = 'STAR'
+                else:
+                    answer_type = 'TEXT'
+
+                incoming_id = q.get('id')
+                if incoming_id:
+                    try:
+                        incoming_id = int(incoming_id)
+                    except Exception:
+                        return Response({
+                            'error': f'Invalid question id: {incoming_id}'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                    if incoming_id not in existing_questions:
+                        return Response({
+                            'error': f'Question id {incoming_id} does not belong to this form.'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                    FeedbackQuestion.objects.filter(id=incoming_id, feedback_form=feedback_form).update(
+                        question=question_text,
+                        allow_rating=allow_rating,
+                        allow_comment=allow_comment,
+                        answer_type=answer_type,
+                        order=q.get('order', idx + 1)
+                    )
+                    kept_question_ids.add(incoming_id)
+                else:
+                    created = FeedbackQuestion.objects.create(
+                        feedback_form=feedback_form,
+                        question=question_text,
+                        allow_rating=allow_rating,
+                        allow_comment=allow_comment,
+                        answer_type=answer_type,
+                        order=q.get('order', idx + 1)
+                    )
+                    kept_question_ids.add(created.id)
+
+            to_delete_ids = [qid for qid in existing_questions.keys() if qid not in kept_question_ids]
+            if to_delete_ids:
+                answered_ids = list(
+                    FeedbackQuestion.objects.filter(id__in=to_delete_ids, responses__isnull=False)
+                    .values_list('id', flat=True)
+                    .distinct()
+                )
+                if answered_ids:
+                    return Response({
+                        'error': (
+                            'Cannot delete questions that already have responses. '
+                            f'Protected question ids: {answered_ids}'
+                        )
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                FeedbackQuestion.objects.filter(id__in=to_delete_ids, feedback_form=feedback_form).delete()
+
+            if FeedbackQuestion.objects.filter(feedback_form=feedback_form).count() == 0:
+                return Response({
+                    'error': 'At least one question is required.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        serialized = FeedbackFormSerializer(feedback_form, context={'request': request}).data
+        return Response({
+            'detail': 'Feedback form updated successfully.',
+            'form': serialized
+        }, status=status.HTTP_200_OK)
+
+
 class GetResponseStatisticsView(APIView):
     """
     API 7: Get Response Statistics
@@ -846,61 +1230,61 @@ class GetResponseStatisticsView(APIView):
             ).count()
         elif feedback_form.target_type == 'STUDENT':
             from academics.models import StudentProfile, Section, AcademicYear
+            student_department_filter = (
+                Q(section__managing_department=feedback_form.department)
+                | Q(section__batch__course__department=feedback_form.department)
+                | Q(section__batch__department=feedback_form.department)
+            )
             
-            if feedback_form.all_classes:
-                # All students in department
-                expected_count = StudentProfile.objects.filter(
-                    section__batch__course__department=feedback_form.department
-                ).count()
+            # Students matching year/semester/section criteria
+            sections_to_query = []
+            
+            # Get current academic year for year calculation
+            current_ay = AcademicYear.objects.filter(is_active=True).first()
+            current_acad_year = None
+            if current_ay:
+                try:
+                    current_acad_year = int(str(current_ay.name).split('-')[0])
+                except:
+                    pass
+            
+            # Build list of matching sections
+            if feedback_form.sections:  # Multi-class: use sections list
+                sections_to_query = list(feedback_form.sections)
+            elif feedback_form.section_id:  # Legacy: single section
+                sections_to_query = [feedback_form.section_id]
             else:
-                # Students matching year/semester/section criteria
-                sections_to_query = []
+                # No specific sections: query by year and semester
+                sections_filter = Q(batch__course__department=feedback_form.department)
                 
-                # Get current academic year for year calculation
-                current_ay = AcademicYear.objects.filter(is_active=True).first()
-                current_acad_year = None
-                if current_ay:
-                    try:
-                        current_acad_year = int(str(current_ay.name).split('-')[0])
-                    except:
-                        pass
-                
-                # Build list of matching sections
-                if feedback_form.sections:  # Multi-class: use sections list
-                    sections_to_query = list(feedback_form.sections)
-                elif feedback_form.section_id:  # Legacy: single section
-                    sections_to_query = [feedback_form.section_id]
-                else:
-                    # No specific sections: query by year and semester
-                    sections_filter = Q(batch__course__department=feedback_form.department)
-                    
-                    # Filter by years
-                    if feedback_form.years:
-                        year_filters = Q()
-                        for year in feedback_form.years:
-                            if current_acad_year:
-                                batch_start_year = current_acad_year - year + 1
-                                year_filters |= Q(batch__start_year=str(batch_start_year))
-                        sections_filter &= year_filters
-                    elif feedback_form.year:
+                # Filter by years
+                if feedback_form.years:
+                    year_filters = Q()
+                    for year in feedback_form.years:
                         if current_acad_year:
-                            batch_start_year = current_acad_year - feedback_form.year + 1
-                            sections_filter &= Q(batch__start_year=str(batch_start_year))
-                    
-                    # Filter by semesters
-                    if feedback_form.semesters:
-                        sections_filter &= Q(semester_id__in=feedback_form.semesters)
-                    elif feedback_form.semester_id:
-                        sections_filter &= Q(semester=feedback_form.semester)
-                    
-                    matching_sections = Section.objects.filter(sections_filter)
-                    sections_to_query = [s.id for s in matching_sections]
+                            batch_start_year = current_acad_year - year + 1
+                            year_filters |= Q(batch__start_year=str(batch_start_year))
+                    sections_filter &= year_filters
+                elif feedback_form.year:
+                    if current_acad_year:
+                        batch_start_year = current_acad_year - feedback_form.year + 1
+                        sections_filter &= Q(batch__start_year=str(batch_start_year))
                 
-                # Count students in matching sections
-                if sections_to_query:
-                    expected_count = StudentProfile.objects.filter(
-                        section_id__in=sections_to_query
-                    ).count()
+                # Filter by semesters
+                if feedback_form.semesters:
+                    sections_filter &= Q(semester_id__in=feedback_form.semesters)
+                elif feedback_form.semester_id:
+                    sections_filter &= Q(semester=feedback_form.semester)
+                
+                matching_sections = Section.objects.filter(sections_filter)
+                sections_to_query = [s.id for s in matching_sections]
+            
+            # Count students in matching sections
+            if sections_to_query:
+                expected_count = StudentProfile.objects.filter(
+                    student_department_filter,
+                    section_id__in=sections_to_query
+                ).count()
         
         return Response({
             'feedback_form_id': form_id,
@@ -973,6 +1357,53 @@ class GetResponseListView(APIView):
                 'teaching_assignment__subject',
                 'teaching_assignment__elective_subject'
             )
+
+            # Ensure analytics grouping respects section regulation + active-semester context.
+            if feedback_form.type == 'SUBJECT_FEEDBACK':
+                from academics.models import AcademicYear
+
+                active_ay = AcademicYear.objects.filter(is_active=True).first()
+                selected_section_ids = list(feedback_form.sections or [])
+                if not selected_section_ids and feedback_form.section_id:
+                    selected_section_ids = [feedback_form.section_id]
+
+                years_filter = list(feedback_form.years or [])
+                if not years_filter and feedback_form.year:
+                    years_filter = [feedback_form.year]
+
+                target_sections = _get_target_sections_for_department(
+                    feedback_form.department_id,
+                    selected_section_ids=selected_section_ids,
+                    years=years_filter,
+                    active_ay=active_ay,
+                )
+                target_context = _derive_regulation_semester_context(target_sections)
+                regulation_codes = target_context['regulation_codes']
+                semester_ids = target_context['semester_ids']
+
+                ta_filter = Q()
+                has_constraint = False
+
+                if regulation_codes:
+                    ta_filter &= (
+                        Q(teaching_assignment__curriculum_row__regulation__in=regulation_codes)
+                        | Q(teaching_assignment__elective_subject__regulation__in=regulation_codes)
+                        | Q(teaching_assignment__curriculum_row__isnull=True, teaching_assignment__elective_subject__isnull=True)
+                    )
+                    has_constraint = True
+
+                if semester_ids:
+                    ta_filter &= (
+                        Q(teaching_assignment__curriculum_row__semester_id__in=semester_ids)
+                        | Q(teaching_assignment__elective_subject__semester_id__in=semester_ids)
+                        | Q(teaching_assignment__section__semester_id__in=semester_ids)
+                    )
+                    has_constraint = True
+
+                if has_constraint:
+                    all_responses = all_responses.filter(
+                        Q(teaching_assignment__isnull=True) | ta_filter
+                    )
             
             logger.info(f"[GetResponseListView] Found {all_responses.count()} total responses")
             
@@ -1058,54 +1489,55 @@ class GetResponseListView(APIView):
                 ).exclude(id=feedback_form.created_by.id).values_list('id', flat=True)
             elif feedback_form.target_type == 'STUDENT':
                 from academics.models import StudentProfile, Section, AcademicYear
+                student_department_filter = (
+                    Q(student_profile__section__managing_department=feedback_form.department)
+                    | Q(student_profile__section__batch__course__department=feedback_form.department)
+                    | Q(student_profile__section__batch__department=feedback_form.department)
+                )
                 
-                if feedback_form.all_classes:
-                    expected_users = User.objects.filter(
-                        student_profile__section__batch__course__department=feedback_form.department
-                    ).exclude(id=feedback_form.created_by.id).values_list('id', flat=True)
+                # Build query for matching students
+                sections_to_query = []
+                
+                current_ay = AcademicYear.objects.filter(is_active=True).first()
+                current_acad_year = None
+                if current_ay:
+                    try:
+                        current_acad_year = int(str(current_ay.name).split('-')[0])
+                    except:
+                        pass
+                
+                if feedback_form.sections:
+                    sections_to_query = list(feedback_form.sections)
+                elif feedback_form.section_id:
+                    sections_to_query = [feedback_form.section_id]
                 else:
-                    # Build query for matching students
-                    sections_to_query = []
+                    sections_filter = Q(batch__course__department=feedback_form.department)
                     
-                    current_ay = AcademicYear.objects.filter(is_active=True).first()
-                    current_acad_year = None
-                    if current_ay:
-                        try:
-                            current_acad_year = int(str(current_ay.name).split('-')[0])
-                        except:
-                            pass
-                    
-                    if feedback_form.sections:
-                        sections_to_query = list(feedback_form.sections)
-                    elif feedback_form.section_id:
-                        sections_to_query = [feedback_form.section_id]
-                    else:
-                        sections_filter = Q(batch__course__department=feedback_form.department)
-                        
-                        if feedback_form.years:
-                            year_filters = Q()
-                            for year in feedback_form.years:
-                                if current_acad_year:
-                                    batch_start_year = current_acad_year - year + 1
-                                    year_filters |= Q(batch__start_year=str(batch_start_year))
-                            sections_filter &= year_filters
-                        elif feedback_form.year:
+                    if feedback_form.years:
+                        year_filters = Q()
+                        for year in feedback_form.years:
                             if current_acad_year:
-                                batch_start_year = current_acad_year - feedback_form.year + 1
-                                sections_filter &= Q(batch__start_year=str(batch_start_year))
-                        
-                        if feedback_form.semesters:
-                            sections_filter &= Q(semester_id__in=feedback_form.semesters)
-                        elif feedback_form.semester_id:
-                            sections_filter &= Q(semester=feedback_form.semester)
-                        
-                        matching_sections = Section.objects.filter(sections_filter)
-                        sections_to_query = [s.id for s in matching_sections]
+                                batch_start_year = current_acad_year - year + 1
+                                year_filters |= Q(batch__start_year=str(batch_start_year))
+                        sections_filter &= year_filters
+                    elif feedback_form.year:
+                        if current_acad_year:
+                            batch_start_year = current_acad_year - feedback_form.year + 1
+                            sections_filter &= Q(batch__start_year=str(batch_start_year))
                     
-                    if sections_to_query:
-                        expected_users = User.objects.filter(
-                            student_profile__section_id__in=sections_to_query
-                        ).exclude(id=feedback_form.created_by.id).values_list('id', flat=True)
+                    if feedback_form.semesters:
+                        sections_filter &= Q(semester_id__in=feedback_form.semesters)
+                    elif feedback_form.semester_id:
+                        sections_filter &= Q(semester=feedback_form.semester)
+                    
+                    matching_sections = Section.objects.filter(sections_filter)
+                    sections_to_query = [s.id for s in matching_sections]
+                
+                if sections_to_query:
+                    expected_users = User.objects.filter(
+                        student_department_filter,
+                        student_profile__section_id__in=sections_to_query
+                    ).exclude(id=feedback_form.created_by.id).values_list('id', flat=True)
             
             # Find non-responders
             responded_user_ids = set(responses_by_user.keys())
@@ -1136,10 +1568,14 @@ class GetResponseListView(APIView):
                     })
             
             logger.info(f"[GetResponseListView] Successfully processed: {len(responses_by_user)} responded, {len(non_responders)} non-responders")
+            form_serialized = FeedbackFormSerializer(feedback_form, context={'request': request}).data
             
             return Response({
                 'feedback_form_id': form_id,
                 'target_type': feedback_form.target_type,
+                'target_display': form_serialized.get('target_display', ''),
+                'context_display': form_serialized.get('context_display', ''),
+                'class_context_display': form_serialized.get('class_context_display', []),
                 'responded': list(responses_by_user.values()),
                 'non_responders': non_responders,
                 'total_responded': len(responses_by_user),
@@ -1233,6 +1669,10 @@ class GetStudentSubjectsView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             batch = section.batch
+            batch_regulation = batch.regulation if batch else None
+            batch_regulation_code = batch_regulation.code if batch_regulation else None
+            target_regulation_code = feedback_form.regulation.code if feedback_form.regulation else None
+            effective_regulation_code = batch_regulation_code or target_regulation_code
             student_year = None
             
             # Calculate year from batch
@@ -1250,6 +1690,11 @@ class GetStudentSubjectsView(APIView):
             
             if not student_year:
                 print(f"[GetStudentSubjectsView] WARNING: Could not determine student year")
+
+            print(
+                f"[GetStudentSubjectsView] Regulation context - "
+                f"student_batch={batch_regulation_code}, target_form={target_regulation_code}, effective={effective_regulation_code}"
+            )
             
             # Exclude 1st year students
             if student_year == 1:
@@ -1312,44 +1757,32 @@ class GetStudentSubjectsView(APIView):
             
             from curriculum.models import CurriculumDepartment
             
-            # Get semesters from feedback form (if specified)
-            target_semesters = []
+            # Resolve semesters from form and regulation context.
+            target_semester_ids = []
             if hasattr(feedback_form, 'semesters') and feedback_form.semesters:
-                target_semesters = feedback_form.semesters
-                print(f"[GetStudentSubjectsView] Feedback form targets specific semesters: {target_semesters}")
-            
-            # If no semesters specified, use student's batch to determine
-            if not target_semesters and batch and batch.start_year:
-                # Determine semester based on year
-                try:
-                    acad_start = int(str(current_ay.name).split('-')[0])
-                    delta = acad_start - int(batch.start_year)
-                    calculated_year = delta + 1
-                    
-                    # Map year to semesters (e.g., Year 3 = Sem 5 or 6)
-                    if calculated_year == 2:
-                        target_semesters = [3, 4]  # 2nd year = Sem 3 or 4
-                    elif calculated_year == 3:
-                        target_semesters = [5, 6]  # 3rd year = Sem 5 or 6
-                    elif calculated_year == 4:
-                        target_semesters = [7, 8]  # 4th year = Sem 7 or 8
-                    
-                    print(f"[GetStudentSubjectsView] Calculated year {calculated_year}, using semesters: {target_semesters}")
-                except Exception as e:
-                    print(f"[GetStudentSubjectsView] Error calculating semesters: {e}")
-            
-            # Fallback: if still no semesters, fetch all for department
-            if not target_semesters:
-                print(f"[GetStudentSubjectsView] No semesters determined, will fetch all core subjects for department")
+                target_semester_ids = list(feedback_form.semesters)
+                print(f"[GetStudentSubjectsView] Feedback form targets semester IDs: {target_semester_ids}")
+
+            if not target_semester_ids:
+                reg_active_semester_id = getattr(batch_regulation, 'current_active_semester_id', None) if batch_regulation else None
+                if reg_active_semester_id:
+                    target_semester_ids = [reg_active_semester_id]
+                elif section.semester_id:
+                    target_semester_ids = [section.semester_id]
+
+            print(f"[GetStudentSubjectsView] Effective semester IDs: {target_semester_ids}")
             
             # Fetch core curriculum subjects
             curriculum_filter = {
                 'department': student_department,
                 'is_elective': False,  # Core subjects only
             }
-            
-            if target_semesters:
-                curriculum_filter['semester__number__in'] = target_semesters
+
+            if effective_regulation_code:
+                curriculum_filter['regulation'] = effective_regulation_code
+
+            if target_semester_ids:
+                curriculum_filter['semester_id__in'] = target_semester_ids
             
             curriculum_subjects = CurriculumDepartment.objects.filter(
                 **curriculum_filter
@@ -1413,6 +1846,11 @@ class GetStudentSubjectsView(APIView):
                 'elective_subject__parent', 
                 'elective_subject__department'
             )
+
+            if effective_regulation_code:
+                elective_choices = elective_choices.filter(elective_subject__regulation=effective_regulation_code)
+            if target_semester_ids:
+                elective_choices = elective_choices.filter(elective_subject__semester_id__in=target_semester_ids)
             
             print(f"[GetStudentSubjectsView] Total elective choices (all AYs, is_active=True): {elective_choices.count()}")
             
@@ -1502,6 +1940,11 @@ class GetStudentSubjectsView(APIView):
                             academic_year=current_ay,
                             is_active=True
                         ).select_related('staff', 'staff__user', 'elective_subject', 'elective_subject__department')
+
+                        if effective_regulation_code:
+                            ta_query = ta_query.filter(elective_subject__regulation=effective_regulation_code)
+                        if target_semester_ids:
+                            ta_query = ta_query.filter(elective_subject__semester_id__in=target_semester_ids)
                         
                         for ta in ta_query:
                             if ta.staff and ta.staff.user:
@@ -1524,6 +1967,11 @@ class GetStudentSubjectsView(APIView):
                             academic_year=current_ay,
                             is_active=True
                         ).select_related('staff', 'staff__user', 'elective_subject', 'elective_subject__department')
+
+                        if effective_regulation_code:
+                            ta_query = ta_query.filter(elective_subject__regulation=effective_regulation_code)
+                        if target_semester_ids:
+                            ta_query = ta_query.filter(elective_subject__semester_id__in=target_semester_ids)
                         
                         for ta in ta_query:
                             if ta.staff and ta.staff.user:
@@ -1638,6 +2086,9 @@ class GetStudentSubjectsView(APIView):
                                 academic_year=current_ay,
                                 is_active=True
                             ).select_related('staff', 'staff__user', 'curriculum_row').first()
+
+                            if ta and effective_regulation_code and ta.curriculum_row and ta.curriculum_row.regulation != effective_regulation_code:
+                                ta = None
                         
                         # Fallback: try without department filter
                         if not ta:
@@ -1647,6 +2098,9 @@ class GetStudentSubjectsView(APIView):
                                 academic_year=current_ay,
                                 is_active=True
                             ).select_related('staff', 'staff__user', 'curriculum_row').first()
+
+                            if ta and effective_regulation_code and ta.curriculum_row and ta.curriculum_row.regulation != effective_regulation_code:
+                                ta = None
                         
                         if ta:
                             elective_teaching_assignments.append(ta)
@@ -1704,12 +2158,21 @@ class GetStudentSubjectsView(APIView):
                             course_code=code,
                             department_id=dept_id
                         ).select_related('parent', 'department').first()
+
+                        if elec_subj and effective_regulation_code and elec_subj.regulation != effective_regulation_code:
+                            elec_subj = None
                     
                     # Fallback: try without department filter to ensure ALL chosen electives appear
                     if not elec_subj:
                         elec_subj = ElectiveSubject.objects.filter(
                             course_code=code
                         ).select_related('parent', 'department').first()
+
+                        if elec_subj and effective_regulation_code and elec_subj.regulation != effective_regulation_code:
+                            elec_subj = None
+
+                    if elec_subj and target_semester_ids and elec_subj.semester_id not in target_semester_ids:
+                        elec_subj = None
                     
                     if elec_subj:
                         elective_subjects_map[code] = elec_subj
@@ -2145,6 +2608,8 @@ class GetSubjectsByYearView(APIView):
             semester_id = request.GET.get('semester')
             department_id = request.GET.get('department_id')
             sections_param = request.GET.get('sections')  # NEW: section IDs filter
+            preview_only = str(request.GET.get('preview_only', '')).lower() in ['1', 'true', 'yes']
+            include_electives = str(request.GET.get('include_electives', '1')).lower() not in ['0', 'false', 'no']
             
             # Parse years
             years = []
@@ -2187,7 +2652,6 @@ class GetSubjectsByYearView(APIView):
                 TeachingAssignment, 
                 AcademicYear, 
                 Section,
-                Semester,
                 Department,
                 DepartmentRole
             )
@@ -2237,7 +2701,7 @@ class GetSubjectsByYearView(APIView):
                 return Response({
                     'detail': 'No active academic year found.'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
+
             # Calculate batch start years for all given years
             try:
                 acad_start = int(str(current_ay.name).split('-')[0])
@@ -2259,7 +2723,11 @@ class GetSubjectsByYearView(APIView):
             if department_id:
                 try:
                     department_id = int(department_id)
-                    section_filters &= Q(batch__course__department_id=department_id)
+                    section_filters &= (
+                        Q(managing_department_id=department_id)
+                        | Q(batch__course__department_id=department_id)
+                        | Q(batch__department_id=department_id)
+                    )
                     print(f"[GetSubjectsByYearView] Filtering by department_id: {department_id}")
                 except ValueError:
                     pass
@@ -2279,8 +2747,41 @@ class GetSubjectsByYearView(APIView):
                 print(f"[GetSubjectsByYearView] Filtering by section IDs: {section_ids_filter}")
             
             # Get matching sections
-            sections = Section.objects.filter(section_filters).distinct()
+            sections = Section.objects.filter(section_filters).select_related(
+                'managing_department',
+                'batch__regulation',
+                'batch__course__department',
+                'batch__department'
+            ).distinct()
             print(f"[GetSubjectsByYearView] Found {sections.count()} sections")
+
+            context = _derive_regulation_semester_context(sections)
+            regulation_ids = context['regulation_ids']
+            regulation_codes = context['regulation_codes']
+            semesters_for_years = context['semester_ids']
+            semester_numbers = context['semester_numbers']
+            print(
+                f"[GetSubjectsByYearView] Regulation context from sections: "
+                f"regulation_ids={regulation_ids}, semester_ids={semesters_for_years}, semester_numbers={semester_numbers}"
+            )
+
+            if not semesters_for_years:
+                return Response({
+                    'detail': 'No active semester context could be resolved from selected sections.',
+                    'subjects': [],
+                    'regular_subjects': [],
+                    'elective_subjects': [],
+                    'elective_categories': [],
+                    'elective_groups': [],
+                    'total_subjects': 0,
+                    'has_electives': False,
+                    'years': years,
+                    'semester_id': semester_id,
+                    'department_id': department_id,
+                    'section_ids': section_ids_filter,
+                    'regulation_ids': regulation_ids,
+                    'regulation_codes': regulation_codes,
+                }, status=status.HTTP_200_OK)
             
             # Create a mapping of section_id to year for display
             section_to_year = {}
@@ -2289,10 +2790,15 @@ class GetSubjectsByYearView(APIView):
             if sections.exists():
                 for section in sections:
                     if section.batch and section.batch.start_year:
+                        try:
+                            section_start_year = int(section.batch.start_year)
+                        except Exception:
+                            section_start_year = None
+
                         # Calculate which year this section belongs to
                         for year in years:
                             expected_start = acad_start - year + 1
-                            if section.batch.start_year == expected_start:
+                            if section_start_year == expected_start:
                                 section_to_year[section.id] = year
                                 break
                 
@@ -2307,37 +2813,7 @@ class GetSubjectsByYearView(APIView):
                 
                 print(f"[GetSubjectsByYearView] No sections found, but will still fetch elective subjects from curriculum")
             
-            # Calculate semesters for the selected years based on AY parity
-            semesters_for_years = []
-            if current_ay and current_ay.parity:
-                is_odd_semester = current_ay.parity.upper() == 'ODD'
-                print(f"[GetSubjectsByYearView] Academic year parity: {current_ay.parity}")
-                
-                for year in years:
-                    # Year 1 → Sem 1 or 2, Year 2 → Sem 3 or 4, Year 3 → Sem 5 or 6, Year 4 → Sem 7 or 8
-                    base_semester = (year - 1) * 2 + 1  # Odd semester for this year
-                    current_semester_num = base_semester if is_odd_semester else base_semester + 1
-                    
-                    # Get the Semester model instance with this number
-                    try:
-                        semester_obj = Semester.objects.get(number=current_semester_num)
-                        semesters_for_years.append(semester_obj.id)
-                        print(f"[GetSubjectsByYearView] Year {year} → Semester {current_semester_num} (ID: {semester_obj.id})")
-                    except Semester.DoesNotExist:
-                        print(f"[GetSubjectsByYearView] WARNING: Semester {current_semester_num} not found for year {year}")
-            
-            print(f"[GetSubjectsByYearView] Semesters for years {years}: {semesters_for_years}")
-            
-            # Debug: Show which semester numbers we're searching for
-            if semesters_for_years:
-                semester_numbers = []
-                for sem_id in semesters_for_years:
-                    try:
-                        sem_obj = Semester.objects.get(id=sem_id)
-                        semester_numbers.append(sem_obj.number)
-                    except:
-                        pass
-                print(f"[GetSubjectsByYearView] Semester numbers: {semester_numbers}")
+            print(f"[GetSubjectsByYearView] Semester numbers from section context: {semester_numbers}")
             
             print(f"[GetSubjectsByYearView] Fetching teaching assignments for {len(section_ids)} sections")
             
@@ -2362,6 +2838,13 @@ class GetSubjectsByYearView(APIView):
                     'section'
                 ).distinct()
                 
+                if regulation_codes:
+                    teaching_assignments = teaching_assignments.filter(
+                        Q(curriculum_row__regulation__in=regulation_codes)
+                        | Q(elective_subject__regulation__in=regulation_codes)
+                        | Q(curriculum_row__isnull=True, elective_subject__isnull=True)
+                    )
+
                 print(f"[GetSubjectsByYearView] Found {teaching_assignments.count()} teaching assignments")
             else:
                 teaching_assignments = []
@@ -2382,7 +2865,8 @@ class GetSubjectsByYearView(APIView):
                     is_elective = True
                     subject_name = assignment.elective_subject.course_name
                     subject_code = assignment.elective_subject.course_code
-                    subject_key = f"elec_{assignment.elective_subject.id}"
+                    normalized_code = (subject_code or '').strip().upper()
+                    subject_key = f"elec_code_{normalized_code}" if normalized_code else f"elec_{assignment.elective_subject.id}"
                     
                     # Get department info for elective subjects (important for OE)
                     if assignment.elective_subject.department:
@@ -2398,20 +2882,33 @@ class GetSubjectsByYearView(APIView):
                 elif assignment.curriculum_row:
                     subject_name = assignment.curriculum_row.course_name
                     subject_code = assignment.curriculum_row.course_code
-                    subject_key = f"curr_{assignment.curriculum_row.id}"
                     is_elective = assignment.curriculum_row.is_elective
+
+                    # Skip placeholder rows like "Professional Elective IV" from core list.
+                    row_name = (subject_name or '').strip().lower()
+                    if (not is_elective) and ('elective' in row_name):
+                        continue
+
+                    normalized_code = (subject_code or '').strip().upper()
+                    if is_elective:
+                        subject_key = f"elec_code_{normalized_code}" if normalized_code else f"elec_name_{row_name}"
+                    else:
+                        subject_key = f"core_code_{normalized_code}" if normalized_code else f"core_name_{row_name}"
+
                     if is_elective:
                         elective_category = assignment.curriculum_row.category or 'Other Electives'
                         
                 elif assignment.subject:
                     subject_name = assignment.subject.name
                     subject_code = assignment.subject.code
-                    subject_key = f"subj_{assignment.subject.id}"
+                    normalized_code = (subject_code or '').strip().upper()
+                    subject_key = f"core_code_{normalized_code}" if normalized_code else f"subj_{assignment.subject.id}"
                     
                 elif assignment.custom_subject:
                     subject_name = assignment.get_custom_subject_display()
                     subject_code = assignment.custom_subject
-                    subject_key = f"cust_{assignment.custom_subject}"
+                    normalized_code = (subject_code or '').strip().upper()
+                    subject_key = f"core_code_{normalized_code}" if normalized_code else f"cust_{assignment.custom_subject}"
                 
                 if not subject_name or not subject_key:
                     continue
@@ -2472,13 +2969,16 @@ class GetSubjectsByYearView(APIView):
             # Students see only their chosen OE via ElectiveChoice (handled separately)
             print(f"[GetSubjectsByYearView] Fetching elective subjects from curriculum and matching with teaching assignments...")
             
-            if department_id and semesters_for_years:
+            if include_electives and department_id and semesters_for_years:
                 # Fetch PE/EE elective subjects for the department only
                 dept_electives = ElectiveSubject.objects.filter(
                     department_id=department_id,
                     semester_id__in=semesters_for_years,
                     approval_status='APPROVED'
                 ).select_related('parent', 'semester', 'department').distinct()
+
+                if regulation_codes:
+                    dept_electives = dept_electives.filter(regulation__in=regulation_codes)
                 
                 print(f"[GetSubjectsByYearView] Found {dept_electives.count()} department elective subjects")
                 
@@ -2487,29 +2987,17 @@ class GetSubjectsByYearView(APIView):
                 # DO NOT filter by department_id for Open Electives
                 # Match various category patterns: "Open Elective", "OE", "Open Elective I", etc.
                 # 
-                # Use TWO approaches to maximize OE subject discovery:
-                # 1. Filter by calculated semester IDs (primary method)
-                # 2. Also include subjects where semester number matches year range (fallback)
+                # Use section-context semester IDs for OE subject discovery.
                 oe_query = Q(parent__category__icontains='Open Elective') | Q(parent__category__istartswith='OE')
                 oe_query = oe_query & Q(approval_status='APPROVED')
-                
-                # Primary: Use calculated semester IDs
-                if semesters_for_years:
-                    oe_electives = ElectiveSubject.objects.filter(
-                        oe_query,
-                        semester_id__in=semesters_for_years
-                    ).select_related('parent', 'semester', 'department').distinct()
-                else:
-                    # Fallback: If no semester IDs, try to match by semester number range
-                    # Year 2 = Sem 3-4, Year 3 = Sem 5-6, Year 4 = Sem 7-8
-                    semester_numbers = []
-                    for year in years:
-                        semester_numbers.extend([(year - 1) * 2 + 1, (year - 1) * 2 + 2])
-                    
-                    oe_electives = ElectiveSubject.objects.filter(
-                        oe_query,
-                        semester__number__in=semester_numbers
-                    ).select_related('parent', 'semester', 'department').distinct()
+
+                oe_electives = ElectiveSubject.objects.filter(
+                    oe_query,
+                    semester_id__in=semesters_for_years
+                ).select_related('parent', 'semester', 'department').distinct()
+
+                if regulation_codes:
+                    oe_electives = oe_electives.filter(regulation__in=regulation_codes)
                 
                 print(f"[GetSubjectsByYearView] Found {oe_electives.count()} Open Elective subjects across all departments")
                 if oe_electives.exists():
@@ -2590,7 +3078,8 @@ class GetSubjectsByYearView(APIView):
                 processed_count = 0
                 merged_count = 0
                 for elective in curriculum_electives:
-                    subject_key = f"elec_{elective.id}"
+                    normalized_code = (elective.course_code or '').strip().upper()
+                    subject_key = f"elec_code_{normalized_code}" if normalized_code else f"elec_{elective.id}"
                     
                     # Check if already added from teaching assignment section
                     already_exists = subject_key in subjects_dict
@@ -2706,47 +3195,59 @@ class GetSubjectsByYearView(APIView):
                 for cat, items in elective_groups.items():
                     print(f"  - {cat}: {len(items)} subjects")
                 
-                # Also fetch core subjects from curriculum if no teaching assignments found
-                if not section_ids or len(subjects_dict) == 0:
-                    print(f"[GetSubjectsByYearView] Fetching core subjects from curriculum department rows...")
-                    curriculum_rows = CurriculumDepartment.objects.filter(
-                        department_id=department_id,
-                        semester_id__in=semesters_for_years,
-                        is_elective=False,
-                        approval_status='APPROVED'
-                    ).select_related('semester').distinct()
+            elif preview_only:
+                print("[GetSubjectsByYearView] Preview-only mode: skipping elective processing.")
+
+            # Always merge core curriculum subjects so unassigned core papers are still visible.
+            # This keeps HOD preview aligned with student subject mapping behavior.
+            if department_id and semesters_for_years:
+                print(f"[GetSubjectsByYearView] Merging core subjects from curriculum department rows...")
+                curriculum_rows = CurriculumDepartment.objects.filter(
+                    department_id=department_id,
+                    semester_id__in=semesters_for_years,
+                    is_elective=False
+                ).select_related('semester').distinct()
+
+                if regulation_codes:
+                    curriculum_rows = curriculum_rows.filter(regulation__in=regulation_codes)
+                
+                print(f"[GetSubjectsByYearView] Found {curriculum_rows.count()} core subjects in curriculum")
+                
+                for row in curriculum_rows:
+                    row_name = (row.course_name or '').strip().lower()
+                    # Skip placeholder elective titles from core list; electives are handled separately.
+                    if 'elective' in row_name:
+                        continue
+
+                    normalized_code = (row.course_code or '').strip().upper()
+                    subject_key = f"core_code_{normalized_code}" if normalized_code else f"core_name_{row_name}"
                     
-                    print(f"[GetSubjectsByYearView] Found {curriculum_rows.count()} core subjects in curriculum")
+                    # Skip if already added from teaching assignment
+                    if subject_key in subjects_dict:
+                        continue
                     
-                    for row in curriculum_rows:
-                        subject_key = f"curr_{row.id}"
-                        
-                        # Skip if already added from teaching assignment
-                        if subject_key in subjects_dict:
-                            continue
-                        
-                        # Calculate which year this subject belongs to
-                        subject_year = None
-                        if row.semester:
-                            subject_year = ((row.semester.number + 1) // 2)
-                            if subject_year in years:
-                                print(f"[GetSubjectsByYearView] Adding core subject: {row.course_name} (Sem {row.semester.number}, Year {subject_year})")
-                        
-                        # Add to subjects_dict
-                        subject_data = {
-                            'subject_name': row.course_name or 'Unknown Subject',
-                            'subject_code': row.course_code or '',
-                            'staff': set(['To be assigned']),
-                            'sections': set(['All Sections']),
-                            'years': set([subject_year]) if subject_year else set(),
-                            'teaching_assignment_ids': [],
-                            'is_elective': False,
-                            'elective_category': None,
-                            'department_name': None,
-                            'department_code': None
-                        }
-                        
-                        subjects_dict[subject_key] = subject_data
+                    # Calculate which year this subject belongs to
+                    subject_year = None
+                    if row.semester:
+                        subject_year = ((row.semester.number + 1) // 2)
+                        if subject_year in years:
+                            print(f"[GetSubjectsByYearView] Adding core subject: {row.course_name} (Sem {row.semester.number}, Year {subject_year})")
+                    
+                    # Add to subjects_dict
+                    subject_data = {
+                        'subject_name': row.course_name or 'Unknown Subject',
+                        'subject_code': row.course_code or '',
+                        'staff': set(['To be assigned']),
+                        'sections': set(['All Sections']),
+                        'years': set([subject_year]) if subject_year else set(),
+                        'teaching_assignment_ids': [],
+                        'is_elective': False,
+                        'elective_category': None,
+                        'department_name': None,
+                        'department_code': None
+                    }
+                    
+                    subjects_dict[subject_key] = subject_data
             
             print(f"[GetSubjectsByYearView] Total subjects after adding curriculum subjects: {len(subjects_dict)}")
             
@@ -2781,6 +3282,10 @@ class GetSubjectsByYearView(APIView):
             # Sort by subject name
             regular_subjects.sort(key=lambda x: x['subject_name'])
             elective_subjects.sort(key=lambda x: (x.get('elective_category', ''), x['subject_name']))
+
+            if preview_only and not include_electives:
+                elective_subjects = []
+                elective_groups = {}
             
             # Format elective CATEGORIES for HOD view (not individual subjects)
             # HOD sees: "Professional Elective IV", "Emerging Elective I", etc.
@@ -2847,7 +3352,9 @@ class GetSubjectsByYearView(APIView):
                 'years': years,  # All requested years
                 'semester_id': semester_id,
                 'department_id': department_id,
-                'section_ids': section_ids_filter  # Selected section IDs
+                'section_ids': section_ids_filter,  # Selected section IDs
+                'regulation_ids': regulation_ids,
+                'regulation_codes': regulation_codes
             }, status=status.HTTP_200_OK)
             
         except Exception as e:

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.db import transaction
+from django.db.models import Q
 from .models import FeedbackForm, FeedbackQuestion, FeedbackResponse
 from academics.models import Department
 from django.contrib.auth import get_user_model
@@ -54,6 +55,8 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
     
     # Display label (computed)
     target_display = serializers.SerializerMethodField()
+    context_display = serializers.SerializerMethodField()
+    class_context_display = serializers.SerializerMethodField()
     is_submitted = serializers.SerializerMethodField()
     
     class Meta:
@@ -61,57 +64,193 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'target_type', 'type', 'status', 'created_at', 'updated_at',
             'created_by', 'created_by_name', 'questions', 'active',
-            'year', 'semester_number', 'section_name', 'regulation_name', 'all_classes',
+            'department',
+            'year', 'semester_number', 'section_name', 'regulation_name',
             'years', 'semesters', 'sections',
-            'target_display', 'is_submitted'
+            'target_display', 'context_display', 'class_context_display', 'is_submitted'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
-    
-    def get_target_display(self, obj):
-        """Generate display label based on target type and class info."""
-        if obj.target_type == 'STAFF':
-            return 'Staff Feedback'
-        elif obj.target_type == 'STUDENT':
-            if obj.all_classes:
-                return 'All Classes'
-            else:
-                parts = []
-                
-                # Check for multi-class selection
-                if obj.years and len(obj.years) > 0:
-                    year_names = {1: '1st', 2: '2nd', 3: '3rd', 4: '4th'}
-                    year_labels = [year_names.get(y, str(y)) for y in obj.years]
-                    if len(year_labels) > 2:
-                        parts.append(f"Years: {', '.join(year_labels)}")
-                    else:
-                        parts.append(', '.join([f"{y} Year" for y in year_labels]))
-                elif obj.year:
-                    # Fallback to legacy single year
-                    year_names = {1: '1st', 2: '2nd', 3: '3rd', 4: '4th'}
-                    parts.append(f"{year_names.get(obj.year, str(obj.year))} Year")
-                
-                # Semesters
+
+    def _get_section_display_entries(self, obj):
+        """Build unique and ordered section display entries: Dept - Yx - Section A."""
+        from academics.models import Section, AcademicYear
+
+        current_ay = AcademicYear.objects.filter(is_active=True).first()
+        current_acad_year = None
+        if current_ay:
+            try:
+                current_acad_year = int(str(current_ay.name).split('-')[0])
+            except Exception:
+                current_acad_year = None
+
+        section_ids = []
+        if obj.sections:
+            section_ids.extend(list(obj.sections))
+        if obj.section_id:
+            section_ids.append(obj.section_id)
+
+        if not section_ids:
+            return []
+
+        sections_qs = Section.objects.filter(id__in=section_ids).select_related(
+            'semester',
+            'managing_department',
+            'batch__course__department',
+            'batch__department'
+        )
+
+        entries = []
+        seen = set()
+        for sec in sections_qs:
+            if sec.id in seen:
+                continue
+            seen.add(sec.id)
+
+            department_obj = (
+                sec.managing_department
+                or (sec.batch.course.department if sec.batch and sec.batch.course_id else None)
+                or (sec.batch.department if sec.batch else None)
+            )
+            department_label = None
+            if department_obj:
+                department_label = department_obj.short_name or department_obj.code or department_obj.name
+
+            student_year = None
+            if sec.batch and sec.batch.start_year and current_acad_year:
+                try:
+                    student_year = current_acad_year - int(sec.batch.start_year) + 1
+                except Exception:
+                    student_year = None
+
+            year_text = f"Y{student_year}" if student_year else "Y?"
+            dept_text = department_label or "Department"
+            display_name = f"{dept_text} - {year_text} - Section {sec.name}"
+
+            entries.append({
+                'id': sec.id,
+                'department_label': dept_text,
+                'year': student_year if student_year else 99,
+                'semester_number': sec.semester.number if sec.semester_id else None,
+                'section_name': sec.name,
+                'display_name': display_name,
+            })
+
+        entries.sort(key=lambda item: (item['year'], item['department_label'], item['section_name']))
+        return entries
+
+    def get_sections_display(self, obj):
+        return [item['display_name'] for item in self._get_section_display_entries(obj)]
+
+    def get_class_context_display(self, obj):
+        """Build compact class targeting lines grouped by department, year and semester."""
+        if obj.target_type != 'STUDENT':
+            return []
+
+        def ordinal(value):
+            mapping = {1: '1st', 2: '2nd', 3: '3rd', 4: '4th'}
+            return mapping.get(value, str(value))
+
+        entries = self._get_section_display_entries(obj)
+        grouped = {}
+        for item in entries:
+            dept = item.get('department_label') or 'Department'
+            year = item.get('year') if item.get('year') and item.get('year') != 99 else obj.year
+            sem = item.get('semester_number')
+            if sem is None:
                 if obj.semesters and len(obj.semesters) > 0:
                     from academics.models import Semester
-                    sem_objs = Semester.objects.filter(id__in=obj.semesters).values_list('number', flat=True)
-                    sem_nums = sorted(sem_objs)
-                    if len(sem_nums) > 2:
-                        parts.append(f"Sems: {', '.join(map(str, sem_nums))}")
-                    else:
-                        parts.append(', '.join([f"Sem {s}" for s in sem_nums]))
+                    sem_nums = sorted(Semester.objects.filter(id__in=obj.semesters).values_list('number', flat=True))
+                    sem = ', '.join(map(str, sem_nums)) if sem_nums else None
                 elif obj.semester:
-                    parts.append(f"Semester {obj.semester.number}")
-                
-                # Sections
-                if obj.sections and len(obj.sections) > 0:
-                    from academics.models import Section
-                    sec_objs = Section.objects.filter(id__in=obj.sections).values_list('name', flat=True)
-                    sec_names = sorted(set(sec_objs))
-                    parts.append(f"Sections: {', '.join(sec_names)}")
-                elif obj.section:
-                    parts.append(f"Section {obj.section.name}")
-                
-                return ' – '.join(parts) if parts else 'Student Feedback'
+                    sem = obj.semester.number
+
+            key = (str(dept), year, sem)
+            grouped.setdefault(key, [])
+            section_name = item.get('section_name')
+            if section_name and section_name not in grouped[key]:
+                grouped[key].append(section_name)
+
+        lines = []
+        for (dept, year, sem), section_names in sorted(grouped.items(), key=lambda row: (row[0][0], row[0][1] or 99, str(row[0][2] or ''))):
+            year_label = f"{ordinal(year)} Year" if year else 'Year'
+            sem_label = f"Sem {sem}" if sem else 'Sem'
+            if section_names:
+                section_label = 'Sections' if len(section_names) > 1 else 'Section'
+                sections_text = ', '.join(sorted(section_names))
+                lines.append(f"{dept} - {year_label} - {sem_label} - {section_label} {sections_text}")
+            else:
+                lines.append(f"{dept} - {year_label} - {sem_label}")
+
+        # Backward-compatible fallback for older forms with no section mapping.
+        if not lines:
+            dept_obj = getattr(obj, 'department', None)
+            dept = (dept_obj.short_name or dept_obj.code or dept_obj.name) if dept_obj else 'Department'
+
+            year_label = None
+            if obj.years and len(obj.years) > 0:
+                year_label = ', '.join([f"{ordinal(y)} Year" for y in obj.years])
+            elif obj.year:
+                year_label = f"{ordinal(obj.year)} Year"
+
+            sem_label = None
+            if obj.semesters and len(obj.semesters) > 0:
+                from academics.models import Semester
+                sem_nums = sorted(Semester.objects.filter(id__in=obj.semesters).values_list('number', flat=True))
+                if sem_nums:
+                    sem_label = f"Sem {', '.join(map(str, sem_nums))}"
+            elif obj.semester:
+                sem_label = f"Sem {obj.semester.number}"
+
+            base_parts = [part for part in [dept, year_label, sem_label] if part]
+            if base_parts:
+                lines.append(' - '.join(base_parts))
+
+        return lines
+
+    def get_context_display(self, obj):
+        """Generate consolidated class targeting display for cards and detail headers."""
+        if obj.target_type == 'STAFF':
+            return 'Staff Feedback'
+        if obj.target_type != 'STUDENT':
+            return 'Feedback'
+
+        class_lines = self.get_class_context_display(obj)
+        if class_lines:
+            return class_lines[0]
+
+        parts = []
+
+        year_names = {1: '1st', 2: '2nd', 3: '3rd', 4: '4th'}
+        if obj.years and len(obj.years) > 0:
+            year_labels = [f"{year_names.get(y, str(y))} Year" for y in obj.years]
+            parts.append(', '.join(year_labels))
+        elif obj.year:
+            parts.append(f"{year_names.get(obj.year, str(obj.year))} Year")
+
+        sem_nums = []
+        if obj.semesters and len(obj.semesters) > 0:
+            from academics.models import Semester
+            sem_nums = sorted(Semester.objects.filter(id__in=obj.semesters).values_list('number', flat=True))
+        elif obj.semester:
+            sem_nums = [obj.semester.number]
+
+        if sem_nums:
+            parts.append(f"Sem {', '.join(map(str, sem_nums))}")
+
+        sections_display = self.get_sections_display(obj)
+        if sections_display:
+            parts.append(', '.join(sections_display))
+        elif obj.section:
+            parts.append(f"Section {obj.section.name}")
+
+        return ' - '.join(parts) if parts else 'Student Feedback'
+    
+    def get_target_display(self, obj):
+        """Return generic target label; detailed class context is in context_display."""
+        if obj.target_type == 'STAFF':
+            return 'Staff Feedback'
+        if obj.target_type == 'STUDENT':
+            return 'Student Feedback'
         return 'Feedback'
     
     def get_is_submitted(self, obj):
@@ -145,6 +284,12 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
                 
                 if not section:
                     return False
+
+                batch = section.batch
+                batch_regulation = batch.regulation if batch else None
+                regulation_code = getattr(batch_regulation, 'code', None)
+                regulation_active_semester_id = getattr(batch_regulation, 'current_active_semester_id', None) if batch_regulation else None
+                effective_semester_id = regulation_active_semester_id or section.semester_id
                 
                 current_ay = AcademicYear.objects.filter(is_active=True).first()
                 
@@ -154,6 +299,20 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
                     academic_year__is_active=True,
                     is_active=True
                 )
+
+                if regulation_code:
+                    all_section_tas = all_section_tas.filter(
+                        Q(curriculum_row__regulation=regulation_code)
+                        | Q(elective_subject__regulation=regulation_code)
+                        | Q(curriculum_row__isnull=True, elective_subject__isnull=True)
+                    )
+
+                if effective_semester_id:
+                    all_section_tas = all_section_tas.filter(
+                        Q(curriculum_row__semester_id=effective_semester_id)
+                        | Q(elective_subject__semester_id=effective_semester_id)
+                        | Q(section__semester_id=effective_semester_id)
+                    )
                 
                 # Get student's elective choices
                 student_elective_ids = set(
@@ -161,6 +320,10 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
                         student=student_profile,
                         academic_year=current_ay,
                         is_active=True
+                    ).filter(
+                        Q(elective_subject__regulation=regulation_code) if regulation_code else Q()
+                    ).filter(
+                        Q(elective_subject__semester_id=effective_semester_id) if effective_semester_id else Q()
                     ).values_list('elective_subject_id', flat=True)
                 )
                 
@@ -229,12 +392,30 @@ class FeedbackFormCreateSerializer(serializers.ModelSerializer):
         model = FeedbackForm
         fields = [
             'target_type', 'type', 'is_subject_based', 'department', 'status', 'questions',
-            'year', 'semester', 'section', 'regulation', 'all_classes',
+            'year', 'semester', 'section', 'regulation',
             'years', 'semesters', 'sections'
         ]
     
     def validate(self, data):
-        """Validate that questions are provided."""
+        """Validate mandatory fields and question payload consistency."""
+        if not data.get('department'):
+            raise serializers.ValidationError({'department': 'Department selection is required.'})
+
+        if not data.get('target_type'):
+            raise serializers.ValidationError({'target_type': 'Target audience is required.'})
+
+        if not data.get('type'):
+            raise serializers.ValidationError({'type': 'Feedback type is required.'})
+
+        # Keep is_subject_based consistent with type and validate if explicitly provided.
+        expected_subject_based = data.get('type') == 'SUBJECT_FEEDBACK'
+        provided_subject_based = data.get('is_subject_based', None)
+        if provided_subject_based is not None and provided_subject_based != expected_subject_based:
+            raise serializers.ValidationError({
+                'is_subject_based': 'is_subject_based must match feedback type.'
+            })
+        data['is_subject_based'] = expected_subject_based
+
         questions = data.get('questions', [])
         if not questions:
             raise serializers.ValidationError({
@@ -248,6 +429,15 @@ class FeedbackFormCreateSerializer(serializers.ModelSerializer):
             data['semesters'] = []
         if 'sections' not in data or data['sections'] is None:
             data['sections'] = []
+        else:
+            # Prevent duplicate section ids while preserving selection order.
+            data['sections'] = list(dict.fromkeys(data['sections']))
+
+        # Mandatory class targeting for student feedback.
+        if data.get('target_type') == 'STUDENT':
+            if not data.get('years'):
+                raise serializers.ValidationError({'years': 'Please select at least one year.'})
+            # Sections are optional: empty sections means all sections of selected year(s).
         
         return data
     

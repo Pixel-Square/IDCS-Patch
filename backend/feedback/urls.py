@@ -7,6 +7,7 @@ from .views import (
     GetClassOptionsView,
     DeactivateFeedbackFormView,
     PublishFeedbackFormView,
+    UpdateFeedbackFormView,
     GetResponseStatisticsView,
     GetResponseListView,
     GetStudentSubjectsView,
@@ -36,6 +37,9 @@ urlpatterns = [
     
     # API: Publish Feedback Form (HOD)
     path('<int:form_id>/publish/', PublishFeedbackFormView.as_view(), name='feedback-publish'),
+
+    # API: Update Draft Feedback Form (HOD)
+    path('<int:form_id>/update/', UpdateFeedbackFormView.as_view(), name='feedback-update'),
     
     # API 7: Get Response Statistics (HOD)
     path('<int:form_id>/statistics/', GetResponseStatisticsView.as_view(), name='feedback-statistics'),
