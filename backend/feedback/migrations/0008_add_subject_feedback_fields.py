@@ -37,17 +37,44 @@ class Migration(migrations.Migration):
                 help_text='Staff member this feedback is about (for subject feedback type)',
             ),
         ),
-        migrations.AddField(
-            model_name='feedbackresponse',
-            name='teaching_assignment',
-            field=models.ForeignKey(
-                blank=True,
-                null=True,
-                on_delete=django.db.models.deletion.SET_NULL,
-                related_name='feedback_responses',
-                to='academics.teachingassignment',
-                help_text='Teaching assignment this feedback relates to',
-            ),
+        migrations.SeparateDatabaseAndState(
+            # NOTE:
+            # Some environments already have `teaching_assignment_id` created
+            # (manual SQL / earlier schema). The plain AddField would crash with
+            # DuplicateColumn on Postgres.
+            database_operations=[
+                migrations.RunSQL(
+                    sql="""
+                    DO $$
+                    BEGIN
+                      IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'feedback_responses'
+                          AND column_name = 'teaching_assignment_id'
+                      ) THEN
+                        ALTER TABLE feedback_responses
+                          ADD COLUMN teaching_assignment_id bigint NULL;
+                      END IF;
+                    END $$;
+                    """,
+                    reverse_sql=migrations.RunSQL.noop,
+                ),
+            ],
+            state_operations=[
+                migrations.AddField(
+                    model_name='feedbackresponse',
+                    name='teaching_assignment',
+                    field=models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name='feedback_responses',
+                        to='academics.teachingassignment',
+                        help_text='Teaching assignment this feedback relates to',
+                    ),
+                ),
+            ],
         ),
         # Update unique_together to include subject and staff for subject feedback
         migrations.AlterUniqueTogether(
