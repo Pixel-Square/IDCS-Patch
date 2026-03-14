@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { getMe } from "./services/auth";
+import { derivePrimaryRole, getMe } from "./services/auth";
 import Navbar from "./components/navigation/Navbar";
 import DashboardSidebar from './components/layout/DashboardSidebar';
 import { useSidebar } from './components/layout/SidebarContext';
@@ -88,6 +88,7 @@ type Me = {
   username: string;
   email?: string;
   roles?: string[];
+  role?: string;
   permissions?: string[];
   profile_type?: string | null;
   profile?: any | null;
@@ -139,6 +140,7 @@ export default function App() {
                 typeof role === 'string' ? role : role.name,
               )
             : [],
+          role: derivePrimaryRole(r.roles),
           permissions: Array.isArray(r.permissions) ? r.permissions : [],
           profile_type: r.profile_type || null,
           profile: r.profile || null,

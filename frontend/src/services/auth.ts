@@ -152,6 +152,17 @@ apiClient.interceptors.response.use(
 )
 
 export async function login(identifier: string, password: string){
+  // Clear any stale cached profile/role state before establishing a new session.
+  // (Fixes cases where old HOD roles linger for IQAC users.)
+  try {
+    localStorage.removeItem('roles')
+    localStorage.removeItem('permissions')
+    localStorage.removeItem('me')
+    localStorage.removeItem('role')
+  } catch {
+    // ignore
+  }
+
   let res
   try {
     res = await apiClient.post('token/', { identifier, password }, { timeout: LOGIN_API_TIMEOUT })
@@ -173,6 +184,18 @@ export async function login(identifier: string, password: string){
     // ignore - caller will handle missing profile
   }
   return res.data
+}
+
+export function derivePrimaryRole(roles: unknown): string {
+  const list = Array.isArray(roles) ? roles : []
+  const normalized = list
+    .map((r: any) => (typeof r === 'string' ? r : r?.name))
+    .map((r: any) => String(r || '').trim().toUpperCase())
+    .filter(Boolean)
+
+  // Prefer IQAC when present so multi-role users default correctly.
+  if (normalized.includes('IQAC')) return 'IQAC'
+  return normalized[0] || ''
 }
 
 export function logout(){
@@ -201,11 +224,16 @@ export async function getMe(){
   }
   const res = await apiClient.get('me/')
   const me = res.data
+  const primaryRole = derivePrimaryRole(me?.roles)
+  if (primaryRole) {
+    me.role = primaryRole
+  }
   try{
     // persist roles and permissions for easy access by UI
     localStorage.setItem('roles', JSON.stringify(me.roles || []))
     localStorage.setItem('permissions', JSON.stringify(me.permissions || []))
     localStorage.setItem('me', JSON.stringify(me || null))
+    if (primaryRole) localStorage.setItem('role', primaryRole)
   }catch(e){
     // ignore storage errors
   }
