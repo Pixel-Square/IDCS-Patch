@@ -169,11 +169,21 @@ if BI_DB_NAME:
         },
     }
 
-# Django cache config using Redis (used by sessions, caching, etc.)
+# Django cache config using Redis (shared across all gunicorn workers).
+# django-redis is installed; locmem is NEVER shared between workers so sessions
+# always miss and hit the DB — use Redis to fix that.
+_REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1')
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake',
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': _REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'IGNORE_EXCEPTIONS': True,  # degrade gracefully if Redis blips
+        },
+        'TIMEOUT': 300,  # 5 minutes default TTL
     }
 }
 

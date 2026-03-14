@@ -740,3 +740,17 @@ class UserQueryAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         """Prevent adding queries from admin - they should be created by users via API."""
         return False
+
+
+# Register any remaining accounts models without explicit admin classes above.
+from django.apps import apps as django_apps
+from django.contrib.admin.sites import AlreadyRegistered
+
+_accounts_app_config = next((cfg for cfg in django_apps.get_app_configs() if cfg.name == 'accounts'), None)
+if _accounts_app_config:
+    for _model in _accounts_app_config.get_models():
+        if _model not in admin.site._registry:
+            try:
+                admin.site.register(_model)
+            except AlreadyRegistered:
+                pass
