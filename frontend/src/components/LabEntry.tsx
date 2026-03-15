@@ -536,13 +536,48 @@ export default function LabEntry({
         if (!mounted) return;
         const d = (res as any)?.draft as LabDraftPayload | null;
         if (d && typeof d === 'object' && d.sheet && typeof d.sheet === 'object') {
-          const coAEnabled = Boolean((d.sheet as any).coAEnabled ?? true);
-          const coBEnabled = Boolean((d.sheet as any).coBEnabled ?? true);
           const ciaExamEnabled = Boolean((d.sheet as any).ciaExamEnabled ?? true);
-          const expCountA = clampInt(Number((d.sheet as any).expCountA ?? DEFAULT_EXPERIMENTS), 0, 12);
-          const expCountB = clampInt(Number((d.sheet as any).expCountB ?? DEFAULT_EXPERIMENTS), 0, 12);
-          const btlsA = normalizeBtlArray((d.sheet as any).btlsA, expCountA);
-          const btlsB = normalizeBtlArray((d.sheet as any).btlsB, expCountB);
+          const expCountALegacy = clampInt(Number((d.sheet as any).expCountA ?? DEFAULT_EXPERIMENTS), 0, 12);
+          const expCountBLegacy = clampInt(Number((d.sheet as any).expCountB ?? DEFAULT_EXPERIMENTS), 0, 12);
+          const expMaxALegacy = clampInt(Number((d.sheet as any).expMaxA ?? DEFAULT_EXPERIMENT_MAX), 0, 100);
+          const expMaxBLegacy = clampInt(Number((d.sheet as any).expMaxB ?? DEFAULT_EXPERIMENT_MAX), 0, 100);
+          const btlsALegacy = normalizeBtlArray((d.sheet as any).btlsA, expCountALegacy);
+          const btlsBLegacy = normalizeBtlArray((d.sheet as any).btlsB, expCountBLegacy);
+
+          // `coConfigs` is the source of truth for experiment counts/max-per-experiment.
+          // If it's dropped here, the UI will revert to DEFAULT_EXPERIMENTS (5) and DEFAULT_EXPERIMENT_MAX.
+          const loadedCoConfigs = buildCoConfigs(
+            {
+              termLabel: String((d.sheet as any).termLabel || (masterCfg as any)?.termLabel || 'KRCT AY25-26'),
+              batchLabel: String(subjectId),
+              coAEnabled: Boolean((d.sheet as any).coAEnabled ?? true),
+              coBEnabled: Boolean((d.sheet as any).coBEnabled ?? true),
+              ciaExamEnabled,
+              expCountA: expCountALegacy,
+              expMaxA: expMaxALegacy,
+              expCountB: expCountBLegacy,
+              expMaxB: expMaxBLegacy,
+              btlsA: btlsALegacy,
+              btlsB: btlsBLegacy,
+              coConfigs: (d.sheet as any).coConfigs,
+              reviewComponents: (d.sheet as any).reviewComponents,
+              rowsByStudentId: {},
+            } as any,
+            selectableCosArr,
+            coA,
+            coB,
+          );
+
+          const cfgA = loadedCoConfigs[String(coA)];
+          const cfgB = loadedCoConfigs[String(coB)];
+          const coAEnabled = Boolean(cfgA?.enabled);
+          const coBEnabled = Boolean(cfgB?.enabled);
+          const expCountA = clampInt(Number(cfgA?.expCount ?? expCountALegacy), 0, 12);
+          const expCountB = clampInt(Number(cfgB?.expCount ?? expCountBLegacy), 0, 12);
+          const expMaxA = clampInt(Number(cfgA?.expMax ?? expMaxALegacy), 0, 100);
+          const expMaxB = clampInt(Number(cfgB?.expMax ?? expMaxBLegacy), 0, 100);
+          const btlsA = normalizeBtlArray(cfgA?.btl ?? btlsALegacy, expCountA);
+          const btlsB = normalizeBtlArray(cfgB?.btl ?? btlsBLegacy, expCountB);
           const reviewComponents = constrainReviewComponentsTotal(normalizeReviewComponents((d.sheet as any).reviewComponents));
           const normalizedRows: Record<string, LabRowState> = {};
           const rawRows = (d.sheet as any).rowsByStudentId && typeof (d.sheet as any).rowsByStudentId === 'object' ? (d.sheet as any).rowsByStudentId : {};
@@ -590,9 +625,12 @@ export default function LabEntry({
               coBEnabled,
               ciaExamEnabled,
               expCountA,
+              expMaxA,
               expCountB,
+              expMaxB,
               btlsA,
               btlsB,
+              coConfigs: loadedCoConfigs,
               reviewComponents,
               rowsByStudentId: normalizedRows,
               markManagerLocked: loadedLocked,
@@ -660,7 +698,7 @@ export default function LabEntry({
     return () => {
       mounted = false;
     };
-  }, [assessmentKey, subjectId, key, masterCfg]);
+  }, [assessmentKey, subjectId, key, masterCfg, teachingAssignmentId, selectableCosArr, coA, coB]);
 
   // Fetch roster
   useEffect(() => {
@@ -855,7 +893,7 @@ export default function LabEntry({
       cancelled = true;
       clearTimeout(tid);
     };
-  }, [assessmentKey, subjectId, draft]);
+  }, [assessmentKey, subjectId, draft, teachingAssignmentId]);
 
   const coConfigs = useMemo(() => buildCoConfigs(draft.sheet, selectableCosArr, coA, coB), [draft.sheet, selectableCosArr, coA, coB]);
 
@@ -1202,6 +1240,13 @@ export default function LabEntry({
     if (!file) return;
 
     const normalizeReg = (v: any) => normalizeRegisterNo(v);
+    const normalizeHeaderKey = (v: any) =>
+      String(v ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^0-9a-z]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     const parseFinite = (v: any): number | null => {
       if (v == null || v === '') return null;
       if (typeof v === 'string' && !v.trim()) return null;
@@ -1214,7 +1259,7 @@ export default function LabEntry({
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
       const sheet0 = workbook.Sheets[workbook.SheetNames[0]];
-      const rows: any[][] = XLSX.utils.sheet_to_json(sheet0, { header: 1, defval: '', blankrows: false, raw: false });
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet0, { header: 1, defval: '', blankrows: false, raw: true });
       if (!Array.isArray(rows) || rows.length < 2) {
         alert('Excel file is empty.');
         return;
@@ -1223,23 +1268,38 @@ export default function LabEntry({
       const header = (rows[0] || []).map((h) => String(h ?? '').trim());
       const colMap = new Map<string, number>();
       header.forEach((h, i) => {
-        if (h) colMap.set(h, i);
+        if (!h) return;
+        colMap.set(h, i);
+        const norm = normalizeHeaderKey(h);
+        if (norm) colMap.set(norm, i);
       });
 
-      const regIdx = colMap.get('Register No');
+      const getCol = (...names: string[]) => {
+        for (const name of names) {
+          const direct = colMap.get(name);
+          if (direct != null) return direct;
+          const norm = normalizeHeaderKey(name);
+          if (!norm) continue;
+          const idx = colMap.get(norm);
+          if (idx != null) return idx;
+        }
+        return null;
+      };
+
+      const regIdx = getCol('Register No', 'Register No.', 'Reg No', 'Reg No.', 'Reg.No', 'RegNo', 'Register Number', 'Roll No', 'Roll No.', 'Roll Number');
       if (regIdx == null) {
         alert('Invalid file format: Register No column not found.');
         return;
       }
 
-      const absentIdx = colMap.get('Absent');
-      const ciaIdx = colMap.get('CIA Exam');
+      const absentIdx = getCol('Absent');
+      const ciaIdx = getCol('CIA Exam', 'CIA');
       const expCols = enabledCoMetas.flatMap((m) =>
         Array.from({ length: m.expCount }, (_, i) => ({
           coNumber: m.coNumber,
           expIndex: i,
           expMax: m.expMax,
-          idx: colMap.get(`CO${m.coNumber}_E${i + 1}`),
+          idx: getCol(`CO${m.coNumber}_E${i + 1}`, `CO${m.coNumber} E${i + 1}`, `CO${m.coNumber}-E${i + 1}`),
         })),
       );
 
@@ -1374,8 +1434,12 @@ export default function LabEntry({
     setDraft((p) => {
       if (p.sheet.markManagerLocked) return p;
       const cfgs = buildCoConfigs(p.sheet, selectableCosArr, coA, coB);
-      cfgs[String(coNumber)] = { ...cfgs[String(coNumber)], enabled };
-      return { ...p, sheet: { ...p.sheet, coConfigs: cfgs } };
+      const k = String(coNumber);
+      cfgs[k] = { ...cfgs[k], enabled };
+      const nextSheet: any = { ...p.sheet, coConfigs: cfgs };
+      if (coNumber === coA) nextSheet.coAEnabled = enabled;
+      if (coNumber === coB) nextSheet.coBEnabled = enabled;
+      return { ...p, sheet: nextSheet };
     });
   }
 
@@ -1384,8 +1448,12 @@ export default function LabEntry({
     setDraft((p) => {
       if (p.sheet.markManagerLocked) return p;
       const cfgs = buildCoConfigs(p.sheet, selectableCosArr, coA, coB);
-      cfgs[String(coNumber)] = { ...cfgs[String(coNumber)], expMax: next };
-      return { ...p, sheet: { ...p.sheet, coConfigs: cfgs } };
+      const k = String(coNumber);
+      cfgs[k] = { ...cfgs[k], expMax: next };
+      const nextSheet: any = { ...p.sheet, coConfigs: cfgs };
+      if (coNumber === coA) nextSheet.expMaxA = next;
+      if (coNumber === coB) nextSheet.expMaxB = next;
+      return { ...p, sheet: nextSheet };
     });
   }
 
@@ -1406,9 +1474,23 @@ export default function LabEntry({
         const row = rowsByStudentId[k];
         const mbc = (row as any).marksByCo && typeof (row as any).marksByCo === 'object' ? { ...(row as any).marksByCo } : {};
         mbc[String(coNumber)] = normalizeMarksArray(mbc[String(coNumber)], next);
-        rowsByStudentId[k] = { ...row, marksByCo: mbc } as LabRowState;
+        const nextRow: any = { ...row, marksByCo: mbc };
+        if (coNumber === coA) nextRow.marksA = normalizeMarksArray((row as any).marksA, next);
+        if (coNumber === coB) nextRow.marksB = normalizeMarksArray((row as any).marksB, next);
+        rowsByStudentId[k] = nextRow as LabRowState;
       }
-      return { ...p, sheet: { ...p.sheet, coConfigs: cfgs, rowsByStudentId } };
+
+      const nextSheet: any = { ...p.sheet, coConfigs: cfgs, rowsByStudentId };
+      if (coNumber === coA) {
+        nextSheet.expCountA = next;
+        nextSheet.btlsA = cfgs[String(coNumber)]?.btl ?? nextSheet.btlsA;
+      }
+      if (coNumber === coB) {
+        nextSheet.expCountB = next;
+        nextSheet.btlsB = cfgs[String(coNumber)]?.btl ?? nextSheet.btlsB;
+      }
+
+      return { ...p, sheet: nextSheet };
     });
   }
 
@@ -1420,7 +1502,10 @@ export default function LabEntry({
       const btl = [...old.btl];
       btl[expIndex] = value;
       cfgs[String(coNumber)] = { ...old, btl };
-      return { ...p, sheet: { ...p.sheet, coConfigs: cfgs } };
+      const nextSheet: any = { ...p.sheet, coConfigs: cfgs };
+      if (coNumber === coA) nextSheet.btlsA = btl;
+      if (coNumber === coB) nextSheet.btlsB = btl;
+      return { ...p, sheet: nextSheet };
     });
   }
 
@@ -1650,7 +1735,7 @@ export default function LabEntry({
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
-  }, [subjectId, assessmentKey, tableBlocked]);
+  }, [subjectId, assessmentKey, tableBlocked, teachingAssignmentId]);
 
   async function resetSheet() {
     if (!subjectId) return;
@@ -1791,7 +1876,7 @@ export default function LabEntry({
   useEffect(() => {
     if (!subjectId) return;
     refreshPublishedSnapshot(false);
-  }, [subjectId, assessmentKey]);
+  }, [subjectId, assessmentKey, teachingAssignmentId]);
 
   const prevEntryOpenRef = React.useRef<boolean | null>(null);
   useEffect(() => {
@@ -1862,7 +1947,7 @@ export default function LabEntry({
     if (!subjectId) return;
     setPublishedViewSnapshot(null);
     refreshPublishedSnapshot(true);
-  }, [viewMarksModalOpen, subjectId, assessmentKey]);
+  }, [viewMarksModalOpen, subjectId, assessmentKey, teachingAssignmentId]);
 
   // identity + experiments + total + CIA exam + CO attainment + BTL
   const headerCols = 3 + Math.max(totalExpCols, 1) + 1 + coAttainmentCols + visibleBtlIndices.length * 2;

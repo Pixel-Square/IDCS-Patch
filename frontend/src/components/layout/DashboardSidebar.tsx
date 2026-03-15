@@ -44,6 +44,7 @@ import { useAttendanceNotificationCount } from '../../hooks/useAttendanceNotific
   pbas_manager: Layout,
   settings: Settings,
   hr_request_templates: FileText,
+  hr_manage_gate: Shield,
   staff_requests_approvals: Bell,
   requests_hub: Bell,
   applications_admin: Layout,
@@ -51,6 +52,7 @@ import { useAttendanceNotificationCount } from '../../hooks/useAttendanceNotific
   applications_home: Layout,
   idscan_test: ScanLine,
   idscan_gatepass: Shield,
+  idscan_gatescan: Shield,
   rf_reader: Grid,
   feedback: MessageCircle,
 };
@@ -349,10 +351,22 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   }
   // IDCSScan — available to SECURITY, IQAC, and ADMIN roles
   const isSecurity = rolesUpper.includes('SECURITY');
-  if (isSecurity && !items.some((i) => i.key === 'idscan_test')) {
+  const isLibrary = rolesUpper.includes('LIBRARY');
+  
+  // LIBRARY role: only Profile and Assign Cards
+  if (isLibrary) {
+    // Remove all items except Profile that was added via unshift
+    const profileItem = items.find(i => i.key === 'profile');
+    items.length = 0;
+    if (profileItem) items.push(profileItem);
+    items.push({ key: 'idscan_assign_cards', label: 'Assign Cards', to: '/idscan/assign-cards' });
+    items.push({ key: 'idscan_cards_data', label: 'Cards Data', to: '/idscan/cards-data' });
+  } else if (isSecurity && !items.some((i) => i.key === 'idscan_test')) {
     items.push({ key: 'idscan_test',     label: 'RFID Scanner Test', to: '/idscan/test' });
     items.push({ key: 'idscan_assign_cards', label: 'RFID Card Assignment', to: '/idscan/assign-cards' });
+    items.push({ key: 'idscan_cards_data', label: 'Cards Data', to: '/idscan/cards-data' });
     items.push({ key: 'idscan_gatepass', label: 'Gatepass Scanner',   to: '/idscan/gatepass' });
+    items.push({ key: 'idscan_gatescan', label: 'GateScan', to: '/idscan/gatescan' });
   }
   if (!isSecurity && applicationsNav?.show_applications && !items.some((item) => item.key === 'applications_home')) {
     items.push({ key: 'applications_home', label: 'My Applications', to: '/applications' });
@@ -384,6 +398,14 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   // HR Features
   if ((permsLower.includes('staff_requests.manage_templates') || rolesUpper.includes('HR')) && !items.some(item => item.key === 'hr_request_templates')) {
     items.push({ key: 'hr_request_templates', label: 'HR: Request Templates', to: '/hr/request-templates' });
+  }
+
+  if ((rolesUpper.includes('HR') || rolesUpper.includes('SECURITY')) && !items.some(item => item.key === 'hr_manage_gate')) {
+    items.push({ key: 'hr_manage_gate', label: 'HR: Manage Gate', to: '/hr/manage-gate' });
+  }
+
+  if (rolesUpper.includes('HR') && !items.some(item => item.key === 'hr_gatepass_logs')) {
+    items.push({ key: 'hr_gatepass_logs', label: 'HR: GatePass Logs', to: '/hr/gatepass-logs' });
   }
 
   if (rolesUpper.includes('HR') && !items.some(item => item.key === 'hr_staff_attendance_analytics')) {

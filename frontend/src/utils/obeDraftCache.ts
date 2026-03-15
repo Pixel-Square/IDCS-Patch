@@ -33,19 +33,19 @@ export function clearLocalDraftCache(subjectId: string, assessment: string, teac
   // Sheet-style caches
   if (a === 'ssa1') {
     removeSheetKeys('ssa1');
-    lsRemove(`ssa1_selected_btls_${sid}`);
+    removeKeysByPrefix(`ssa1_selected_btls_${sid}`);
   }
   if (a === 'review1') {
     removeSheetKeys('review1');
-    lsRemove(`review1_selected_btls_${sid}`);
+    removeKeysByPrefix(`review1_selected_btls_${sid}`);
   }
   if (a === 'ssa2') {
     removeSheetKeys('ssa2');
-    lsRemove(`ssa2_selected_btls_${sid}`);
+    removeKeysByPrefix(`ssa2_selected_btls_${sid}`);
   }
   if (a === 'review2') {
     removeSheetKeys('review2');
-    lsRemove(`review2_selected_btls_${sid}`);
+    removeKeysByPrefix(`review2_selected_btls_${sid}`);
   }
   if (a === 'formative1') {
     removeSheetKeys('formative1');

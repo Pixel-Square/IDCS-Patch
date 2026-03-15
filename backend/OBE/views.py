@@ -1926,12 +1926,15 @@ def _resolve_staff_teaching_assignment(request, subject_code: str, teaching_assi
 
     qs = TeachingAssignment.objects.select_related('academic_year', 'subject', 'curriculum_row', 'section').filter(is_active=True)
     if teaching_assignment_id is not None:
+        ta = None
         if staff_profile is not None:
             ta = qs.filter(id=teaching_assignment_id, staff=staff_profile).first()
+            # For IQAC/HOD/master roles that also have a staff_profile, allow scoping
+            # by explicit teaching_assignment_id even if they are not the assigned staff.
+            if ta is None and _has_obe_master_access(user):
+                ta = qs.filter(id=teaching_assignment_id).first()
         elif _has_obe_master_access(user):
             ta = qs.filter(id=teaching_assignment_id).first()
-        else:
-            ta = None
         if ta is not None:
             return ta
 

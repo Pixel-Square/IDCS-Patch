@@ -67,6 +67,8 @@ import IQACStaffAttendancePage from './pages/iqac/StaffAttendance';
 import PSStaffAttendanceViewPage from './pages/PS/StaffAttendanceView';
 import RequestTemplatesPage from './pages/hr/RequestTemplatesPage';
 import OrganizationStaffAttendanceAnalytics from './pages/hr/OrganizationStaffAttendanceAnalytics';
+import ManageGatePage from './pages/hr/ManageGatePage';
+import GatePassLogsPage from './pages/hr/GatePassLogsPage';
 import MyRequestsPage from './pages/staff-requests/MyRequestsPage';
 import PendingApprovalsPage from './pages/staff-requests/PendingApprovalsPage';
 import ApplicationsAdminPage from './pages/iqac/ApplicationsAdminPage';
@@ -80,6 +82,8 @@ import RFReaderAssignCardsPage from './pages/RFReader/AssignCardsPage';
 import RFReaderCreateGatePage from './pages/RFReader/CreateGatePage';
 import RFReaderTestStudentsPage from './pages/RFReader/TestStudentsPage';
 import RFReaderAddStudentsRFPage from './pages/RFReader/AddStudentsRFPage';
+import RFReaderGateScanPage from './pages/RFReader/GateScanPage';
+import RFReaderCardsDataPage from './pages/RFReader/CardsDataPage';
 import AttendanceAnalyticsRequestsPage from './pages/attendance/AttendanceAnalyticsRequestsPage';
 import RequestsPage from './pages/requests/RequestsPage';
 import ProfileImageUpdateRequestsPage from './pages/requests/ProfileImageUpdateRequestsPage';
@@ -379,11 +383,19 @@ export default function App() {
                 />
                 <Route
                   path="/idscan/assign-cards"
-                  element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<RFReaderAssignCardsPage />} />}
+                  element={<ProtectedRoute user={user} requiredRoles={['SECURITY', 'LIBRARY']} element={<RFReaderAssignCardsPage />} />}
+                />
+                <Route
+                  path="/idscan/cards-data"
+                  element={<ProtectedRoute user={user} requiredRoles={['LIBRARY', 'SECURITY', 'IQAC', 'ADMIN']} element={<RFReaderCardsDataPage />} />}
                 />
                 <Route
                   path="/idscan/gatepass"
                   element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<IDCSScanGatepassPage />} />}
+                />
+                <Route
+                  path="/idscan/gatescan"
+                  element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<RFReaderGateScanPage />} />}
                 />
                 <Route
                   path="/iqac/rf-reader"
@@ -481,6 +493,14 @@ export default function App() {
                 <Route
                   path="/hr/staff-attendance-analytics"
                   element={<ProtectedRoute user={user} requiredRoles={['HR']} requiredPermissions={['staff_requests.manage_templates']} element={<OrganizationStaffAttendanceAnalytics />} />}
+                />
+                <Route
+                  path="/hr/manage-gate"
+                  element={<ProtectedRoute user={user} requiredRoles={['HR', 'SECURITY']} element={<ManageGatePage />} />}
+                />
+                <Route
+                  path="/hr/gatepass-logs"
+                  element={<ProtectedRoute user={user} requiredRoles={['HR']} element={<GatePassLogsPage />} />}
                 />
                 
                 {/* Staff Requests Routes */}

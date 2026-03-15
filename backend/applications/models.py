@@ -20,6 +20,9 @@ class ApplicationField(models.Model):
     class FieldType(models.TextChoices):
         TEXT = 'TEXT', 'Text'
         DATE = 'DATE', 'Date'
+        TIME = 'TIME', 'Time'
+        DATE_IN_OUT = 'DATE IN OUT', 'Date In Out'
+        DATE_OUT_IN = 'DATE OUT IN', 'Date Out In'
         BOOLEAN = 'BOOLEAN', 'Boolean'
         FILE = 'FILE', 'File'
         NUMBER = 'NUMBER', 'Number'
@@ -106,6 +109,31 @@ class Application(models.Model):
         null=True, blank=True,
         on_delete=models.SET_NULL,
         related_name='gatepass_scans',
+    )
+
+    # Gatepass entry scan tracking — set when Security scans the student back in
+    gatepass_in_scanned_at = models.DateTimeField(null=True, blank=True)
+    gatepass_in_scanned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='gatepass_in_scans',
+    )
+
+    class GatepassScanMode(models.TextChoices):
+        ONLINE = 'ONLINE', 'Online'
+        OFFLINE = 'OFFLINE', 'Offline'
+
+    # Scan source mode (ONLINE/OFFLINE). Defaults to ONLINE for backwards compatibility.
+    gatepass_scanned_mode = models.CharField(
+        max_length=10,
+        choices=GatepassScanMode.choices,
+        default=GatepassScanMode.ONLINE,
+    )
+    gatepass_in_scanned_mode = models.CharField(
+        max_length=10,
+        choices=GatepassScanMode.choices,
+        default=GatepassScanMode.ONLINE,
     )
 
     class Meta:
