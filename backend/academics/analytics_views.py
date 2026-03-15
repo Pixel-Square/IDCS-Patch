@@ -13,6 +13,7 @@ from .models import (
     PeriodAttendanceSession,
     StudentProfile, 
     Section, 
+    Department,
     StaffProfile,
     DepartmentRole
 )
@@ -329,7 +330,6 @@ class AnalyticsFiltersView(APIView):
         if not (can_view_all or can_view_department or can_view_class):
             raise PermissionDenied('You do not have permission to view analytics')
         
-        from curriculum.models import Department
         departments = []
         sections = []
         

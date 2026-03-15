@@ -14,12 +14,147 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 6px 16px rgba(15, 23, 42, 0.08);
   --radius: 10px;
+
+  /* Django admin CSS vars - keep forms readable in all theme modes */
+  --primary: var(--kr-primary);
+  --secondary: #4b5563;
+  --accent: var(--kr-secondary);
+  --primary-fg: #ffffff;
+
+  --body-fg: var(--kr-text);
+  --body-bg: var(--kr-bg);
+  --body-quiet-color: var(--kr-subtle);
+  --body-loud-color: #111827;
+
+  --header-color: #ffffff;
+  --header-branding-color: #ffffff;
+  --header-bg: var(--kr-primary);
+  --header-link-color: #ffffff;
+
+  --breadcrumbs-fg: #374151;
+  --breadcrumbs-link-fg: var(--kr-primary);
+  --breadcrumbs-bg: #eef2ff;
+
+  --link-fg: var(--kr-primary);
+  --link-hover-color: var(--kr-primary-dark);
+  --link-selected-fg: var(--kr-primary-dark);
+
+  --hairline-color: var(--kr-border);
+  --border-color: var(--kr-border);
+
+  --error-fg: var(--kr-danger);
+
+  --message-success-bg: #ecfdf3;
+  --message-warning-bg: #fff7ed;
+  --message-error-bg: #fef2f2;
+
+  --darkened-bg: #eef2f7;
+  --selected-bg: #eaf1ff;
+  --selected-row: #f5f9ff;
+
+  --close-button-bg: #6b7280;
+  --close-button-hover-bg: #4b5563;
+}
+
+/* Prevent auto dark mode from creating low-contrast black-on-black fields */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --body-fg: var(--kr-text);
+    --body-bg: var(--kr-bg);
+    --body-quiet-color: var(--kr-subtle);
+    --body-loud-color: #111827;
+    --header-bg: var(--kr-primary);
+    --header-color: #ffffff;
+    --header-link-color: #ffffff;
+    --breadcrumbs-bg: #eef2ff;
+    --breadcrumbs-fg: #374151;
+    --darkened-bg: #eef2f7;
+    --selected-bg: #eaf1ff;
+    --selected-row: #f5f9ff;
+    --hairline-color: var(--kr-border);
+    --border-color: var(--kr-border);
+  }
+}
+
+html[data-theme='dark'] {
+  --body-fg: var(--kr-text);
+  --body-bg: var(--kr-bg);
+  --body-quiet-color: var(--kr-subtle);
+  --body-loud-color: #111827;
+  --header-bg: var(--kr-primary);
+  --header-color: #ffffff;
+  --header-link-color: #ffffff;
+  --breadcrumbs-bg: #eef2ff;
+  --breadcrumbs-fg: #374151;
+  --darkened-bg: #eef2f7;
+  --selected-bg: #eaf1ff;
+  --selected-row: #f5f9ff;
+  --hairline-color: var(--kr-border);
+  --border-color: var(--kr-border);
 }
 
 /* Global shell */
 body {
   background: var(--kr-bg);
   color: var(--kr-text);
+}
+
+/* Model form readability */
+.change-form input,
+.change-form textarea,
+.change-form select,
+.change-form .vTextField,
+.change-form .vLargeTextField,
+.change-form .vURLField,
+.change-form .vIntegerField,
+.change-form .vDateField,
+.change-form .vTimeField,
+.change-form .vDateTimeField,
+#changelist-form input,
+#changelist-form select,
+#changelist-form textarea {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border: 1px solid var(--kr-border) !important;
+}
+
+.change-form input:focus,
+.change-form textarea:focus,
+.change-form select:focus,
+#changelist-form input:focus,
+#changelist-form select:focus,
+#changelist-form textarea:focus {
+  border-color: var(--kr-primary) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+  outline: none;
+}
+
+.change-form .form-row,
+.change-form .aligned label,
+.change-form .help,
+.change-form .helptext,
+.change-form .readonly,
+.inline-group h2,
+.module h2,
+.module caption {
+  color: #111827;
+}
+
+.submit-row,
+.object-tools,
+.selector,
+.selector-available h2,
+.selector-chosen h2 {
+  background: #f8fafc;
+  color: #111827;
+}
+
+/* Keep calendar/time widgets readable */
+.calendarbox,
+.clockbox {
+  background: #ffffff;
+  color: #111827;
+  border: 1px solid var(--kr-border);
 }
 
 #header {

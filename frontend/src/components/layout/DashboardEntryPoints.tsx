@@ -19,6 +19,35 @@ export default function DashboardEntryPoints({ user }: DashboardEntryPointsProps
   const username = user?.username || 'User';
   const [attendanceStatus, setAttendanceStatus] = useState<AttendanceStatus | null>(null);
   const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [avatarCandidateIndex, setAvatarCandidateIndex] = useState(0);
+
+  const avatarUrlCandidates = React.useMemo(() => {
+    const rootValue = String((user as any)?.profile_image || '').trim();
+    const nestedValue = String((user as any)?.profile?.profile_image || '').trim();
+    const raw = rootValue || nestedValue;
+    if (!raw) return [] as string[];
+
+    const normalized = raw.replace(/\\+/g, '/');
+    if (normalized.startsWith('http://') || normalized.startsWith('https://') || normalized.startsWith('blob:') || normalized.startsWith('data:')) {
+      return [normalized];
+    }
+
+    if (normalized.startsWith('/')) {
+      const direct = normalized;
+      const apiBaseUrl = `${getApiBase()}${normalized}`;
+      return direct === apiBaseUrl ? [direct] : [direct, apiBaseUrl];
+    }
+
+    const direct = `/media/${normalized}`;
+    const apiBaseUrl = `${getApiBase()}/media/${normalized}`;
+    return direct === apiBaseUrl ? [direct] : [direct, apiBaseUrl];
+  }, [user]);
+
+  useEffect(() => {
+    setAvatarCandidateIndex(0);
+  }, [avatarUrlCandidates]);
+
+  const currentAvatarUrl = avatarUrlCandidates[avatarCandidateIndex] || '';
   
   // Get designation based on profile type
   const getDesignation = () => {
@@ -114,8 +143,17 @@ export default function DashboardEntryPoints({ user }: DashboardEntryPointsProps
       {/* Welcome Card */}
       <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 sm:p-8 shadow-md">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
-            <User className="w-7 h-7 text-white" />
+          <div className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {currentAvatarUrl ? (
+              <img
+                src={currentAvatarUrl}
+                alt="Profile"
+                className="w-full h-full object-cover"
+                onError={() => setAvatarCandidateIndex((prev) => prev + 1)}
+              />
+            ) : (
+              <User className="w-7 h-7 text-white" />
+            )}
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Welcome, {username}</h1>

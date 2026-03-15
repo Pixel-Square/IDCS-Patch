@@ -81,6 +81,8 @@ import RFReaderCreateGatePage from './pages/RFReader/CreateGatePage';
 import RFReaderTestStudentsPage from './pages/RFReader/TestStudentsPage';
 import RFReaderAddStudentsRFPage from './pages/RFReader/AddStudentsRFPage';
 import AttendanceAnalyticsRequestsPage from './pages/attendance/AttendanceAnalyticsRequestsPage';
+import RequestsPage from './pages/requests/RequestsPage';
+import ProfileImageUpdateRequestsPage from './pages/requests/ProfileImageUpdateRequestsPage';
 
 type RoleObj = { name: string };
 type Me = {
@@ -151,6 +153,29 @@ export default function App() {
       .finally(() => { if (!cancelled) { clearTimeout(timeout); setLoading(false) } })
 
     return () => { cancelled = true; clearTimeout(timeout) }
+  }, []);
+
+  useEffect(() => {
+    const onMeUpdated = (event: Event) => {
+      const detail = (event as CustomEvent).detail as Me | null | undefined;
+      if (!detail) return;
+      const normalizedUser = {
+        ...detail,
+        roles: Array.isArray(detail.roles)
+          ? detail.roles.map((role: string | RoleObj) =>
+              typeof role === 'string' ? role : role.name,
+            )
+          : [],
+        role: derivePrimaryRole(detail.roles as any),
+        permissions: Array.isArray(detail.permissions) ? detail.permissions : [],
+        profile_type: detail.profile_type || null,
+        profile: detail.profile || null,
+      };
+      setUser(normalizedUser as Me);
+    };
+
+    window.addEventListener('idcs:me-updated', onMeUpdated as EventListener);
+    return () => window.removeEventListener('idcs:me-updated', onMeUpdated as EventListener);
   }, []);
 
   if (loading) {
@@ -475,6 +500,37 @@ export default function App() {
                       user={user}
                       requiredRoles={['HOD', 'IQAC']}
                       element={<AttendanceAnalyticsRequestsPage />}
+                    />
+                  }
+                />
+                <Route
+                  path="/requests"
+                  element={
+                    <ProtectedRoute
+                      user={user}
+                      requiredRoles={['HOD', 'AHOD', 'HR', 'HAA', 'IQAC', 'PS', 'PRINCIPAL']}
+                      requiredPermissions={[
+                        'staff_requests.approve_requests',
+                        'accounts.profile_image_unlock_approve',
+                        'obe.master.manage',
+                        'academics.view_all_attendance',
+                        'academics.view_attendance_overall',
+                        'academics.view_all_departments',
+                        'academics.view_department_attendance',
+                        'academics.view_class_attendance',
+                        'academics.view_section_attendance',
+                      ]}
+                      element={<RequestsPage user={user} />}
+                    />
+                  }
+                />
+                <Route
+                  path="/requests/profile-image-update"
+                  element={
+                    <ProtectedRoute
+                      user={user}
+                      requiredPermissions={['accounts.profile_image_unlock_approve']}
+                      element={<ProfileImageUpdateRequestsPage />}
                     />
                   }
                 />

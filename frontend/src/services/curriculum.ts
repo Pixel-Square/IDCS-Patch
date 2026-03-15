@@ -52,9 +52,10 @@ export type DeptRow = {
   is_elective?: boolean;
 };
 
-// Default to production API if VITE_API_BASE isn't provided
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://db.krgi.co.in';
 import fetchWithAuth from './fetchAuth';
+import { getApiBase } from './apiBase';
+
+const API_BASE = getApiBase();
 
 export async function fetchBatchYears(): Promise<BatchYear[]> {
   const res = await fetchWithAuth(`${API_BASE}/api/academics/batch-years/`);

@@ -34,6 +34,18 @@ type Me = {
 };
 
 const DEFAULT_COUNTRY_CODE = '91';
+const AVATAR_EDITOR_FRAME_SIZE = 280;
+const AVATAR_UPLOAD_SIZE = 512;
+
+type AvatarNatural = {
+  width: number;
+  height: number;
+};
+
+type AvatarOffset = {
+  x: number;
+  y: number;
+};
 
 function normalizeMobileForApi(raw: unknown): string {
   const s = String(raw ?? '').trim();
@@ -109,7 +121,63 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [avatarCandidateIndex, setAvatarCandidateIndex] = useState(0);
+  const [avatarConfirmModalOpen, setAvatarConfirmModalOpen] = useState(false);
+  const [avatarPendingFile, setAvatarPendingFile] = useState<File | null>(null);
+  const [avatarEditorSrc, setAvatarEditorSrc] = useState<string | null>(null);
+  const [avatarEditorNatural, setAvatarEditorNatural] = useState<AvatarNatural | null>(null);
+  const [avatarEditorScale, setAvatarEditorScale] = useState(1);
+  const [avatarEditorOffset, setAvatarEditorOffset] = useState<AvatarOffset>({ x: 0, y: 0 });
+  const [avatarEditorDragging, setAvatarEditorDragging] = useState(false);
+  const [avatarUnlockRequestBusy, setAvatarUnlockRequestBusy] = useState(false);
+  const [avatarUnlockRequestError, setAvatarUnlockRequestError] = useState<string | null>(null);
+  const [avatarUnlockRequestInfo, setAvatarUnlockRequestInfo] = useState<string | null>(null);
+  const [avatarUnlockRequestStatus, setAvatarUnlockRequestStatus] = useState<string | null>(null);
+  const [avatarUnlockModalOpen, setAvatarUnlockModalOpen] = useState(false);
+  const [avatarUnlockRequestReason, setAvatarUnlockRequestReason] = useState('');
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const avatarDragPointerIdRef = useRef<number | null>(null);
+  const avatarDragStartRef = useRef<{ clientX: number; clientY: number; x: number; y: number } | null>(null);
+
+  function getBaseAvatarScale(natural: AvatarNatural): number {
+    return Math.max(
+      AVATAR_EDITOR_FRAME_SIZE / Math.max(1, natural.width),
+      AVATAR_EDITOR_FRAME_SIZE / Math.max(1, natural.height),
+    );
+  }
+
+  function getAvatarRenderedSize(natural: AvatarNatural, scaleMultiplier: number) {
+    const baseScale = getBaseAvatarScale(natural);
+    const scale = baseScale * scaleMultiplier;
+    return {
+      width: natural.width * scale,
+      height: natural.height * scale,
+      effectiveScale: scale,
+    };
+  }
+
+  function clampAvatarOffset(offset: AvatarOffset, natural: AvatarNatural, scaleMultiplier: number): AvatarOffset {
+    const rendered = getAvatarRenderedSize(natural, scaleMultiplier);
+    const maxX = Math.max(0, (rendered.width - AVATAR_EDITOR_FRAME_SIZE) / 2);
+    const maxY = Math.max(0, (rendered.height - AVATAR_EDITOR_FRAME_SIZE) / 2);
+    return {
+      x: Math.min(maxX, Math.max(-maxX, offset.x)),
+      y: Math.min(maxY, Math.max(-maxY, offset.y)),
+    };
+  }
+
+  const normalizeMeResponse = (value: any): Me => ({
+    ...value,
+    roles: Array.isArray(value?.roles)
+      ? value.roles.map((role: string | RoleObj) => (typeof role === 'string' ? role : role?.name))
+      : [],
+  });
+
+  const applyUserUpdate = (value: any) => {
+    const normalized = normalizeMeResponse(value);
+    setUser(normalized);
+    window.dispatchEvent(new CustomEvent('idcs:me-updated', { detail: normalized }));
+    return normalized;
+  };
 
   useEffect(() => {
     const current = profileMobile || '';
@@ -194,6 +262,14 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
   }, [avatarPreviewUrl]);
 
   useEffect(() => {
+    return () => {
+      if (avatarEditorSrc) {
+        URL.revokeObjectURL(avatarEditorSrc);
+      }
+    };
+  }, [avatarEditorSrc]);
+
+  useEffect(() => {
     const edited = Boolean((user as any)?.profileEdited ?? (user as any)?.name_email_edited);
     setNameEmailEditLocked(edited);
     if (edited) {
@@ -270,6 +346,66 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
   const hasLoadableCandidate = Boolean(avatarPreviewUrl) || avatarCandidateIndex < avatarUrlCandidates.length;
   const activeAvatarUrl = avatarPreviewUrl || resolvedCandidate;
   const avatarLocked = Boolean((user as any)?.profile_image_updated ?? (user as any)?.profile?.profile_image_updated);
+
+  async function loadAvatarUnlockRequestStatus() {
+    try {
+      const res = await fetchWithAuth('/api/accounts/profile-image-update-requests/');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(String(data?.detail || 'Failed to load profile image request status'));
+      }
+      const latestStatus = String(data?.latest?.status || '').trim();
+      setAvatarUnlockRequestStatus(latestStatus || null);
+      setAvatarUnlockRequestError(null);
+    } catch (err: any) {
+      setAvatarUnlockRequestStatus(null);
+      setAvatarUnlockRequestError(String(err?.message || err || 'Failed to load request status'));
+    }
+  }
+
+  useEffect(() => {
+    if (avatarLocked) {
+      loadAvatarUnlockRequestStatus();
+    } else {
+      setAvatarUnlockRequestStatus(null);
+      setAvatarUnlockRequestError(null);
+      setAvatarUnlockRequestInfo(null);
+    }
+  }, [avatarLocked]);
+
+  function openAvatarUnlockModal() {
+    if (!avatarLocked || avatarUnlockRequestBusy) return;
+    setAvatarUnlockRequestReason('');
+    setAvatarUnlockModalOpen(true);
+  }
+
+  async function submitAvatarUnlockRequest() {
+    if (!avatarLocked || avatarUnlockRequestBusy) return;
+
+    try {
+      setAvatarUnlockRequestBusy(true);
+      setAvatarUnlockRequestError(null);
+      setAvatarUnlockRequestInfo(null);
+
+      const res = await fetchWithAuth('/api/accounts/profile-image-update-requests/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: avatarUnlockRequestReason.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(String(data?.detail || 'Failed to submit request'));
+      }
+
+      setAvatarUnlockRequestInfo('Request submitted successfully. Please wait for approval.');
+      setAvatarUnlockRequestStatus('PENDING');
+      setAvatarUnlockModalOpen(false);
+    } catch (err: any) {
+      setAvatarUnlockRequestError(String(err?.message || err || 'Failed to submit request'));
+    } finally {
+      setAvatarUnlockRequestBusy(false);
+    }
+  }
 
   const showVerifiedCheck = Boolean(profileMobileVerified && !mobileEditing && profileMobile);
 
@@ -349,18 +485,10 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
       const res = await verifyMobileOtp(nextMobile, otp);
       const me = (res && (res.me as any)) || null;
       if (me) {
-        const normalized = {
-          ...me,
-          roles: Array.isArray(me.roles) ? me.roles.map((role: any) => (typeof role === 'string' ? role : role.name)) : [],
-        } as Me;
-        setUser(normalized);
+        applyUserUpdate(me);
       } else {
         const r = await getMe();
-        const normalized = {
-          ...r,
-          roles: Array.isArray(r.roles) ? r.roles.map((role: any) => (typeof role === 'string' ? role : role.name)) : [],
-        } as Me;
-        setUser(normalized);
+        applyUserUpdate(r);
       }
       setOtpSent(false);
       setOtpDraft('');
@@ -396,18 +524,10 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
       const res = await removeMobileNumber(pwd);
       const me = (res && (res.me as any)) || null;
       if (me) {
-        const normalized = {
-          ...me,
-          roles: Array.isArray(me.roles) ? me.roles.map((role: any) => (typeof role === 'string' ? role : role.name)) : [],
-        } as Me;
-        setUser(normalized);
+        applyUserUpdate(me);
       } else {
         const r = await getMe();
-        const normalized = {
-          ...r,
-          roles: Array.isArray(r.roles) ? r.roles.map((role: any) => (typeof role === 'string' ? role : role.name)) : [],
-        } as Me;
-        setUser(normalized);
+        applyUserUpdate(r);
       }
       setRemoveModalOpen(false);
       setRemovePassword('');
@@ -508,12 +628,7 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
       }
 
       const updated = await getMe();
-      console.debug('[profile] uploaded avatar, API returned profile_image:', (updated as any)?.profile_image || (updated as any)?.profile?.profile_image || '');
-      const normalized = {
-        ...updated,
-        roles: Array.isArray(updated.roles) ? updated.roles.map((role: any) => (typeof role === 'string' ? role : role.name)) : [],
-      } as Me;
-      setUser(normalized);
+      applyUserUpdate(updated);
       setEditingNameEmail(false);
       setNameEmailEditLocked(true);
     } catch (e: any) {
@@ -548,20 +663,107 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
     avatarInputRef.current?.click();
   }
 
-  async function handleAvatarFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const lowerName = String(file.name || '').toLowerCase();
-    const validType = file.type === 'image/jpeg' || file.type === 'image/png' || file.type === 'image/jpg';
-    const validExt = lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png');
-
-    if (!validType && !validExt) {
-      window.alert('Please select a JPG or PNG image.');
-      e.target.value = '';
-      return;
+  function closeAvatarConfirmModal() {
+    if (avatarUploading) return;
+    setAvatarConfirmModalOpen(false);
+    setAvatarPendingFile(null);
+    if (avatarEditorSrc) {
+      URL.revokeObjectURL(avatarEditorSrc);
     }
+    setAvatarEditorSrc(null);
+    setAvatarEditorNatural(null);
+    setAvatarEditorScale(1);
+    setAvatarEditorOffset({ x: 0, y: 0 });
+    setAvatarEditorDragging(false);
+    avatarDragPointerIdRef.current = null;
+    avatarDragStartRef.current = null;
+  }
 
+  function buildCroppedAvatarFile(file: File): Promise<File> {
+    return new Promise((resolve, reject) => {
+      if (!avatarEditorNatural || !avatarEditorSrc) {
+        reject(new Error('Image editor is not ready. Please reselect the image.'));
+        return;
+      }
+
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = AVATAR_UPLOAD_SIZE;
+        canvas.height = AVATAR_UPLOAD_SIZE;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Unable to process image.'));
+          return;
+        }
+
+        const rendered = getAvatarRenderedSize(avatarEditorNatural, avatarEditorScale);
+        const scaleRatio = AVATAR_UPLOAD_SIZE / AVATAR_EDITOR_FRAME_SIZE;
+        const drawWidth = rendered.width * scaleRatio;
+        const drawHeight = rendered.height * scaleRatio;
+        const drawX = (AVATAR_UPLOAD_SIZE - drawWidth) / 2 + avatarEditorOffset.x * scaleRatio;
+        const drawY = (AVATAR_UPLOAD_SIZE - drawHeight) / 2 + avatarEditorOffset.y * scaleRatio;
+
+        ctx.clearRect(0, 0, AVATAR_UPLOAD_SIZE, AVATAR_UPLOAD_SIZE);
+        ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+
+        const usePng = String(file.type || '').toLowerCase().includes('png');
+        const outputType = usePng ? 'image/png' : 'image/jpeg';
+        const outputName = usePng ? 'profile-image.png' : 'profile-image.jpg';
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Unable to generate cropped image.'));
+              return;
+            }
+            resolve(new File([blob], outputName, { type: outputType }));
+          },
+          outputType,
+          usePng ? undefined : 0.92,
+        );
+      };
+      image.onerror = () => reject(new Error('Failed to load selected image.'));
+      image.src = avatarEditorSrc;
+    });
+  }
+
+  function handleAvatarEditorPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (!avatarEditorNatural || avatarUploading) return;
+    avatarDragPointerIdRef.current = e.pointerId;
+    avatarDragStartRef.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      x: avatarEditorOffset.x,
+      y: avatarEditorOffset.y,
+    };
+    setAvatarEditorDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function handleAvatarEditorPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!avatarEditorNatural) return;
+    if (avatarDragPointerIdRef.current !== e.pointerId || !avatarDragStartRef.current) return;
+    const dx = e.clientX - avatarDragStartRef.current.clientX;
+    const dy = e.clientY - avatarDragStartRef.current.clientY;
+    const nextOffset = {
+      x: avatarDragStartRef.current.x + dx,
+      y: avatarDragStartRef.current.y + dy,
+    };
+    setAvatarEditorOffset(clampAvatarOffset(nextOffset, avatarEditorNatural, avatarEditorScale));
+  }
+
+  function handleAvatarEditorPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (avatarDragPointerIdRef.current !== e.pointerId) return;
+    avatarDragPointerIdRef.current = null;
+    avatarDragStartRef.current = null;
+    setAvatarEditorDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }
+
+  async function uploadAvatar(file: File) {
     const previewUrl = URL.createObjectURL(file);
     if (avatarPreviewUrl) {
       URL.revokeObjectURL(avatarPreviewUrl);
@@ -584,22 +786,72 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
       }
 
       const updated = await getMe();
-      const normalized = {
-        ...updated,
-        roles: Array.isArray(updated.roles) ? updated.roles.map((role: any) => (typeof role === 'string' ? role : role.name)) : [],
-      } as Me;
-      setUser(normalized);
+      applyUserUpdate(updated);
 
       URL.revokeObjectURL(previewUrl);
       setAvatarPreviewUrl(null);
+      setAvatarConfirmModalOpen(false);
+      setAvatarPendingFile(null);
     } catch (err: any) {
       window.alert(String(err?.message || err || 'Failed to upload profile image'));
       URL.revokeObjectURL(previewUrl);
       setAvatarPreviewUrl(null);
     } finally {
       setAvatarUploading(false);
-      e.target.value = '';
     }
+  }
+
+  async function handleConfirmAvatarUpload() {
+    if (!avatarPendingFile || avatarUploading) return;
+    try {
+      const croppedFile = await buildCroppedAvatarFile(avatarPendingFile);
+      await uploadAvatar(croppedFile);
+    } catch (err: any) {
+      window.alert(String(err?.message || err || 'Failed to prepare cropped profile image'));
+    }
+  }
+
+  async function handleAvatarFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const lowerName = String(file.name || '').toLowerCase();
+    const validType = file.type === 'image/jpeg' || file.type === 'image/png' || file.type === 'image/jpg';
+    const validExt = lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png');
+
+    if (!validType && !validExt) {
+      window.alert('Please select a JPG or PNG image.');
+      e.target.value = '';
+      return;
+    }
+
+    const imageUrl = URL.createObjectURL(file);
+    const meta = await new Promise<AvatarNatural | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth || 1, height: img.naturalHeight || 1 });
+      img.onerror = () => resolve(null);
+      img.src = imageUrl;
+    });
+
+    if (!meta) {
+      URL.revokeObjectURL(imageUrl);
+      window.alert('Unable to read the selected image. Please choose another file.');
+      e.target.value = '';
+      return;
+    }
+
+    if (avatarEditorSrc) {
+      URL.revokeObjectURL(avatarEditorSrc);
+    }
+
+    const startScale = 1;
+    setAvatarPendingFile(file);
+    setAvatarEditorSrc(imageUrl);
+    setAvatarEditorNatural(meta);
+    setAvatarEditorScale(startScale);
+    setAvatarEditorOffset(clampAvatarOffset({ x: 0, y: 0 }, meta, startScale));
+    setAvatarConfirmModalOpen(true);
+    e.target.value = '';
   }
 
   return (
@@ -648,6 +900,28 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                   onChange={handleAvatarFileChange}
                 />
               </div>
+              {avatarLocked && (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={openAvatarUnlockModal}
+                    disabled={avatarUnlockRequestBusy || avatarUnlockRequestStatus === 'PENDING'}
+                    className="text-xs px-3 py-1.5 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                  >
+                    {avatarUnlockRequestStatus === 'PENDING'
+                      ? 'Request Pending'
+                      : avatarUnlockRequestBusy
+                        ? 'Submitting...'
+                        : 'Request Image Update'}
+                  </button>
+                  {avatarUnlockRequestInfo && (
+                    <div className="mt-1 text-xs text-emerald-700">{avatarUnlockRequestInfo}</div>
+                  )}
+                  {avatarUnlockRequestError && (
+                    <div className="mt-1 text-xs text-red-600">{avatarUnlockRequestError}</div>
+                  )}
+                </div>
+              )}
               <div>
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{user.username}</h1>
                 <p className="text-gray-600 mt-1">{user.email || 'No email provided'}</p>
@@ -1145,6 +1419,166 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                 <div className="flex justify-end gap-2">
                   <button onClick={() => setRemoveModalOpen(false)} className="px-3 py-2">Cancel</button>
                   <button onClick={handleRemoveMobile} className="px-3 py-2 bg-red-600 text-white rounded">Remove</button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+
+        {/* Confirm avatar upload modal */}
+        {avatarConfirmModalOpen && (
+          <ModalPortal>
+            <div className="fixed inset-0 flex items-center justify-center z-50">
+              <div className="absolute inset-0 bg-black opacity-30" onClick={closeAvatarConfirmModal} />
+              <div className="bg-white rounded-lg p-6 shadow-lg z-10 w-full max-w-lg">
+                <h3 className="text-lg font-semibold mb-3">Confirm Profile Image Upload</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Once uploaded, this profile image cannot be changed later. Please confirm to continue.
+                </p>
+
+                <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                  <div>
+                    <div className="text-xs font-semibold text-gray-500 mb-2">Adjust image (drag to move)</div>
+                    <div
+                      className={`relative w-[280px] h-[280px] max-w-full rounded-xl border border-gray-200 overflow-hidden bg-gray-100 ${avatarEditorDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                      onPointerDown={handleAvatarEditorPointerDown}
+                      onPointerMove={handleAvatarEditorPointerMove}
+                      onPointerUp={handleAvatarEditorPointerUp}
+                      onPointerCancel={handleAvatarEditorPointerUp}
+                    >
+                      {avatarEditorSrc && avatarEditorNatural ? (
+                        <img
+                          src={avatarEditorSrc}
+                          alt="Avatar editor"
+                          draggable={false}
+                          className="absolute select-none pointer-events-none"
+                          style={{
+                            width: `${getAvatarRenderedSize(avatarEditorNatural, avatarEditorScale).width}px`,
+                            height: `${getAvatarRenderedSize(avatarEditorNatural, avatarEditorScale).height}px`,
+                            maxWidth: 'none',
+                            maxHeight: 'none',
+                            left: '50%',
+                            top: '50%',
+                            transform: `translate(calc(-50% + ${avatarEditorOffset.x}px), calc(-50% + ${avatarEditorOffset.y}px))`,
+                          }}
+                        />
+                      ) : null}
+                    </div>
+                    <div className="mt-3">
+                      <label className="text-xs font-semibold text-gray-500">Zoom</label>
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={3}
+                        step={0.01}
+                        value={avatarEditorScale}
+                        onChange={(evt) => {
+                          const nextScale = Number(evt.target.value || 1);
+                          setAvatarEditorScale(nextScale);
+                          if (avatarEditorNatural) {
+                            setAvatarEditorOffset((prev) => clampAvatarOffset(prev, avatarEditorNatural, nextScale));
+                          }
+                        }}
+                        className="w-full"
+                        disabled={avatarUploading || !avatarEditorNatural}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold text-gray-500 mb-2">Final profile icon preview</div>
+                    <div className="relative w-[120px] h-[120px] rounded-full overflow-hidden border-4 border-white shadow-lg bg-gray-100">
+                      {avatarEditorSrc && avatarEditorNatural ? (
+                        <img
+                          src={avatarEditorSrc}
+                          alt="Final avatar preview"
+                          draggable={false}
+                          className="absolute select-none pointer-events-none"
+                          style={{
+                            width: `${(getAvatarRenderedSize(avatarEditorNatural, avatarEditorScale).width * 120) / AVATAR_EDITOR_FRAME_SIZE}px`,
+                            height: `${(getAvatarRenderedSize(avatarEditorNatural, avatarEditorScale).height * 120) / AVATAR_EDITOR_FRAME_SIZE}px`,
+                            maxWidth: 'none',
+                            maxHeight: 'none',
+                            left: '50%',
+                            top: '50%',
+                            transform: `translate(calc(-50% + ${(avatarEditorOffset.x * 120) / AVATAR_EDITOR_FRAME_SIZE}px), calc(-50% + ${(avatarEditorOffset.y * 120) / AVATAR_EDITOR_FRAME_SIZE}px))`,
+                          }}
+                        />
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-3 leading-relaxed">
+                      Tip: center your face/logo in the circle preview. Use zoom when the image is too wide or too tall.
+                    </p>
+                  </div>
+                </div>
+
+                {avatarPendingFile && (
+                  <div className="text-sm text-gray-700 mb-4">
+                    <span className="font-medium">Selected file:</span> {avatarPendingFile.name}
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={closeAvatarConfirmModal}
+                    className="px-3 py-2 text-gray-700 hover:bg-gray-100 rounded"
+                    disabled={avatarUploading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmAvatarUpload}
+                    className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                    disabled={avatarUploading || !avatarPendingFile}
+                  >
+                    {avatarUploading ? 'Uploading...' : 'Yes, Upload'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+
+        {/* Profile Image Unlock Request Modal */}
+        {avatarUnlockModalOpen && (
+          <ModalPortal>
+            <div className="fixed inset-0 flex items-center justify-center z-[60]">
+              <div className="absolute inset-0 bg-black opacity-30" onClick={() => !avatarUnlockRequestBusy && setAvatarUnlockModalOpen(false)} />
+              <div className="bg-white rounded-lg p-6 shadow-lg z-10 w-full max-w-md mx-4">
+                <h3 className="text-lg font-semibold mb-3">Request Profile Image Update</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Please provide a reason for requesting a profile image update. (Optional)
+                </p>
+                <div className="mb-4">
+                  <textarea
+                    value={avatarUnlockRequestReason}
+                    onChange={(e) => setAvatarUnlockRequestReason(e.target.value)}
+                    placeholder="Enter reason..."
+                    disabled={avatarUnlockRequestBusy}
+                    className="w-full h-24 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  />
+                </div>
+                {avatarUnlockRequestError && (
+                  <div className="mb-4 text-xs text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                    {avatarUnlockRequestError}
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAvatarUnlockModalOpen(false)}
+                    disabled={avatarUnlockRequestBusy}
+                    className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitAvatarUnlockRequest}
+                    disabled={avatarUnlockRequestBusy}
+                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                  >
+                    {avatarUnlockRequestBusy ? 'Submitting...' : 'Submit Request'}
+                  </button>
                 </div>
               </div>
             </div>

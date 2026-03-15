@@ -35,3 +35,10 @@ Notes:
 - The backend `AUTH_USER_MODEL` is `accounts.User` and includes a `role` FK. Role mappings are in `RoleMap`.
 - The frontend uses `VITE_API_BASE` as the backend API base. If not set, it defaults to same-origin (and uses `http://localhost:8000` when running on localhost).
     - For Vite dev setups where Django runs on another port, either set `VITE_API_BASE` or use the Vite `/api` proxy (see `frontend/vite.config.ts`, configurable via `VITE_DEV_API_PROXY_TARGET`).
+
+Operations:
+- Health check script: `tools/health_check.sh`
+- Monitoring setup helper: `tools/setup_health_monitoring.sh`
+- Logrotate template: `deploy/logrotate_idcs_health.conf`
+- Production runbook: `docs/PRODUCTION_OBSERVABILITY_RUNBOOK.md`
+- Slow endpoint tracing: `tools/trace_slow_endpoints.sh`

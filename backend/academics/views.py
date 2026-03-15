@@ -2443,6 +2443,8 @@ class StaffImportView(APIView):
                 row_errors.append('Username is required.')
             if not email:
                 row_errors.append('Email is required.')
+            if not password:
+                row_errors.append('Password is required.')
             if not department_name:
                 row_errors.append('Department is required.')
             if not record_status:
@@ -2496,7 +2498,7 @@ class StaffImportView(APIView):
                 with transaction.atomic():
                     user_obj = User.objects.create_user(
                         username=username,
-                        password=password if password else 'changeme123',
+                        password=password,
                         first_name=first_name,
                         last_name=last_name,
                         email=email,

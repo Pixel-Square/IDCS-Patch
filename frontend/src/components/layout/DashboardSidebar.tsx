@@ -45,6 +45,7 @@ import { useAttendanceNotificationCount } from '../../hooks/useAttendanceNotific
   settings: Settings,
   hr_request_templates: FileText,
   staff_requests_approvals: Bell,
+  requests_hub: Bell,
   applications_admin: Layout,
   applications_inbox: ClipboardList,
   applications_home: Layout,
@@ -395,6 +396,22 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   const isApprover = approverRoles.some(r => rolesUpper.includes(r));
   if ((permsLower.includes('staff_requests.approve_requests') || isApprover) && !items.some(item => item.key === 'staff_requests_approvals')) {
     items.push({ key: 'staff_requests_approvals', label: 'Pending Approvals', to: '/staff-requests/pending-approvals' });
+  }
+
+  const canSeeRequestsHub =
+    isApprover ||
+    permsLower.includes('staff_requests.approve_requests') ||
+    permsLower.includes('accounts.profile_image_unlock_approve') ||
+    permsLower.includes('obe.master.manage') ||
+    permsLower.includes('academics.view_all_attendance') ||
+    permsLower.includes('academics.view_attendance_overall') ||
+    permsLower.includes('academics.view_all_departments') ||
+    permsLower.includes('academics.view_department_attendance') ||
+    permsLower.includes('academics.view_class_attendance') ||
+    permsLower.includes('academics.view_section_attendance');
+
+  if (canSeeRequestsHub && !items.some(item => item.key === 'requests_hub')) {
+    items.push({ key: 'requests_hub', label: 'Requests', to: '/requests' });
   }
 
   // Add Token Raise for all users at the end (no permission check needed)

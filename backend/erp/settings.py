@@ -297,11 +297,18 @@ TWILIO_SERVICE_SID = os.getenv('TWILIO_SERVICE_SID', '')
 # Restrict CORS to explicit origins when credentials (cookies/auth) are used.
 # Wildcard '*' is invalid with `Access-Control-Allow-Credentials: true`.
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = [
+
+def _split_env_csv(name: str) -> list[str]:
+    return [v.strip() for v in str(os.getenv(name, '') or '').split(',') if v.strip()]
+
+
+_PROD_WEB_ORIGINS = [
     'https://idcs.krgi.co.in',
     'https://db.krgi.co.in',
     'https://cloud.krgi.co.in',
-    # Local dev origins (common ports) so frontend at localhost can call API
+]
+
+_DEFAULT_DEBUG_ORIGINS = [
     'http://localhost',
     'http://localhost:3000',
     'http://localhost:5173',
@@ -324,24 +331,28 @@ CORS_ALLOWED_ORIGINS = [
     'http://127.0.0.1:5175',
     'http://127.0.0.1:5176',
     'http://127.0.0.1:5177',
-    # Production/front-end hosts
-    'https://idcs.krgi.co.in',
-    'https://db.krgi.co.in',
-    'https://cloud.krgi.co.in',
-    # Local LAN frontend host (when served on :80)
-    'http://192.168.40.253',
-    'http://192.168.40.253:80',
-    'http://192.168.40.253:81',
-    'http://192.168.40.253:5173',
-    'http://192.168.40.253:4173',
 ]
+
+CORS_ALLOWED_ORIGINS = _split_env_csv('CORS_ALLOWED_ORIGINS') or list(_PROD_WEB_ORIGINS)
+
+if DEBUG:
+    CORS_ALLOWED_ORIGINS += _DEFAULT_DEBUG_ORIGINS
+    CORS_ALLOWED_ORIGINS += _split_env_csv('CORS_DEV_EXTRA_ORIGINS')
+
+# Always keep production origins allowed unless explicitly overridden at deploy level.
+for _origin in _PROD_WEB_ORIGINS:
+    if _origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(_origin)
+
+# De-duplicate while preserving order.
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(CORS_ALLOWED_ORIGINS))
+
 # Allow browser to include credentials (cookies or HTTP auth) in cross-origin requests
 CORS_ALLOW_CREDENTIALS = True
 
 # Allow configuring CSRF trusted origins via environment variable
 # Provide comma-separated origins including scheme, e.g. 'https://db.zynix.us'
-csrf_env = os.getenv('CSRF_TRUSTED_ORIGINS', '')
-CSRF_TRUSTED_ORIGINS = [h.strip() for h in csrf_env.split(',') if h.strip()]
+CSRF_TRUSTED_ORIGINS = _split_env_csv('CSRF_TRUSTED_ORIGINS') or list(_PROD_WEB_ORIGINS)
 # In DEBUG add localhost aliases for convenience
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += [
@@ -352,6 +363,7 @@ if DEBUG:
         'http://localhost:83',
         'http://127.0.0.1:83',
     ]
+    CSRF_TRUSTED_ORIGINS += _split_env_csv('CSRF_DEV_EXTRA_ORIGINS')
 # Always allow the production dashboard hostname if not already present
 if 'https://db.krgi.co.in' not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append('https://db.krgi.co.in')
@@ -361,9 +373,13 @@ if 'https://idcs.krgi.co.in' not in CSRF_TRUSTED_ORIGINS:
 if 'https://cloud.krgi.co.in' not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append('https://cloud.krgi.co.in')
 
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(CSRF_TRUSTED_ORIGINS))
+
 # --- Production security hardening ---
 # Keep these settings env-driven so local development remains frictionless,
 # while production defaults become secure-by-default.
+DATA_ENCRYPTION_KEY = os.getenv('DATA_ENCRYPTION_KEY', '')
+
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', '0' if DEBUG else '1') == '1'
 SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', '0' if DEBUG else '1') == '1'

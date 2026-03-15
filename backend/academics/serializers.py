@@ -1133,12 +1133,14 @@ class StaffProfileSerializer(serializers.ModelSerializer):
         
         if not username:
             raise serializers.ValidationError({'username': 'Username is required for new staff.'})
+        if not password:
+            raise serializers.ValidationError({'password': 'Password is required for new staff.'})
         
         # Create user
         try:
             user = User.objects.create_user(
                 username=username,
-                password=password or 'changeme123',
+                password=password,
                 first_name=first_name,
                 last_name=last_name,
                 email=email
