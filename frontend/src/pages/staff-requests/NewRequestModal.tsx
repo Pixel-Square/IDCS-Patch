@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { getActiveTemplates, createRequest, filterTemplatesForDate } from '../../services/staffRequests';
+import { createRequest, filterTemplatesForDate } from '../../services/staffRequests';
 import type { RequestTemplate, FormField } from '../../types/staffRequests';
 import DynamicFormRenderer from './DynamicFormRenderer';
 
@@ -32,17 +32,15 @@ export default function NewRequestModal({ onClose, onCreated, onSuccess, presele
     try {
       let data: RequestTemplate[];
       let message: string | undefined;
-      
-      // Use filtered templates if date is provided
-      if (preselectedDate) {
-        const result = await filterTemplatesForDate(preselectedDate);
-        data = result.templates;
-        message = result.message;
-        if (message) {
-          setFilterMessage(message);
-        }
-      } else {
-        data = await getActiveTemplates();
+
+      // Always filter by date: use preselectedDate or today so earn/deduct
+      // forms are correctly separated based on holiday vs working day.
+      const dateToFilter = preselectedDate || new Date().toISOString().slice(0, 10);
+      const result = await filterTemplatesForDate(dateToFilter);
+      data = result.templates;
+      message = result.message;
+      if (message) {
+        setFilterMessage(message);
       }
       
       setTemplates(data);

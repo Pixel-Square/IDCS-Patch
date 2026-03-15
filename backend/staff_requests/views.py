@@ -38,7 +38,7 @@ def is_user_approver_for_request(user, staff_request, approver_role):
         
     # 2. Check for Global Roles (HR, PRINCIPAL, IQAC, PS, etc.)
     if approver_role in ['HR', 'PRINCIPAL', 'IQAC', 'PS', 'ADMIN']:
-        if hasattr(user, 'user_roles') and user.user_roles.filter(role__name=approver_role).exists():
+        if hasattr(user, 'user_roles') and user.user_roles.filter(role__name__iexact=approver_role).exists():
             return True
             
     # 3. Check for Department-Specific Roles (HOD)
@@ -267,9 +267,27 @@ class RequestTemplateViewSet(viewsets.ModelViewSet):
         except:
             return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Check if date is holiday
+        # Check if date is holiday (department-aware)
         from staff_attendance.models import Holiday, AttendanceRecord
-        is_holiday = Holiday.objects.filter(date=check_date).exists()
+
+        # Resolve user's current department for dept-scoped holiday check
+        user_dept_id = None
+        try:
+            if hasattr(request.user, 'staff_profile'):
+                dept = request.user.staff_profile.get_current_department()
+                if dept:
+                    user_dept_id = dept.id
+        except Exception:
+            pass
+
+        holiday_obj = Holiday.objects.filter(date=check_date).first()
+        if holiday_obj:
+            dept_ids = list(holiday_obj.departments.values_list('id', flat=True))
+            # College-wide (no departments) → applies to everyone
+            # Dept-scoped → applies only if user's dept is in the list
+            is_holiday = (not dept_ids) or (user_dept_id is not None and user_dept_id in dept_ids)
+        else:
+            is_holiday = False
         
         # Check if it's Sunday (also considered holiday)
         is_sunday = check_date.weekday() == 6
@@ -750,7 +768,11 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
                             logger.info(f'[LeaveBalance] Claimed {use_from_col} days from COL ({col_template.name}) for request {staff_request.id}')
                             remaining_days -= use_from_col
 
-                # If COL covered all days, skip creating/modifying the leave balance entirely
+                    # When claim_col is checked, NEVER deduct from CL regardless of COL balance
+                    remaining_days = 0
+                    logger.info(f'[LeaveBalance] COL claim active - skipping CL deduction for request {staff_request.id}')
+
+                # If COL covered all days (or claim_col forced skip), skip CL balance deduction
                 if remaining_days <= 0:
                     logger.info(f'[LeaveBalance] All days covered by COL for request {staff_request.id}')
                 else:
@@ -1045,8 +1067,32 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
                             working_days += 1
                         
                         current_date += timedelta(days=1)
-                    
-                    return working_days
+
+                    # Normalize shift markers
+                    fn = str(form_data.get('from_noon', form_data.get('from_shift', ''))).strip().upper()
+                    tn = str(form_data.get('to_noon', form_data.get('to_shift', ''))).strip().upper()
+                    if fn == 'FULL DAY':
+                        fn = 'FULL'
+                    if tn == 'FULL DAY':
+                        tn = 'FULL'
+
+                    # Single-day leave/permission: explicit FN or AN must count as 0.5 day.
+                    if start == end:
+                        if fn in ['FN', 'AN'] and tn in ['FN', 'AN']:
+                            return 0.5 if fn == tn else 1.0
+                        if fn in ['FN', 'AN'] and not tn:
+                            return 0.5
+                        if tn in ['FN', 'AN'] and not fn:
+                            return 0.5
+                        if fn == 'FULL' or tn == 'FULL':
+                            return 1.0
+                        return float(working_days)
+
+                    # Multi-day adjustment:
+                    # from_noon='AN' → first day starts at AN, FN of first day skipped (-0.5)
+                    # to_noon='FN'   → last day ends at FN, AN of last day skipped (-0.5)
+                    half_day_adj = (0.5 if fn == 'AN' else 0.0) + (0.5 if tn == 'FN' else 0.0)
+                    return max(0.0, working_days - half_day_adj)
             except (ValueError, AttributeError):
                 pass
         
@@ -1182,7 +1228,9 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
     def _get_primary_role(self, user):
         """
         Get user's primary role for leave allotment lookup.
-        Checks roles relationship and returns first matching role from priority list.
+        SPL roles (HOD, IQAC, HR, PS, CFSW, EDC, COE, HAA) take priority over
+        generic FACULTY/STAFF roles so that a user who holds both an SPL role
+        and a Staff role is allocated the SPL quota, not the Staff quota.
         Defaults to 'STAFF' if no roles found.
         """
         try:
@@ -1192,8 +1240,9 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
             if not user_roles:
                 return 'STAFF'
             
-            # Priority order for role selection (for leave allotment lookup)
-            role_priority = ['HOD', 'AHOD', 'FACULTY', 'STAFF', 'HR']
+            # SPL roles first, then generic roles — ensures SPL allotment wins
+            role_priority = ['HOD', 'IQAC', 'HR', 'PS', 'CFSW', 'EDC', 'COE', 'HAA',
+                             'AHOD', 'FACULTY', 'STAFF']
             
             # Return first role that matches priority order
             for priority_role in role_priority:
@@ -1300,7 +1349,9 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
         form_data = staff_request.form_data
         # Support both old and new field names for backward compatibility
         shift = form_data.get('shift', None)  # Old field (backward compatibility)
-        from_noon = form_data.get('from_noon', form_data.get('from_shift', None))  # New field name
+        # Also fall back to 'shift' so that forms like Late Entry (which have a 'shift' select
+        # field and a 'from_date' field) are handled correctly in the single-from_date case (Case 3).
+        from_noon = form_data.get('from_noon', form_data.get('from_shift', form_data.get('shift', None)))
         to_noon = form_data.get('to_noon', form_data.get('to_shift', None))  # New field name
         
         # Clean up the shift values - strip whitespace and handle empty strings
@@ -2037,6 +2088,62 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
+    @action(detail=False, methods=['get'])
+    def late_entry_stats(self, request):
+        """
+        Get current-month Late Entry Permission usage counts for the requesting user.
+        GET /api/staff-requests/requests/late_entry_stats/
+        Optional query param: ?month=YYYY-MM  (defaults to current month)
+
+        Returns:
+          {
+            "month": "2026-03",
+            "ten_mins": <count of approved requests with late_duration="10 mins">,
+            "one_hr":   <count of approved requests with late_duration="1 hr">,
+            "total":    <combined count>
+          }
+        """
+        from datetime import date
+        import calendar
+
+        month_param = request.query_params.get('month')
+        if month_param:
+            try:
+                year, month = map(int, month_param.split('-'))
+            except (ValueError, AttributeError):
+                return Response({'error': 'Invalid month format, use YYYY-MM'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            today = date.today()
+            year, month = today.year, today.month
+
+        month_start = date(year, month, 1)
+        month_end = date(year, month, calendar.monthrange(year, month)[1])
+
+        # Find approved Late Entry requests for this user in the month
+        late_requests = StaffRequest.objects.filter(
+            applicant=request.user,
+            template__name__icontains='late entry',
+            status='approved',
+            created_at__date__gte=month_start,
+            created_at__date__lte=month_end,
+        )
+
+        ten_mins = 0
+        one_hr = 0
+        for req in late_requests:
+            duration = (req.form_data or {}).get('late_duration', '')
+            if duration == '10 mins':
+                ten_mins += 1
+            elif duration == '1 hr':
+                one_hr += 1
+
+        return Response({
+            'month': f'{year:04d}-{month:02d}',
+            'ten_mins': ten_mins,
+            'one_hr': one_hr,
+            'total': ten_mins + one_hr,
+        })
+
     @action(detail=False, methods=['get'])
     def col_claimable_info(self, request):
         """

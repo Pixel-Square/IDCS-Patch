@@ -57,6 +57,16 @@ class AttendanceRecord(models.Model):
         """
         # Define statuses that can be auto-updated from biometric data
         BIOMETRIC_STATUSES = ['present', 'absent', 'partial', 'half_day']
+
+        has_biometric = self.morning_in is not None or self.evening_out is not None
+
+        # A session status should be recalculated if:
+        #  (a) it's already a biometric status (present/absent/partial/half_day), OR
+        #  (b) it's None but we have biometric scan data — meaning it was never set
+        #      and needs to be derived from the time data now.
+        # In both cases we must NOT touch a leave status (CL, OD, COL, etc.).
+        def _needs_biometric_calc(session_status):
+            return session_status in BIOMETRIC_STATUSES or (session_status is None and has_biometric)
         
         try:
             settings = AttendanceSettings.objects.first()
@@ -66,8 +76,8 @@ class AttendanceRecord(models.Model):
                 out_limit = settings.attendance_out_time_limit  # Default: 17:00
                 mid_split = settings.mid_time_split  # Default: 13:00 (1 PM)
                 
-                # === Calculate FN status (only if current status is biometric) ===
-                if self.fn_status in BIOMETRIC_STATUSES:
+                # === Calculate FN status ===
+                if _needs_biometric_calc(self.fn_status):
                     if self.morning_in:
                         # FN: Present if came before/at the in_time_limit
                         if self.morning_in <= in_limit:
@@ -80,8 +90,8 @@ class AttendanceRecord(models.Model):
                         self.fn_status = 'absent'
                 # else: Preserve leave status (CL, OD, ML, COL, etc.)
                 
-                # === Calculate AN status (only if current status is biometric) ===
-                if self.an_status in BIOMETRIC_STATUSES:
+                # === Calculate AN status ===
+                if _needs_biometric_calc(self.an_status):
                     if self.morning_in and self.evening_out:
                         # Has both in and out times
                         # AN is absent if:
@@ -98,7 +108,6 @@ class AttendanceRecord(models.Model):
                             self.an_status = 'present'
                     elif self.morning_in:
                         # Has morning_in but no evening_out - probably partial day
-                        # If came before mid_split, completed FN but not AN
                         if self.morning_in <= mid_split:
                             self.an_status = 'absent'  # Has FN but no AN
                         else:
@@ -110,19 +119,12 @@ class AttendanceRecord(models.Model):
                 # else: Preserve leave status (CL, OD, ML, COL, etc.)
                 
             else:
-                # No settings OR time-based absence is disabled
-                # Use simple logic - only update if both statuses are biometric
-                if self.fn_status in BIOMETRIC_STATUSES:
-                    if self.morning_in:
-                        self.fn_status = 'present'
-                    else:
-                        self.fn_status = 'absent'
+                # No settings OR time-based absence is disabled — simple present/absent logic
+                if _needs_biometric_calc(self.fn_status):
+                    self.fn_status = 'present' if self.morning_in else 'absent'
                 
-                if self.an_status in BIOMETRIC_STATUSES:
-                    if self.evening_out:
-                        self.an_status = 'present'
-                    else:
-                        self.an_status = 'absent'
+                if _needs_biometric_calc(self.an_status):
+                    self.an_status = 'present' if self.evening_out else 'absent'
             
             # === Calculate overall status based on FN and AN ===
             # Overall status logic:
@@ -261,7 +263,16 @@ class Holiday(models.Model):
     notes = models.TextField(blank=True, help_text="Additional notes")
     is_sunday = models.BooleanField(default=False, help_text="True if this is an auto-generated Sunday holiday")
     is_removable = models.BooleanField(default=True, help_text="If False, this holiday cannot be deleted")
-    
+
+    # Optional department scoping: if empty the holiday applies to ALL departments;
+    # if specific departments are selected only those departments observe the holiday.
+    departments = models.ManyToManyField(
+        'academics.Department',
+        blank=True,
+        related_name='holidays',
+        help_text='If empty, holiday applies to all departments. Otherwise only selected departments observe it.',
+    )
+
     # Audit fields
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

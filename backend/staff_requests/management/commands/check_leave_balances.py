@@ -29,14 +29,17 @@ class Command(BaseCommand):
         )
 
     def _get_primary_role(self, user):
-        """Get primary role for a user (simplified)"""
+        """Get primary role for a user.
+        SPL roles take priority over generic STAFF/FACULTY."""
         try:
-            roles = user.roles.values_list('name', flat=True)
-            role_priority = ['HOD', 'FACULTY', 'STAFF', 'HR']
+            roles = list(user.roles.values_list('name', flat=True))
+            # SPL roles first so staff who also hold an SPL role get the SPL allotment
+            role_priority = ['HOD', 'IQAC', 'HR', 'PS', 'CFSW', 'EDC', 'COE', 'HAA',
+                             'AHOD', 'FACULTY', 'STAFF']
             for role in role_priority:
                 if role in roles:
                     return role
-            return list(roles)[0] if roles else 'STAFF'
+            return roles[0] if roles else 'STAFF'
         except Exception:
             return 'STAFF'
 

@@ -58,6 +58,13 @@ export interface LeaveBalance {
   updated_at?: string;
 }
 
+export interface LateEntryStats {
+  month: string;
+  ten_mins: number;
+  one_hr: number;
+  total: number;
+}
+
 export interface LeaveBalancesResponse {
   user: {
     id: number;

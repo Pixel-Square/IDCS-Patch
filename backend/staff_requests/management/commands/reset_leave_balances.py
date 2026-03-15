@@ -264,20 +264,32 @@ class Command(BaseCommand):
             )
     
     def _get_primary_role(self, user):
-        """Get the primary role for a user from academics.user_roles"""
+        """Get the primary role for a user.
+        SPL roles take priority over generic STAFF/FACULTY."""
         try:
-            # Try to get role from academics app
+            # Prefer user.roles (direct role names) when available
+            if hasattr(user, 'roles'):
+                role_names = list(user.roles.values_list('name', flat=True))
+                if role_names:
+                    role_priority = ['HOD', 'IQAC', 'HR', 'PS', 'CFSW', 'EDC', 'COE', 'HAA',
+                                     'AHOD', 'FACULTY', 'STAFF']
+                    for priority_role in role_priority:
+                        if priority_role in role_names:
+                            return priority_role
+                    return role_names[0]
+            # Fallback: user_roles through-model
             if hasattr(user, 'user_roles'):
-                roles = user.user_roles.all()
-                if roles.exists():
-                    # Return first role's name
-                    return roles.first().role
+                role_names = list(user.user_roles.values_list('role__name', flat=True))
+                if role_names:
+                    role_priority = ['HOD', 'IQAC', 'HR', 'PS', 'CFSW', 'EDC', 'COE', 'HAA',
+                                     'AHOD', 'FACULTY', 'STAFF']
+                    for priority_role in role_priority:
+                        if priority_role in role_names:
+                            return priority_role
+                    return role_names[0]
         except Exception:
             pass
-        
-        # Fallback to checking groups
+        # Fallback to groups
         if user.groups.exists():
             return user.groups.first().name
-        
-        # Default fallback
         return 'STAFF'

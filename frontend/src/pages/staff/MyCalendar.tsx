@@ -34,6 +34,8 @@ interface Holiday {
   notes: string;
   is_sunday: boolean;
   is_removable: boolean;
+  department_ids: number[];
+  departments_info: { id: number; name: string; code: string; short_name: string }[];
 }
 
 interface AttendanceSettings {
@@ -57,6 +59,7 @@ export default function MyCalendarPage() {
   const [showNewRequestModal, setShowNewRequestModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [lateEntryTemplateId, setLateEntryTemplateId] = useState<number | null>(null);
+  const [mobileWeekIndex, setMobileWeekIndex] = useState(0);
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -371,6 +374,31 @@ export default function MyCalendarPage() {
     calendarDays.push(day);
   }
 
+  // Pad to full weeks so mobile week-wise pagination always has 7 cells.
+  while (calendarDays.length % 7 !== 0) {
+    calendarDays.push(null);
+  }
+
+  const totalWeeks = Math.max(1, Math.ceil(calendarDays.length / 7));
+  const mobileWeekStart = mobileWeekIndex * 7;
+  const mobileWeekEnd = mobileWeekStart + 6;
+
+  useEffect(() => {
+    const now = new Date();
+    if (selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1) {
+      const weekOfToday = Math.floor((firstDay + now.getDate() - 1) / 7);
+      setMobileWeekIndex(Math.min(Math.max(weekOfToday, 0), totalWeeks - 1));
+    } else {
+      setMobileWeekIndex(0);
+    }
+  }, [selectedYear, selectedMonth, firstDay, totalWeeks]);
+
+  useEffect(() => {
+    if (mobileWeekIndex > totalWeeks - 1) {
+      setMobileWeekIndex(Math.max(0, totalWeeks - 1));
+    }
+  }, [mobileWeekIndex, totalWeeks]);
+
   return (
     <div className="p-6">
       <div className="max-w-7xl mx-auto">
@@ -541,21 +569,44 @@ export default function MyCalendarPage() {
               
             </div>
 
-            <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            {/* Day headers */}
-            <div className="grid grid-cols-7 gap-2 mb-4">
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-6 mb-6">
+            {/* Day headers - hidden on mobile, shown on desktop */}
+            <div className="hidden sm:grid grid-cols-7 gap-1 sm:gap-2 mb-3 sm:mb-4">
               {daysOfWeek.map(day => (
-                <div key={day} className="text-center font-semibold text-gray-600 text-sm py-2">
+                <div key={day} className="text-center font-semibold text-gray-600 text-xs sm:text-sm py-1.5 sm:py-2">
                   {day}
                 </div>
               ))}
             </div>
 
+            <div className="sm:hidden flex items-center justify-between mb-3">
+              <button
+                type="button"
+                onClick={() => setMobileWeekIndex(prev => Math.max(0, prev - 1))}
+                disabled={mobileWeekIndex === 0}
+                className="px-2.5 py-1.5 text-xs font-semibold rounded-md border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Prev Week
+              </button>
+              <span className="text-xs font-semibold text-gray-600">
+                Week {mobileWeekIndex + 1} / {totalWeeks}
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobileWeekIndex(prev => Math.min(totalWeeks - 1, prev + 1))}
+                disabled={mobileWeekIndex >= totalWeeks - 1}
+                className="px-2.5 py-1.5 text-xs font-semibold rounded-md border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next Week
+              </button>
+            </div>
+
             {/* Calendar days */}
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-7 gap-1 sm:gap-2">
               {calendarDays.map((day, index) => {
+                const hideOnMobile = index < mobileWeekStart || index > mobileWeekEnd;
                 if (day === null) {
-                  return <div key={`empty-${index}`} className="aspect-square" />;
+                  return <div key={`empty-${index}`} className={`${hideOnMobile ? 'hidden sm:block ' : ''}min-h-[92px] sm:aspect-square`} />;
                 }
 
                 const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -582,7 +633,7 @@ export default function MyCalendarPage() {
                   <div
                     key={day}
                     onClick={() => handleDateClick(day)}
-                    className={`aspect-square border-2 rounded-lg p-2 cursor-pointer transition-all hover:shadow-md ${
+                    className={`${hideOnMobile ? 'hidden sm:block ' : ''}min-h-[92px] sm:aspect-square border-2 rounded-lg p-1.5 sm:p-2 cursor-pointer transition-all hover:shadow-md overflow-hidden ${
                       holidayInfo
                         ? holidayInfo.is_sunday 
                           ? 'bg-blue-50 border-blue-300'
@@ -597,10 +648,10 @@ export default function MyCalendarPage() {
                     <div className="h-full flex flex-col justify-between">
                       {/* Day number */}
                       <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-900">{day}</span>
+                        <span className="font-bold text-gray-900 text-xl sm:text-2xl">{day}</span>
                         {holidayInfo ? (
                           <span 
-                            className={`text-xs font-bold px-1.5 py-0.5 rounded uppercase ${
+                            className={`text-[10px] sm:text-xs font-bold px-1 sm:px-1.5 py-0.5 rounded uppercase ${
                               holidayInfo.is_sunday 
                                 ? 'text-blue-700 bg-blue-200' 
                                 : 'text-orange-700 bg-orange-200'
@@ -610,7 +661,7 @@ export default function MyCalendarPage() {
                             HOL
                           </span>
                         ) : displayLeaveStatus ? (
-                          <span className="text-xs font-bold text-purple-700 bg-purple-200 px-1.5 py-0.5 rounded uppercase">
+                          <span className="text-[10px] sm:text-xs font-bold text-purple-700 bg-purple-200 px-1 sm:px-1.5 py-0.5 rounded uppercase">
                             {displayLeaveStatus}
                           </span>
                         ) : (
@@ -618,7 +669,35 @@ export default function MyCalendarPage() {
                         )}
                       </div>
 
+                      {/* Compact mobile content */}
+                      <div className="sm:hidden text-[10px] leading-tight space-y-0">
+                        {holidayInfo ? (
+                          <>
+                            <div className="font-semibold text-gray-700 truncate">{holidayInfo.name}</div>
+                            {hasAttendance && (
+                              <div className="text-gray-700">
+                                {attendance.fn_status?.toUpperCase() === 'PRESENT' ? 'P' : attendance.fn_status?.slice(0, 2)} /
+                                {attendance.an_status?.toUpperCase() === 'PRESENT' ? 'P' : attendance.an_status?.slice(0, 2)}
+                              </div>
+                            )}
+                          </>
+                        ) : displayLeaveStatus ? (
+                          <div className="font-semibold text-purple-700 truncate">{displayLeaveStatus}</div>
+                        ) : hasAttendance ? (
+                          <>
+                            {attendance.morning_in && <div className={`${lateIn ? 'text-red-700 font-semibold' : 'text-gray-700'} truncate`}>In {attendance.morning_in}</div>}
+                            {attendance.evening_out && <div className={`${earlyOut ? 'text-red-700 font-semibold' : 'text-gray-700'} truncate`}>Out {attendance.evening_out}</div>}
+                            <div className="font-medium text-gray-700 truncate">FN {attendance.fn_status} / AN {attendance.an_status}</div>
+                          </>
+                        ) : isEarnedCol(dateStr) ? (
+                          <div className="font-semibold text-blue-700">Worked</div>
+                        ) : (
+                          <div className="text-gray-500 text-[10px] flex items-center gap-1"><Plus className="w-3 h-3" />Add</div>
+                        )}
+                      </div>
+
                       {/* Leave, Holiday, or Attendance info */}
+                      <div className="hidden sm:block">
                       {holidayInfo ? (
                         <div className="text-center mt-1">
                           <div className={`text-xs font-semibold capitalize ${
@@ -627,7 +706,7 @@ export default function MyCalendarPage() {
                             {holidayInfo.name}
                           </div>
                           {hasAttendance && (
-                            <div className="text-xs text-gray-700 space-y-0.5 mt-1">
+                            <div className="text-sm text-gray-700 space-y-0.5 mt-1">
                               {/* Show IN/OUT times on holidays */}
                               {attendance.morning_in && (
                                 <div title={attendance.morning_in} className={`${lateIn ? 'text-red-700 font-semibold' : ''}`}>
@@ -640,7 +719,7 @@ export default function MyCalendarPage() {
                                 </div>
                               )}
                               {/* Show FN/AN status on holidays */}
-                              <div className="text-[10px] space-y-0.5 mt-1">
+                              <div className="text-sm space-y-0.5 mt-1">
                                 {attendance.fn_status && (
                                   <div className={`font-medium ${
                                     attendance.fn_status === 'present' ? 'text-green-700' : 
@@ -698,7 +777,7 @@ export default function MyCalendarPage() {
                           </div>
                         </div>
                       ) : hasAttendance ? (
-                        <div className="text-xs text-gray-700 space-y-0.5">
+                          <div className="text-sm text-gray-700 space-y-0.5">
                           {(() => {
                             // Display times as-is from backend (no swapping)
                             // Backend stores: morning_in (entry time), evening_out (exit time)
@@ -720,7 +799,7 @@ export default function MyCalendarPage() {
                               </>
                             );
                           })()}
-                          <div className="text-[10px] space-y-0.5 mt-1">
+                          <div className="text-sm space-y-0.5 mt-1">
                             {attendance.fn_status && (
                               <div className={`font-medium ${
                                 attendance.fn_status === 'present' ? 'text-green-700' : 
@@ -750,7 +829,7 @@ export default function MyCalendarPage() {
                               </div>
                             )}
                             {isHalfDayLeave && (
-                              <div className="text-[9px] text-purple-600 font-bold mt-0.5">
+                              <div className="text-sm text-purple-600 font-bold mt-0.5">
                                 HALF DAY
                               </div>
                             )}
@@ -777,10 +856,11 @@ export default function MyCalendarPage() {
                           </div>
                         </div>
                       ) : null}
+                      </div>
 
                       {/* Click to add request hint */}
                       {!holidayInfo && !displayLeaveStatus && !hasAttendance && (
-                        <div className="text-xs text-gray-500 text-center flex items-center justify-center gap-1">
+                        <div className="hidden sm:flex text-xs text-gray-500 text-center items-center justify-center gap-1">
                           <Plus className="w-3 h-3" />
                           Add
                         </div>

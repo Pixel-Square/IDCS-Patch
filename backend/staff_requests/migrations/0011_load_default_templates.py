@@ -23,7 +23,9 @@ def load_default_templates(apps, schema_editor):
         return
     
     # Common form schemas
+    # Insert `others_category` before `reason` so fresh installs include the dropdown
     leave_form_schema = [
+        {"name": "others_category", "type": "select", "label": "Category", "required": False, "options": ["General", "Personal", "Other"], "placeholder": "Select category"},
         {"name": "reason", "type": "text", "label": "Reason", "required": True},
         {"name": "from_date", "type": "date", "label": "From Date", "required": True, "help_text": "Start date of leave/request"},
         {"name": "from_noon", "type": "select", "label": "From Noon", "options": ["Full day", "FN", "AN"], "required": True, "help_text": "Select FN (morning) or AN (afternoon) for start date"},
@@ -31,10 +33,12 @@ def load_default_templates(apps, schema_editor):
         {"name": "to_noon", "type": "select", "label": "To Noon", "options": ["Full day", "FN", "AN"], "required": False, "help_text": "Select FN or AN for end date (optional)"}
     ]
     
+    # Late entry now uses shift + late_duration instead of an explicit time field
     late_entry_form_schema = [
         {"name": "reason", "type": "text", "label": "Reason", "required": True},
         {"name": "from_date", "type": "date", "label": "Date", "required": True},
-        {"name": "in_time", "type": "time", "label": "In Time", "required": True}
+        {"name": "shift", "type": "select", "label": "Shift", "required": True, "options": ["FN", "AN"]},
+        {"name": "late_duration", "type": "select", "label": "Late Duration", "required": True, "options": ["10 mins", "1 hr"]}
     ]
     
     od_form_schema = [
@@ -88,7 +92,8 @@ def load_default_templates(apps, schema_editor):
             "form_schema": leave_form_schema,
             "allowed_roles": COMMON_ROLES,
             "ledger_policy": {},
-            "leave_policy": {"action": "deduct", "attendance_status": "COL"},
+            # Compensatory leave should be treated as an earn action so it appears on holidays
+            "leave_policy": {"action": "earn", "attendance_status": "COL"},
             "attendance_action": {
                 "change_status": True,
                 "from_status": "absent",
@@ -108,7 +113,15 @@ def load_default_templates(apps, schema_editor):
             "allowed_roles": COMMON_ROLES,
             "ledger_policy": {},
             "leave_policy": {"action": "neutral"},
-            "attendance_action": {},
+            "attendance_action": {
+                "change_status": True,
+                "from_status": "absent",
+                "to_status": "present",
+                "apply_to_dates": ["from_date"],
+                "date_format": "YYYY-MM-DD",
+                "add_notes": True,
+                "notes_template": "Late Entry approved ({shift}, {late_duration})"
+            },
             "approval_steps": ["HOD", "HR"]
         },
         {
@@ -178,7 +191,7 @@ def load_default_templates(apps, schema_editor):
             "form_schema": leave_form_schema,
             "allowed_roles": SPL_ROLES,
             "ledger_policy": {},
-            "leave_policy": {"action": "deduct", "attendance_status": "COL"},
+            "leave_policy": {"action": "earn", "attendance_status": "COL"},
             "attendance_action": {
                 "change_status": True,
                 "from_status": "absent",
@@ -198,7 +211,15 @@ def load_default_templates(apps, schema_editor):
             "allowed_roles": SPL_ROLES,
             "ledger_policy": {},
             "leave_policy": {"action": "neutral"},
-            "attendance_action": {},
+            "attendance_action": {
+                "change_status": True,
+                "from_status": "absent",
+                "to_status": "present",
+                "apply_to_dates": ["from_date"],
+                "date_format": "YYYY-MM-DD",
+                "add_notes": True,
+                "notes_template": "Late Entry approved ({shift}, {late_duration})"
+            },
             "approval_steps": ["PRINCIPAL"]
         },
         {
