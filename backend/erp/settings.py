@@ -21,10 +21,20 @@ try:
 except Exception:
     pass
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'dev-secret')
+_django_secret_key = os.getenv('DJANGO_SECRET_KEY', '')
+if not _django_secret_key:
+    if os.getenv('DEBUG', '0') == '1':
+        _django_secret_key = 'dev-secret-do-not-use-in-production'
+    else:
+        raise RuntimeError(
+            'DJANGO_SECRET_KEY environment variable is not set. '
+            'Add it to backend/.env before starting the server.'
+        )
+SECRET_KEY = _django_secret_key
 
 DEBUG = os.getenv('DEBUG', '0') == '1'
 RUNNING_RUNSERVER = 'runserver' in sys.argv
+ALLOW_SQLITE_FALLBACK = os.getenv('ALLOW_SQLITE_FALLBACK', '1' if DEBUG else '0') == '1'
 
 ALLOWED_HOSTS = (
     ['*'] if DEBUG else [
@@ -141,6 +151,11 @@ if DB_NAME:
         }
     }
 else:
+    if not ALLOW_SQLITE_FALLBACK:
+        raise RuntimeError(
+            'SQLite fallback is disabled in this environment. '
+            'Set DB_NAME (PostgreSQL) or ALLOW_SQLITE_FALLBACK=1 explicitly.'
+        )
     # Fall back to SQLite for local development
     DATABASES = {
         'default': {
@@ -214,9 +229,10 @@ STATICFILES_DIRS = [
 if DEBUG:
     STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 else:
-    # Temporarily using StaticFilesStorage to debug 500 error
-    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
-    # STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
+    STATICFILES_STORAGE = os.getenv(
+        'STATICFILES_STORAGE',
+        'django.contrib.staticfiles.storage.ManifestStaticFilesStorage',
+    )
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -345,6 +361,21 @@ if 'https://idcs.krgi.co.in' not in CSRF_TRUSTED_ORIGINS:
 if 'https://cloud.krgi.co.in' not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append('https://cloud.krgi.co.in')
 
+# --- Production security hardening ---
+# Keep these settings env-driven so local development remains frictionless,
+# while production defaults become secure-by-default.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', '0' if DEBUG else '1') == '1'
+SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', '0' if DEBUG else '1') == '1'
+CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', '0' if DEBUG else '1') == '1'
+
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0' if DEBUG else '31536000'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv('SECURE_HSTS_INCLUDE_SUBDOMAINS', '0' if DEBUG else '1') == '1'
+SECURE_HSTS_PRELOAD = os.getenv('SECURE_HSTS_PRELOAD', '0' if DEBUG else '1') == '1'
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = os.getenv('SECURE_REFERRER_POLICY', 'strict-origin-when-cross-origin')
+
 # Optional: restrict which account may publish marks via the web UI/backend.
 # Set to a username or email (string). If empty/None publishing remains unrestricted
 # (aside from existing permission checks). Example: 'iqac.user@example.com'
@@ -365,7 +396,7 @@ OBE_WHATSAPP_API_URL_FALLBACK = os.getenv('OBE_WHATSAPP_API_URL_FALLBACK', '')
 OBE_WHATSAPP_GATEWAY_BASE_URL = os.getenv('OBE_WHATSAPP_GATEWAY_BASE_URL', '')
 # Optional secondary base URL for the IQAC Settings QR/Status page.
 OBE_WHATSAPP_GATEWAY_BASE_URL_FALLBACK = os.getenv('OBE_WHATSAPP_GATEWAY_BASE_URL_FALLBACK', '')
-OBE_WHATSAPP_API_KEY = os.getenv('OBE_WHATSAPP_API_KEY', 'IQAC_SECRET_123')
+OBE_WHATSAPP_API_KEY = os.getenv('OBE_WHATSAPP_API_KEY', '')
 OBE_WHATSAPP_TIMEOUT_SECONDS = float(os.getenv('OBE_WHATSAPP_TIMEOUT_SECONDS', '8'))
 OBE_WHATSAPP_DEFAULT_COUNTRY_CODE = os.getenv('OBE_WHATSAPP_DEFAULT_COUNTRY_CODE', '91')
 OBE_WHATSAPP_ALLOW_NON_LOCAL_URL = os.getenv('OBE_WHATSAPP_ALLOW_NON_LOCAL_URL', '0') == '1'
@@ -381,7 +412,7 @@ EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.Email
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', 'rohit08sk@gmail.com')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', 'inilmwzhzuhzajvc')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', '1') == '1'
 EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', '0') == '1'
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'rohit08sk@gmail.com')

@@ -1,7 +1,10 @@
+import logging
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+
+logger = logging.getLogger(__name__)
 from django.db import transaction
 from django.db.models import Q, Case, When, Value, IntegerField
 from django.shortcuts import get_object_or_404
@@ -559,16 +562,10 @@ class SubmitFeedbackView(APIView):
                 'detail': 'You do not have permission to submit feedback.'
             }, status=status.HTTP_403_FORBIDDEN)
         
-        print(f"[FEEDBACK SUBMIT] User: {request.user.username}")
-        print(f"[FEEDBACK SUBMIT] Payload: {request.data}")
-        
         serializer = FeedbackSubmissionSerializer(data=request.data)
         if serializer.is_valid():
             feedback_form_id = serializer.validated_data['feedback_form_id']
             teaching_assignment_id = serializer.validated_data.get('teaching_assignment_id')
-            
-            print(f"[FEEDBACK SUBMIT] Form ID: {feedback_form_id}")
-            print(f"[FEEDBACK SUBMIT] Teaching Assignment ID: {teaching_assignment_id}")
             
             # Get the feedback form to check type
             feedback_form = get_object_or_404(FeedbackForm, id=feedback_form_id)
@@ -594,7 +591,6 @@ class SubmitFeedbackView(APIView):
                 ).exists()
 
                 if existing_response:
-                    print(f"[FEEDBACK SUBMIT] Duplicate submission detected for subject")
                     return Response({
                         'detail': 'You have already submitted feedback for this subject.'
                     }, status=status.HTTP_400_BAD_REQUEST)
@@ -607,7 +603,6 @@ class SubmitFeedbackView(APIView):
                 ).exists()
                 
                 if existing_response:
-                    print(f"[FEEDBACK SUBMIT] Duplicate submission detected")
                     return Response({
                         'detail': 'You have already submitted feedback for this form.'
                     }, status=status.HTTP_400_BAD_REQUEST)
@@ -615,7 +610,6 @@ class SubmitFeedbackView(APIView):
             # Save responses
             try:
                 feedback_form = serializer.save(user=request.user)
-                print(f"[FEEDBACK SUBMIT] Successfully saved responses")
 
                 if feedback_form.type == 'SUBJECT_FEEDBACK':
                     completion = get_subject_feedback_completion(feedback_form, request.user)
@@ -656,12 +650,11 @@ class SubmitFeedbackView(APIView):
                     'message': 'Feedback submitted successfully'
                 }, status=status.HTTP_200_OK)
             except Exception as e:
-                print(f"[FEEDBACK SUBMIT] Error saving responses: {str(e)}")
+                logger.exception('[FEEDBACK SUBMIT] Error saving responses')
                 return Response({
-                    'detail': f'Error saving feedback: {str(e)}'
+                    'detail': 'Error saving feedback. Please try again.'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        print(f"[FEEDBACK SUBMIT] Validation errors: {serializer.errors}")
         
         # Format validation errors for better frontend display
         error_messages = []
@@ -2889,11 +2882,9 @@ class GetStudentSubjectsView(APIView):
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
-            import traceback
-            print(f"[GetStudentSubjectsView] ERROR: {str(e)}")
-            print(traceback.format_exc())
+            logger.exception('[GetStudentSubjectsView] ERROR')
             return Response({
-                'detail': f'Error fetching subjects: {str(e)}',
+                'detail': 'Error fetching subjects. Please try again.',
                 'subjects': [],
                 'total_subjects': 0,
                 'completed_subjects': 0,
@@ -2978,11 +2969,9 @@ class DiagnosticElectiveChoicesView(APIView):
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
-            import traceback
-            print(f"[DiagnosticElectiveChoicesView] ERROR: {str(e)}")
-            print(traceback.format_exc())
+            logger.exception('[DiagnosticElectiveChoicesView] ERROR')
             return Response({
-                'detail': f'Error: {str(e)}'
+                'detail': 'An error occurred. Please try again.'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
