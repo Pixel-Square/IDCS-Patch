@@ -184,7 +184,7 @@ SESSION_CACHE_ALIAS = 'default'
 AUTH_PASSWORD_VALIDATORS = []
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kolkata'
 USE_I18N = True
 USE_TZ = True
 
@@ -272,6 +272,12 @@ TWILIO_SERVICE_SID = os.getenv('TWILIO_SERVICE_SID', '')
 # Wildcard '*' is invalid with `Access-Control-Allow-Credentials: true`.
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [
+    # Electron desktop app (packaged) uses a custom scheme origin.
+    # This must be explicitly allowed or requests will fail with generic
+    # "Failed to fetch" errors due to CORS.
+    'app://-',
+    # Some Electron configurations / file:// flows can use Origin: null.
+    'null',
     'https://idcs.krgi.co.in',
     'https://db.krgi.co.in',
     'https://cloud.krgi.co.in',

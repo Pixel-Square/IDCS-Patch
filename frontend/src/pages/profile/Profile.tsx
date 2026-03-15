@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getMe, requestMobileOtp, verifyMobileOtp, removeMobileNumber, changePassword, getCachedMe } from '../../services/auth';
-import { User, Mail, Shield, Building, Briefcase, School, Phone, CheckCircle2, Trash2, Key, Eye, EyeOff, Edit2, Save, X, Camera } from 'lucide-react';
+import { User, Mail, Shield, Building, Briefcase, School, Phone, CheckCircle2, Trash2, Key, Eye, EyeOff, Edit2, Save, X, Camera, CreditCard, XCircle } from 'lucide-react';
 import DashboardLayout from '../../components/layout/DashboardLayout';
 import { ModalPortal } from '../../components/ModalPortal';
 import logo from '../../assets/idcs-logo.png';
@@ -653,9 +653,33 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                 <p className="text-gray-600 mt-1">{user.email || 'No email provided'}</p>
               </div>
             </div>
-            <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
-              <div className="text-xs text-gray-500 mb-1">Profile Type</div>
-              <div className="font-bold text-gray-900">{user.profile_type || '—'}</div>
+            <div className="flex items-center gap-3">
+              {(user.profile_type === 'STUDENT' || user.profile_type === 'STAFF') && (
+                <div
+                  className={`px-4 py-2 rounded-lg shadow-sm border ${
+                    user.profile?.rfid_uid
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      : 'bg-red-50 border-red-200 text-red-700'
+                  }`}
+                >
+                  <div className="text-xs font-bold uppercase tracking-wider mb-1 opacity-80">ID Card</div>
+                  <div className="flex items-center gap-1.5 font-bold text-sm">
+                    {user.profile?.rfid_uid ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" /> Connected
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="w-4 h-4" /> Not Connected
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="bg-white rounded-lg px-4 py-2 shadow-sm border border-gray-100">
+                <div className="text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">Profile Type</div>
+                <div className="font-bold text-gray-900">{user.profile_type || '—'}</div>
+              </div>
             </div>
           </div>
         </div>

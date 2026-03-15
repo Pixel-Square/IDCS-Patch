@@ -137,6 +137,7 @@ function FieldInput({
     case 'DATE IN OUT':
       return renderComposite(['in_time', 'out_time'])
     case 'DATE OUT IN':
+      // User request: Ensure OUT time renders first, reflecting it is the start time.
       return renderComposite(['out_time', 'in_time'])
     case 'NUMBER':
       return (
@@ -215,9 +216,16 @@ export default function ApplicationFormPage(): JSX.Element {
         const TERMINAL = ['APPROVED', 'REJECTED', 'CANCELLED']
         try {
           const myApps = await fetchMyApplications()
-          const active = myApps.find(
-            (a) => a.application_type_name === s.name && !TERMINAL.includes(a.current_state),
-          )
+          const active = myApps.find((a) => {
+            if (a.application_type_name !== s.name) return false
+            if (TERMINAL.includes(a.current_state)) return false
+            // If gatepass expired, treat as terminal
+            if (a.gatepass_window_end) {
+              const end = new Date(a.gatepass_window_end).getTime()
+              if (Date.now() > end) return false
+            }
+            return true
+          })
           if (active && mounted) {
             setActiveApp({
               id: active.id,

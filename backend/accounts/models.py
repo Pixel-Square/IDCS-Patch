@@ -144,7 +144,24 @@ def validate_roles_for_user(user, roles):
     role_names = {getattr(r, 'name', str(r)).upper() for r in roles}
 
     STUDENT_ALLOWED = {'STUDENT'}
-    STAFF_ALLOWED = {'STAFF', 'FACULTY', 'ADVISOR', 'HOD', 'AHOD', 'MENTOR', 'ADMIN'}
+    # NOTE: Many deployments use additional staff-only roles (SECURITY, HR, IQAC, etc.).
+    # Keep this list permissive for staff profiles while still preventing STUDENT on staff.
+    STAFF_ALLOWED = {
+        'STAFF',
+        'FACULTY',
+        'ADVISOR',
+        'HOD',
+        'AHOD',
+        'MENTOR',
+        'ADMIN',
+        'IQAC',
+        'SECURITY',
+        'LIBRARY',
+        'HR',
+        'HAA',
+        'PRINCIPAL',
+        'PS',
+    }
 
     if profile == 'STUDENT':
         invalid = role_names - STUDENT_ALLOWED
