@@ -58,20 +58,20 @@ import { getApiBase } from './apiBase';
 const API_BASE = getApiBase();
 
 export async function fetchBatchYears(): Promise<BatchYear[]> {
-  const res = await fetchWithAuth(`${API_BASE}/api/academics/batch-years/`);
+  const res = await fetchWithAuth(`/api/academics/batch-years/`);
   if (!res.ok) throw new Error('Failed to fetch batch years');
   const data = await res.json();
   return Array.isArray(data) ? data : (data.results || []);
 }
 
 export async function fetchMasters(): Promise<Master[]> {
-  const res = await fetchWithAuth(`${API_BASE}/api/curriculum/master/`);
+  const res = await fetchWithAuth(`/api/curriculum/master/`);
   if (!res.ok) throw new Error('Failed to fetch masters');
   return res.json();
 }
 
 export async function createMaster(payload: Partial<Master>) {
-  const res = await fetchWithAuth(`${API_BASE}/api/curriculum/master/`, {
+  const res = await fetchWithAuth(`/api/curriculum/master/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -80,7 +80,7 @@ export async function createMaster(payload: Partial<Master>) {
 }
 
 export async function updateMaster(id: number, payload: Partial<Master>) {
-  const res = await fetchWithAuth(`${API_BASE}/api/curriculum/master/${id}/`, {
+  const res = await fetchWithAuth(`/api/curriculum/master/${id}/`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
@@ -103,13 +103,13 @@ export async function updateMaster(id: number, payload: Partial<Master>) {
 }
 
 export async function fetchDeptRows(): Promise<DeptRow[]> {
-  const res = await fetchWithAuth(`${API_BASE}/api/curriculum/department/`);
+  const res = await fetchWithAuth(`/api/curriculum/department/`);
   if (!res.ok) throw new Error('Failed to fetch dept rows');
   return res.json();
 }
 
 export async function fetchDeptRow(id: number): Promise<DeptRow> {
-  const res = await fetchWithAuth(`${API_BASE}/api/curriculum/department/${encodeURIComponent(String(id))}/`);
+  const res = await fetchWithAuth(`/api/curriculum/department/${encodeURIComponent(String(id))}/`);
   if (!res.ok) throw new Error('Failed to fetch dept row');
   return res.json();
 }
@@ -120,7 +120,7 @@ export async function fetchElectives(params?: { department_id?: number; regulati
   if (params?.regulation) qs.set('regulation', params.regulation);
   if (params?.semester) qs.set('semester', String(params.semester));
   qs.set('page_size', '0'); // Disable pagination to get all results
-  const url = `${API_BASE}/api/curriculum/elective/?${qs.toString()}`;
+  const url = `/api/curriculum/elective/?${qs.toString()}`;
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error('Failed to fetch electives');
   const data = await res.json();
@@ -129,15 +129,16 @@ export async function fetchElectives(params?: { department_id?: number; regulati
 }
 
 export async function createElective(payload: Partial<DeptRow> & { parent: number; semester_id?: number; department_id?: number }) {
-  const res = await fetchWithAuth(`${API_BASE}/api/curriculum/elective/`, {
+  const res = await fetchWithAuth(`/api/curriculum/elective/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
 export async function updateDeptRow(id: number, payload: Partial<DeptRow>) {
-  const res = await fetchWithAuth(`${API_BASE}/api/curriculum/department/${id}/`, {
+  const res = await fetchWithAuth(`/api/curriculum/department/${id}/`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
@@ -146,7 +147,7 @@ export async function updateDeptRow(id: number, payload: Partial<DeptRow>) {
 }
 
 export async function approveDeptRow(id: number, action: 'approve' | 'reject') {
-  const res = await fetchWithAuth(`${API_BASE}/api/curriculum/department/${id}/approve/`, {
+  const res = await fetchWithAuth(`/api/curriculum/department/${id}/approve/`, {
     method: 'POST',
     body: JSON.stringify({ action }),
   });
@@ -210,7 +211,7 @@ export async function propagateDeptRow(
       editable: row.editable,
     };
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/curriculum/department/`, {
+      const res = await fetchWithAuth(`/api/curriculum/department/`, {
         method: 'POST',
         body: JSON.stringify(payload),
       });
