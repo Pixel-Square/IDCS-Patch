@@ -418,6 +418,13 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
   const markManagerLocked = Boolean(sheet.markManagerLocked);
   const showNameList = Boolean(sheet.markManagerSnapshot != null);
 
+  // Auto-unlock Mark Manager if marks have already been entered
+  const autoUnlockMarkManager = Boolean(sheet.markManagerSnapshot != null) ||
+    Object.keys(sheet.rowsByStudentId || {}).some((k) => {
+      const row = sheet.rowsByStudentId[k];
+      return Object.values(row?.q || {}).some((v) => v !== '' && v != null);
+    });
+
   // Restore publishedAt from backend when markLock indicates the table was published.
   // Avoid gating on `!publishedAt` so it still updates after refresh/poll.
   useEffect(() => {
@@ -457,7 +464,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
   const editRequestsEnabled = useMarkEntryEditRequestsEnabled();
   const entryOpen = !isPublished ? Boolean(editAllowed) : !editRequestsEnabled || Boolean(markLock?.entry_open) || markEntryApprovedFresh || markManagerApprovedFresh;
   const publishedEditLocked = Boolean(isPublished && editRequestsEnabled && !entryOpen);
-  const tableBlocked = Boolean(globalLocked || (isPublished ? (editRequestsEnabled && !entryOpen) : !markManagerLocked));
+  const tableBlocked = Boolean(globalLocked || (isPublished ? (editRequestsEnabled && !entryOpen) : (!markManagerLocked && !autoUnlockMarkManager)));
   const editRequestsBlocked = Boolean(isPublished && publishedEditLocked && !editRequestsEnabled);
 
   const publishButtonIsRequestEdit = Boolean(isPublished && publishedEditLocked && editRequestsEnabled);
@@ -1651,11 +1658,11 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
         const header = String(headerRow[i] || '').trim();
         if (!header) continue;
 
-        // Extract question label from header like "Q1 (2.00)" -> "Q1"
-        const match = header.match(/^([QqOo]\d+|[A-Za-z]\d*)/);
+        // Extract question label from header like "Q1 (2.00)", "Q 1 (2.00)", "q10 8 00" -> "Q1"/"Q10"
+        const match = header.match(/^(q|o)\s*0*(\d{1,2})\b/i);
         if (!match) continue;
 
-        const label = match[1].toUpperCase();
+        const label = `${String(match[1] || 'Q').toUpperCase()}${String(Number(match[2] || 0))}`;
 
         // QP2: template has Q9 (8) and Q10 (8) but UI has only Q9 (16).
         if (qpTypeKey === 'QP2' && label === 'Q10') {
@@ -1693,10 +1700,16 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
         const row = rows[i];
         if (!row || row.length === 0) continue;
 
-        const regNo = normalizeRegisterNo(row[regNoIdx]);
-        if (!regNo) continue;
-
-        const student = studentsByRegNo.get(regNo);
+        const regKeys = registerNoKeys(row[regNoIdx]);
+        if (!regKeys.length) continue;
+        let student: Student | undefined;
+        for (const k of regKeys) {
+          const s = studentsByRegNo.get(k);
+          if (s) {
+            student = s;
+            break;
+          }
+        }
         if (!student) {
           skippedCount++;
           continue;
