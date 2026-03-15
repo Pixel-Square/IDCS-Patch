@@ -314,6 +314,13 @@ _PROD_WEB_ORIGINS = [
     'https://cloud.krgi.co.in',
 ]
 
+# CSRF trusted origins must be absolute http(s) origins in Django 4+.
+_PROD_CSRF_ORIGINS = [
+    'https://idcs.krgi.co.in',
+    'https://db.krgi.co.in',
+    'https://cloud.krgi.co.in',
+]
+
 _DEFAULT_DEBUG_ORIGINS = [
     'http://localhost',
     'http://localhost:3000',
@@ -358,7 +365,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Allow configuring CSRF trusted origins via environment variable
 # Provide comma-separated origins including scheme, e.g. 'https://db.zynix.us'
-CSRF_TRUSTED_ORIGINS = _split_env_csv('CSRF_TRUSTED_ORIGINS') or list(_PROD_WEB_ORIGINS)
+CSRF_TRUSTED_ORIGINS = _split_env_csv('CSRF_TRUSTED_ORIGINS') or list(_PROD_CSRF_ORIGINS)
 # In DEBUG add localhost aliases for convenience
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += [
