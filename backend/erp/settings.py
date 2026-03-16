@@ -296,7 +296,8 @@ TWILIO_SERVICE_SID = os.getenv('TWILIO_SERVICE_SID', '')
 
 # Restrict CORS to explicit origins when credentials (cookies/auth) are used.
 # Wildcard '*' is invalid with `Access-Control-Allow-Credentials: true`.
-CORS_ALLOW_ALL_ORIGINS = False
+# In local development, allow all origins to avoid brittle localhost/port mismatches.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 
 def _split_env_csv(name: str) -> list[str]:
     return [v.strip() for v in str(os.getenv(name, '') or '').split(',') if v.strip()]
