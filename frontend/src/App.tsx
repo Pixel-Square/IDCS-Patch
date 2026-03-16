@@ -261,6 +261,10 @@ export default function App() {
                   path="/feedback"
                   element={<ProtectedRoute user={user} requiredPermissions={["feedback.feedback_page"]} element={<FeedbackPage />} />}
                 />
+                <Route
+                  path="/student/feedback"
+                  element={<ProtectedRoute user={user} requiredProfile={'STUDENT'} requiredPermissions={["feedback.feedback_page"]} element={<FeedbackPage />} />}
+                />
                 <Route path="/academic-calendar" element={<AcademicCalendarRedirect user={user} />} />
                 <Route
                   path="/iqac/calendar"
