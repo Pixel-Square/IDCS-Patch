@@ -7,6 +7,7 @@ import { useSidebar } from './SidebarContext';
 import { fetchPendingPublishRequestCount } from '../../services/obe';
 import { ApplicationsNavResponse, fetchApplicationsNav } from '../../services/applications';
 import { useAttendanceNotificationCount } from '../../hooks/useAttendanceNotificationCount';
+import { fetchCurriculumPendingCount } from '../../services/curriculum';
 
   const ICON_MAP: Record<string, any> = {
   profile: User,
@@ -65,11 +66,13 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   const [pendingObeReqCount, setPendingObeReqCount] = useState<number>(0);
   const [pendingSwapReqCount, setPendingSwapReqCount] = useState<number>(0);
   const [pendingAttendanceReqCount, setPendingAttendanceReqCount] = useState<number>(0);
+  const [pendingCurriculumCount, setPendingCurriculumCount] = useState<number>(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [applicationsNav, setApplicationsNav] = useState<ApplicationsNavResponse | null>(null);
 
   const permsForHook = (data?.permissions || []).map((p) => String(p || '').toLowerCase());
   const rolesForHook = (data?.roles || []).map((r) => String(r || '').toUpperCase());
+  const isIqacForBadge = rolesForHook.includes('IQAC');
   const isHodOrIqac = rolesForHook.includes('HOD') || rolesForHook.includes('IQAC');
   const { count: attendanceNotifCount } = useAttendanceNotificationCount(isHodOrIqac);
 
@@ -184,6 +187,31 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
       mounted = false;
     };
   }, [data]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchPendingCount = async () => {
+      if (!isIqacForBadge) {
+        setPendingCurriculumCount(0);
+        return;
+      }
+      try {
+        const resp = await fetchCurriculumPendingCount();
+        if (!mounted) return;
+        setPendingCurriculumCount(Number(resp.totalPending || 0));
+      } catch {
+        // badge is best-effort
+      }
+    };
+
+    fetchPendingCount();
+    const interval = window.setInterval(fetchPendingCount, 30_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, [isIqacForBadge]);
   // auto-expand RFReader when on /iqac/rf-reader routes
   useEffect(() => {
     if (loc.pathname.startsWith('/iqac/rf-reader')) {
@@ -501,6 +529,9 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
                       ) : null}
                       {i.key === 'attendance_analytics' && attendanceNotifCount > 0 ? (
                         <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-full bg-red-600 text-white">{attendanceNotifCount > 99 ? '99+' : attendanceNotifCount}</span>
+                      ) : null}
+                      {i.key === 'department_curriculum' && isIqac && pendingCurriculumCount > 0 ? (
+                        <span className="ml-2 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[11px] font-semibold rounded-full bg-red-600 text-white">{pendingCurriculumCount > 99 ? '99+' : pendingCurriculumCount}</span>
                       ) : null}
                     </span>
                   </Link>
