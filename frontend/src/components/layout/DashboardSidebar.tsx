@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import fetchWithAuth from '../../services/fetchAuth';
 import useDashboard from '../../hooks/useDashboard';
-import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2, PartyPopper, FileText, ScanLine, Shield } from 'lucide-react';
+import { User, BookOpen, Layout, Grid, Home, GraduationCap, Users, Calendar, ClipboardList, Upload, Bell, CalendarClock, MessageSquare, Settings, BarChart2, PartyPopper, FileText, ScanLine, Shield, UserCheck, Wallet } from 'lucide-react';
 import { useSidebar } from './SidebarContext';
 import { fetchPendingPublishRequestCount } from '../../services/obe';
 import { ApplicationsNavResponse, fetchApplicationsNav } from '../../services/applications';
@@ -43,6 +43,8 @@ import { ApplicationsNavResponse, fetchApplicationsNav } from '../../services/ap
   pbas_manager: Layout,
   settings: Settings,
   hr_request_templates: FileText,
+  hr_staff_validation: UserCheck,
+  hr_staff_salary: Wallet,
   staff_requests_approvals: Bell,
   applications_admin: Layout,
   applications_inbox: ClipboardList,
@@ -361,6 +363,12 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
 
   if (rolesUpper.includes('HR') && !items.some(item => item.key === 'hr_staff_attendance_analytics')) {
     items.push({ key: 'hr_staff_attendance_analytics', label: 'HR: Staff Attendance Analytics', to: '/hr/staff-attendance-analytics' });
+  }
+  if (rolesUpper.includes('HR') && !items.some(item => item.key === 'hr_staff_validation')) {
+    items.push({ key: 'hr_staff_validation', label: 'HR: Staff Validation', to: '/hr/staff-validation' });
+  }
+  if (rolesUpper.includes('HR') && !items.some(item => item.key === 'hr_staff_salary')) {
+    items.push({ key: 'hr_staff_salary', label: 'HR: Staff Salary', to: '/hr/staff-salary' });
   }
   
   // Staff Requests system

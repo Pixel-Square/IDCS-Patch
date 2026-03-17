@@ -36,6 +36,7 @@ urlpatterns = [
     path('api/staff-attendance/', include('staff_attendance.urls')),
     # Staff Requests API (dynamic forms & workflow engine)
     path('api/staff-requests/', include('staff_requests.urls')),
+    path('api/staff-salary/', include('staff_salary.urls')),
     path('api/idscan/', include('idcsscan.urls')),
 ]
 

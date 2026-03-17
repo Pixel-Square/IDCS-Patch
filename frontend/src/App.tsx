@@ -64,6 +64,8 @@ import IQACStaffAttendancePage from './pages/iqac/StaffAttendance';
 import PSStaffAttendanceViewPage from './pages/PS/StaffAttendanceView';
 import RequestTemplatesPage from './pages/hr/RequestTemplatesPage';
 import OrganizationStaffAttendanceAnalytics from './pages/hr/OrganizationStaffAttendanceAnalytics';
+import StaffValidationPage from './pages/hr/StaffValidationPage';
+import StaffSalaryPage from './pages/hr/StaffSalaryPage';
 import MyRequestsPage from './pages/staff-requests/MyRequestsPage';
 import PendingApprovalsPage from './pages/staff-requests/PendingApprovalsPage';
 import ApplicationsAdminPage from './pages/iqac/ApplicationsAdminPage';
@@ -433,6 +435,14 @@ export default function App() {
                 <Route
                   path="/hr/staff-attendance-analytics"
                   element={<ProtectedRoute user={user} requiredRoles={['HR']} requiredPermissions={['staff_requests.manage_templates']} element={<OrganizationStaffAttendanceAnalytics />} />}
+                />
+                <Route
+                  path="/hr/staff-validation"
+                  element={<ProtectedRoute user={user} requiredRoles={['HR']} requiredPermissions={['staff_requests.manage_templates']} element={<StaffValidationPage />} />}
+                />
+                <Route
+                  path="/hr/staff-salary"
+                  element={<ProtectedRoute user={user} requiredRoles={['HR']} requiredPermissions={['staff_requests.manage_templates']} element={<StaffSalaryPage />} />}
                 />
                 
                 {/* Staff Requests Routes */}

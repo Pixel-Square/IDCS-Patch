@@ -2539,6 +2539,373 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
             'total': ten_mins + one_hr,
         })
 
+    @action(detail=False, methods=['get'])
+    def staff_validation_overview(self, request):
+        """
+        HR/Admin summary table for staff validation with date and department filters.
+        GET /api/staff-requests/requests/staff_validation_overview/?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD&department_id=<id>
+        """
+        from datetime import datetime
+        from .permissions import IsAdminOrHR
+        from staff_attendance.models import AttendanceRecord
+
+        if not IsAdminOrHR().has_permission(request, self):
+            return Response({'error': 'Only HR/Admin can access this endpoint'}, status=status.HTTP_403_FORBIDDEN)
+
+        from_date_str = request.query_params.get('from_date')
+        to_date_str = request.query_params.get('to_date') or from_date_str
+        department_id = request.query_params.get('department_id')
+
+        if not from_date_str:
+            return Response({'error': 'from_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
+            to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if from_date > to_date:
+            return Response({'error': 'from_date must be before or equal to to_date'}, status=status.HTTP_400_BAD_REQUEST)
+
+        User = get_user_model()
+        staff_qs = User.objects.filter(is_active=True, staff_profile__isnull=False).select_related('staff_profile', 'staff_profile__department')
+        if department_id:
+            staff_qs = staff_qs.filter(staff_profile__department_id=department_id)
+
+        staff_users = list(staff_qs.order_by('first_name', 'username'))
+        staff_ids = [u.id for u in staff_users]
+
+        # Attendance aggregation (session-wise: FN + AN => 1 day)
+        attendance_map = {sid: {'present_days': 0.0, 'absent_days': 0.0} for sid in staff_ids}
+        if staff_ids:
+            attendance_qs = AttendanceRecord.objects.filter(
+                user_id__in=staff_ids,
+                date__gte=from_date,
+                date__lte=to_date
+            ).values('user_id', 'fn_status', 'an_status')
+
+            for row in attendance_qs:
+                uid = row['user_id']
+                fn = str(row.get('fn_status') or '').strip().lower()
+                an = str(row.get('an_status') or '').strip().lower()
+                if fn == 'present':
+                    attendance_map[uid]['present_days'] += 0.5
+                elif fn == 'absent':
+                    attendance_map[uid]['absent_days'] += 0.5
+
+                if an == 'present':
+                    attendance_map[uid]['present_days'] += 0.5
+                elif an == 'absent':
+                    attendance_map[uid]['absent_days'] += 0.5
+
+        # Balance aggregation
+        balances_map = {}
+        if staff_ids:
+            balances_qs = StaffLeaveBalance.objects.filter(staff_id__in=staff_ids).values('staff_id', 'leave_type', 'balance')
+            for row in balances_qs:
+                sid = row['staff_id']
+                leave_type = str(row['leave_type'] or '').strip()
+                balances_map.setdefault(sid, {})[leave_type] = float(row['balance'] or 0)
+
+        def pick_balance(staff_balance_map, keys):
+            for k in keys:
+                if k in staff_balance_map:
+                    return float(staff_balance_map.get(k) or 0)
+            return 0.0
+
+        # Pre-fetch late-entry templates to compute available counts when balances absent
+        from .models import RequestTemplate, StaffRequest
+
+        late_templates = list(RequestTemplate.objects.filter(name__icontains='late entry'))
+
+        rows = []
+        for idx, user_obj in enumerate(staff_users, start=1):
+            profile = getattr(user_obj, 'staff_profile', None)
+            dept = getattr(profile, 'department', None) if profile else None
+            staff_balance_map = balances_map.get(user_obj.id, {})
+            # Determine late entry available count:
+            late_balance_val = pick_balance(staff_balance_map, ['Late Entry Permission', 'Late Entry Permission - SPL'])
+            if late_balance_val and late_balance_val > 0:
+                late_available = float(late_balance_val)
+            else:
+                # No explicit balance stored; derive from template allotment minus approved uses in date range
+                user_role = self._get_primary_role(user_obj)
+                # Prefer SPL template for SPL roles
+                tpl = None
+                if any(r in ['HOD', 'IQAC', 'HR', 'PS', 'CFSW', 'EDC', 'COE', 'HAA'] for r in [user_role]):
+                    tpl = next((t for t in late_templates if t.name.lower().endswith('- spl')), None)
+                if not tpl:
+                    tpl = next((t for t in late_templates if 'late entry' in t.name.lower()), None)
+
+                allotment = 0.0
+                used_count = 0
+                if tpl:
+                    try:
+                        allotment = float((tpl.leave_policy or {}).get('allotment_per_role', {}).get(user_role, 0) or 0)
+                    except Exception:
+                        allotment = 0.0
+
+                    used_count = StaffRequest.objects.filter(
+                        applicant=user_obj,
+                        template=tpl,
+                        status='approved',
+                        created_at__date__gte=from_date,
+                        created_at__date__lte=to_date,
+                    ).count()
+
+                late_available = max(0.0, allotment - float(used_count))
+
+            rows.append({
+                's_no': idx,
+                'staff_user_id': user_obj.id,
+                'staff_id': getattr(profile, 'staff_id', None) or user_obj.username,
+                'staff_name': user_obj.get_full_name() or user_obj.username,
+                'department': {
+                    'id': dept.id if dept else None,
+                    'name': dept.name if dept else 'N/A',
+                },
+                'present_days': round(attendance_map.get(user_obj.id, {}).get('present_days', 0.0), 2),
+                'absent_days': round(attendance_map.get(user_obj.id, {}).get('absent_days', 0.0), 2),
+                'balances': {
+                    'lop': pick_balance(staff_balance_map, ['LOP']),
+                    'cl': pick_balance(staff_balance_map, ['Casual Leave', 'Casual Leave - SPL', 'CL']),
+                    'col': pick_balance(staff_balance_map, ['Compensatory leave', 'Compensatory leave - SPL', 'COL']),
+                    'od': pick_balance(staff_balance_map, ['ON duty', 'ON duty - SPL', 'OD']),
+                    'others': pick_balance(staff_balance_map, ['Others', 'Others - SPL', 'OTHERS']),
+                    'late_entry_permission': late_available,
+                }
+            })
+
+        return Response({
+            'filters': {
+                'from_date': from_date_str,
+                'to_date': to_date_str,
+                'department_id': department_id,
+            },
+            'count': len(rows),
+            'results': rows,
+        })
+
+    @action(detail=False, methods=['get'])
+    def staff_validation_calendar(self, request):
+        """
+        HR/Admin attendance calendar data for one staff between dates.
+        GET /api/staff-requests/requests/staff_validation_calendar/?staff_user_id=<id>&from_date=YYYY-MM-DD&to_date=YYYY-MM-DD
+        """
+        from datetime import datetime
+        from .permissions import IsAdminOrHR
+        from staff_attendance.models import AttendanceRecord
+
+        if not IsAdminOrHR().has_permission(request, self):
+            return Response({'error': 'Only HR/Admin can access this endpoint'}, status=status.HTTP_403_FORBIDDEN)
+
+        staff_user_id = request.query_params.get('staff_user_id')
+        from_date_str = request.query_params.get('from_date')
+        to_date_str = request.query_params.get('to_date') or from_date_str
+
+        if not staff_user_id or not from_date_str:
+            return Response({'error': 'staff_user_id and from_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
+            to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        User = get_user_model()
+        try:
+            target_user = User.objects.select_related('staff_profile', 'staff_profile__department').get(id=staff_user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Staff user not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        records = AttendanceRecord.objects.filter(
+            user=target_user,
+            date__gte=from_date,
+            date__lte=to_date
+        ).order_by('date')
+
+        data = []
+        for record in records:
+            data.append({
+                'date': record.date.isoformat(),
+                'status': record.status,
+                'fn_status': record.fn_status,
+                'an_status': record.an_status,
+                'morning_in': record.morning_in.strftime('%H:%M') if record.morning_in else None,
+                'evening_out': record.evening_out.strftime('%H:%M') if record.evening_out else None,
+                'notes': record.notes,
+            })
+
+        profile = getattr(target_user, 'staff_profile', None)
+        dept = getattr(profile, 'department', None) if profile else None
+        return Response({
+            'staff': {
+                'id': target_user.id,
+                'staff_id': getattr(profile, 'staff_id', None) or target_user.username,
+                'name': target_user.get_full_name() or target_user.username,
+                'department': dept.name if dept else 'N/A',
+            },
+            'from_date': from_date_str,
+            'to_date': to_date_str,
+            'records': data,
+        })
+
+    @action(detail=False, methods=['get'])
+    def hr_templates_for_staff(self, request):
+        """
+        HR/Admin fetch templates as if target staff is applying on a given date.
+        GET /api/staff-requests/requests/hr_templates_for_staff/?staff_user_id=<id>&date=YYYY-MM-DD
+        """
+        from datetime import datetime
+        from .permissions import IsAdminOrHR
+        from staff_attendance.models import Holiday, AttendanceRecord
+
+        if not IsAdminOrHR().has_permission(request, self):
+            return Response({'error': 'Only HR/Admin can access this endpoint'}, status=status.HTTP_403_FORBIDDEN)
+
+        staff_user_id = request.query_params.get('staff_user_id')
+        date_str = request.query_params.get('date')
+
+        if not staff_user_id or not date_str:
+            return Response({'error': 'staff_user_id and date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            check_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        User = get_user_model()
+        try:
+            target_user = User.objects.get(id=staff_user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Staff user not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        user_dept_id = None
+        try:
+            if hasattr(target_user, 'staff_profile'):
+                dept = target_user.staff_profile.get_current_department()
+                if dept:
+                    user_dept_id = dept.id
+        except Exception:
+            pass
+
+        holiday_obj = Holiday.objects.filter(date=check_date).first()
+        if holiday_obj:
+            dept_ids = list(holiday_obj.departments.values_list('id', flat=True))
+            is_holiday = (not dept_ids) or (user_dept_id is not None and user_dept_id in dept_ids)
+        else:
+            is_holiday = False
+
+        is_sunday = check_date.weekday() == 6
+        is_holiday_or_sunday = is_holiday or is_sunday
+
+        attendance = AttendanceRecord.objects.filter(user=target_user, date=check_date).first()
+        if attendance and attendance.status == 'absent':
+            absent_templates = RequestTemplate.objects.filter(is_active=True).exclude(leave_policy__action='earn')
+            filtered_absent = [
+                template for template in absent_templates
+                if can_user_apply_with_template(target_user, template)
+            ]
+            return Response({
+                'templates': RequestTemplateSerializer(filtered_absent, many=True).data,
+                'message': 'Absent date - All forms except Earn available',
+                'is_holiday': is_holiday_or_sunday,
+                'is_absent': True,
+            })
+
+        templates = RequestTemplate.objects.filter(is_active=True).exclude(leave_policy={})
+        filtered = []
+        for template in templates:
+            if not can_user_apply_with_template(target_user, template):
+                continue
+            leave_policy = template.leave_policy
+            if not leave_policy or 'action' not in leave_policy:
+                continue
+            action = leave_policy.get('action')
+            if is_holiday_or_sunday and action == 'earn':
+                filtered.append(template)
+            elif not is_holiday_or_sunday and action in ['deduct', 'neutral']:
+                filtered.append(template)
+
+        return Response({
+            'templates': RequestTemplateSerializer(filtered, many=True).data,
+            'is_holiday': is_holiday_or_sunday,
+            'is_absent': False,
+            'message': f'{"Earn forms available (Holiday)" if is_holiday_or_sunday else "Deduct/Neutral forms available (Working day)"}'
+        })
+
+    @action(detail=False, methods=['post'])
+    def hr_apply_request(self, request):
+        """
+        HR/Admin creates a request on behalf of staff and auto-approves it immediately.
+        POST /api/staff-requests/requests/hr_apply_request/
+
+        Body: {"staff_user_id": 123, "template_id": 1, "form_data": {...}}
+        """
+        from .permissions import IsAdminOrHR
+
+        if not IsAdminOrHR().has_permission(request, self):
+            return Response({'error': 'Only HR/Admin can access this endpoint'}, status=status.HTTP_403_FORBIDDEN)
+
+        staff_user_id = request.data.get('staff_user_id')
+        if not staff_user_id:
+            return Response({'error': 'staff_user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        User = get_user_model()
+        try:
+            target_user = User.objects.get(id=staff_user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Staff user not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.get_serializer(data={
+            'template_id': request.data.get('template_id'),
+            'form_data': request.data.get('form_data', {})
+        })
+        serializer.is_valid(raise_exception=True)
+
+        template = serializer.validated_data.get('template')
+        form_data = serializer.validated_data.get('form_data', {})
+
+        if not can_user_apply_with_template(target_user, template):
+            return Response(
+                {'error': 'Target staff role is not allowed to use this request template'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Reuse late-entry rule validation with target staff attendance profile.
+        late_entry_validation_error = self._validate_late_entry_rules(target_user, template, form_data)
+        if late_entry_validation_error:
+            return Response({'error': late_entry_validation_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            staff_request = serializer.save(applicant=target_user)
+            staff_request.mark_approved()
+
+            ApprovalLog.objects.create(
+                request=staff_request,
+                approver=request.user,
+                step_order=1,
+                action='approved',
+                comments='Auto-approved by HR/Admin (applied on behalf of staff).'
+            )
+
+            try:
+                self._process_leave_balance(staff_request)
+            except Exception:
+                pass
+
+            try:
+                self._process_attendance_action(staff_request)
+            except Exception:
+                pass
+
+        response_serializer = StaffRequestDetailSerializer(staff_request)
+        return Response({
+            'message': 'Request applied and auto-approved successfully',
+            'request': response_serializer.data
+        }, status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=['get'], url_path='balances/by_user')
     def balances_by_user(self, request):
         """

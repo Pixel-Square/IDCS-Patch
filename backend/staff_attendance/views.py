@@ -1,5 +1,6 @@
 import csv
 import io
+import calendar
 import re
 import traceback as tb_module
 from datetime import datetime, date as date_type, timedelta
@@ -281,11 +282,51 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Get date range parameters
+        # Get date range parameters / template type
+        report_type = str(request.query_params.get('report_type') or '1').strip()
+        month_str = str(request.query_params.get('month') or '').strip()
         from_date_str = request.query_params.get('from_date')
         to_date_str = request.query_params.get('to_date')
         department_id = request.query_params.get('department_id')
         export_format = request.query_params.get('format', 'json')
+
+        if report_type in ['2', '3', '4', '5']:
+            if not month_str:
+                if from_date_str:
+                    try:
+                        parsed = datetime.strptime(from_date_str, '%Y-%m-%d').date()
+                        month_str = f"{parsed.year}-{parsed.month:02d}"
+                    except ValueError:
+                        return Response(
+                            {'error': 'month is required for report_type 2/3/4 (format: YYYY-MM)'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                else:
+                    return Response(
+                        {'error': 'month is required for report_type 2/3/4 (format: YYYY-MM)'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            try:
+                year, month = [int(x) for x in month_str.split('-', 1)]
+                last_day = calendar.monthrange(year, month)[1]
+                month_start = date_type(year, month, 1)
+                month_end = date_type(year, month, last_day)
+            except Exception:
+                return Response(
+                    {'error': 'Invalid month format. Use YYYY-MM'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            payload = self._build_staff_monthly_matrix_report(
+                month_start=month_start,
+                month_end=month_end,
+                department_id=department_id,
+                report_type=report_type,
+            )
+            if export_format == 'csv':
+                return self._export_staff_monthly_matrix_csv(payload)
+            return Response(payload)
 
         # `from_date` is required; `to_date` is optional. If only `from_date` provided,
         # analytics will show data for that single date.
@@ -554,6 +595,259 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                 },
                 'staff_analytics': analytics_list,
             })
+
+    def _build_staff_monthly_matrix_report(self, month_start, month_end, department_id=None, report_type='2'):
+        from staff_requests.models import StaffLeaveBalance
+
+        staff_users = User.objects.filter(
+            staff_profile__isnull=False
+        ).select_related('staff_profile', 'staff_profile__department')
+
+        if department_id:
+            staff_users = staff_users.filter(staff_profile__department_id=department_id)
+
+        staff_users = list(staff_users.order_by('staff_profile__department__name', 'first_name', 'username'))
+        staff_ids = [u.id for u in staff_users]
+
+        lop_balance_map = {
+            row['staff_id']: float(row['balance'] or 0.0)
+            for row in StaffLeaveBalance.objects.filter(
+                staff_id__in=staff_ids,
+                leave_type__iexact='LOP'
+            ).values('staff_id', 'balance')
+        }
+
+        records = AttendanceRecord.objects.filter(
+            user_id__in=staff_ids,
+            date__gte=month_start,
+            date__lte=month_end,
+        ).select_related('user', 'user__staff_profile', 'user__staff_profile__department')
+
+        record_map = {(r.user_id, r.date): r for r in records}
+
+        holidays = Holiday.objects.filter(date__gte=month_start, date__lte=month_end).prefetch_related('departments')
+        global_holidays = set()
+        dept_holidays = {}
+        for h in holidays:
+            dept_ids = list(h.departments.values_list('id', flat=True))
+            if not dept_ids:
+                global_holidays.add(h.date)
+            else:
+                for did in dept_ids:
+                    dept_holidays.setdefault(did, set()).add(h.date)
+
+        day_count = (month_end - month_start).days + 1
+        day_dates = [month_start + timedelta(days=i) for i in range(day_count)]
+        day_columns = [f"D{d.day}" for d in day_dates]
+
+        def _to_code(status_value):
+            s = str(status_value or '').strip()
+            if not s:
+                return ''
+            low = s.lower()
+            if low in ['present', 'p']:
+                return 'P'
+            if low in ['absent', 'a']:
+                return 'A'
+            return s.upper()
+
+        def _is_biometric_code(code):
+            return code in {'', 'P', 'A'}
+
+        def _is_holiday_for_staff(the_date, dept_id):
+            if the_date in global_holidays:
+                return True
+            if dept_id and the_date in dept_holidays.get(dept_id, set()):
+                return True
+            return False
+
+        def _duration_hrs(record):
+            if not record or not record.morning_in or not record.evening_out:
+                return ''
+            in_dt = datetime.combine(record.date, record.morning_in)
+            out_dt = datetime.combine(record.date, record.evening_out)
+            if out_dt < in_dt:
+                return ''
+            diff = out_dt - in_dt
+            total_minutes = int(diff.total_seconds() // 60)
+            return f"{total_minutes // 60}:{total_minutes % 60:02d} hrs"
+
+        def _in_out_text(record):
+            if not record or not record.morning_in or not record.evening_out:
+                return ''
+            return f"{record.morning_in.strftime('%I:%M %p')} - {record.evening_out.strftime('%I:%M %p')}"
+
+        def _form_code_display(fn_code, an_code, overall_code=''):
+            fn_form = not _is_biometric_code(fn_code)
+            an_form = not _is_biometric_code(an_code)
+            if fn_form and an_form:
+                if fn_code == an_code:
+                    return fn_code
+                return f"FN:{fn_code} AN:{an_code}"
+            if fn_form:
+                return f"FN:{fn_code}"
+            if an_form:
+                return f"AN:{an_code}"
+            if overall_code and not _is_biometric_code(overall_code):
+                return overall_code
+            return ''
+
+        def _session_status_text(fn_code, an_code, overall_code=''):
+            """Always return explicit FN/AN status text when attendance status exists."""
+            if fn_code or an_code:
+                return f"FN:{fn_code or '-'} AN:{an_code or '-'}"
+            if overall_code:
+                return f"FN:{overall_code} AN:{overall_code}"
+            return ''
+
+        rows = []
+        for user_obj in staff_users:
+            profile = getattr(user_obj, 'staff_profile', None)
+            dept = getattr(profile, 'department', None)
+            dept_id = getattr(dept, 'id', None)
+            staff_code = getattr(profile, 'staff_id', None) or str(user_obj.id)
+            staff_name = f"{user_obj.first_name} {user_obj.last_name}".strip() or user_obj.username
+
+            row = {
+                'staff_user_id': user_obj.id,
+                'staff_id': staff_code,
+                'staff_name': staff_name,
+                'department': getattr(dept, 'name', 'N/A') if dept else 'N/A',
+                'days': max(0.0, float(day_count) - float(lop_balance_map.get(user_obj.id, 0.0))),
+                'values': {}
+            }
+
+            for day_dt in day_dates:
+                key = f"D{day_dt.day}"
+                is_holiday = _is_holiday_for_staff(day_dt, dept_id)
+                is_sunday = day_dt.weekday() == 6
+
+                rec = record_map.get((user_obj.id, day_dt))
+                if not rec:
+                    row['values'][key] = {'value': 'H' if is_holiday else '-', 'is_holiday': is_holiday}
+                    continue
+
+                fn_code = _to_code(rec.fn_status)
+                an_code = _to_code(rec.an_status)
+                overall_code = _to_code(rec.status)
+                form_display = _form_code_display(fn_code, an_code, overall_code)
+                if form_display and report_type not in ['3', '4', '5']:
+                    row['values'][key] = {'value': form_display, 'is_holiday': is_holiday}
+                    continue
+
+                if report_type == '3':
+                    in_out = _in_out_text(rec)
+                    status_text = _session_status_text(fn_code, an_code, overall_code)
+                    if in_out and status_text:
+                        value = f"{status_text} | {in_out}"
+                    elif status_text:
+                        value = status_text
+                    else:
+                        value = in_out if in_out else ('H' if is_holiday else '-')
+                    row['values'][key] = {'value': value, 'is_holiday': is_holiday}
+                    continue
+
+                if report_type == '4':
+                    dur = _duration_hrs(rec)
+                    in_out = _in_out_text(rec)
+                    status_text = _session_status_text(fn_code, an_code, overall_code)
+                    if dur and in_out and status_text:
+                        value = f"{status_text} | {dur} ({in_out})"
+                    elif dur and status_text:
+                        value = f"{status_text} | {dur}"
+                    elif in_out and status_text:
+                        value = f"{status_text} | {in_out}"
+                    elif status_text:
+                        value = status_text
+                    elif dur and in_out:
+                        value = f"{dur} ({in_out})"
+                    elif dur:
+                        value = dur
+                    elif in_out:
+                        value = in_out
+                    else:
+                        value = 'H' if is_holiday else '-'
+                    row['values'][key] = {'value': value, 'is_holiday': is_holiday}
+                    continue
+
+                if report_type == '5':
+                    # Weighted attendance: 0=present, 0.5=half-day, 1=absent
+                    is_fn_absence = fn_code and fn_code.upper() in ['A', 'OD', 'CL', 'COL', 'LATE', 'OTHERS', 'LE']
+                    is_an_absence = an_code and an_code.upper() in ['A', 'OD', 'CL', 'COL', 'LATE', 'OTHERS', 'LE']
+                    
+                    if is_fn_absence and is_an_absence:
+                        value = '1'  # Full day absent
+                    elif is_fn_absence or is_an_absence:
+                        value = '0.5'  # Half day absent
+                    else:
+                        value = '0'  # Present
+                    row['values'][key] = {'value': value, 'is_holiday': is_holiday}
+                    continue
+
+                dur = _duration_hrs(rec)
+                status_text = f"FN:{fn_code or '-'} AN:{an_code or '-'}" if (fn_code or an_code) else ''
+                if dur and status_text:
+                    value = f"{status_text} | {dur}"
+                elif status_text:
+                    value = '-' if status_text == 'FN:A AN:A' else status_text
+                elif dur:
+                    value = dur
+                else:
+                    value = 'H' if is_holiday else '-'
+                row['values'][key] = {'value': value, 'is_holiday': is_holiday}
+
+            rows.append(row)
+
+        columns = ['staff_id', 'staff_name']
+        if report_type in ['2', '4', '5']:
+            columns.append('days')
+        columns.extend(day_columns)
+
+        return {
+            'report_type': report_type,
+            'month': month_start.strftime('%Y-%m'),
+            'date_range': {
+                'from_date': month_start.isoformat(),
+                'to_date': month_end.isoformat(),
+                'working_days': day_count,
+            },
+            'columns': columns,
+            'day_columns': day_columns,
+            'staff_rows': rows,
+            'total_staff': len(rows),
+        }
+
+    def _export_staff_monthly_matrix_csv(self, payload):
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        month = payload.get('month')
+        report_type = payload.get('report_type')
+        writer.writerow(['Organization Staff Attendance Analytics'])
+        writer.writerow(['Report Type', f"Type {report_type}"])
+        writer.writerow(['Month', month])
+        writer.writerow([])
+
+        header = ['Staff ID', 'Staff Name']
+        if report_type in ['2', '4', '5']:
+            header.append('Days')
+        header.extend(payload.get('day_columns') or [])
+        writer.writerow(header)
+
+        for row in payload.get('staff_rows') or []:
+            csv_row = [row.get('staff_id', ''), row.get('staff_name', '')]
+            if report_type in ['2', '4', '5']:
+                csv_row.append(row.get('days', 0))
+            values = row.get('values') or {}
+            for dcol in payload.get('day_columns') or []:
+                cell = values.get(dcol) or {}
+                csv_row.append(cell.get('value', '-'))
+            writer.writerow(csv_row)
+
+        response = Response(output.getvalue(), content_type='text/csv')
+        filename = f"organization_staff_attendance_type_{report_type}_{month}.csv"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
     @action(detail=False, methods=['get'])
     def available_departments(self, request):
