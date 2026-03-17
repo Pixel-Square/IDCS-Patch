@@ -16,7 +16,12 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from openpyxl import Workbook
+
+def _get_workbook_cls():
+    # Defer openpyxl import so URLConf/view module import does not pay Excel stack cost.
+    from openpyxl import Workbook
+
+    return Workbook
 
 try:
     from reportlab.lib.pagesizes import landscape, letter
@@ -1105,7 +1110,7 @@ def room_sheet_delete_column(request: HttpRequest, room_id: int, room_sheet_id: 
 
 
 def _xlsx_bytes(cols: List[str], rows: List[Tuple[Any, ...]]) -> bytes:
-    wb = Workbook()
+    wb = _get_workbook_cls()()
     ws = wb.active
     ws.title = 'data'
     ws.append(cols)
