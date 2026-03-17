@@ -739,56 +739,60 @@ export default function StaffSalaryPage() {
 
         {/* Monthly Sheet Tab */}
         {activeTab === 'monthly' && (
-          <section className="bg-white border rounded-xl p-4 overflow-auto">
-            <h2 className="text-xl font-semibold mb-3">Final Salary Sheet - {month}</h2>
-            
-            {/* Monthly Sheet Filters */}
-            <div className="mb-4 flex flex-wrap gap-3 items-end bg-slate-50 p-3 rounded">
-              <div>
-                <label className="text-sm font-medium text-slate-700 block mb-1">Search (Name/ID)</label>
-                <input 
-                  type="text" 
-                  placeholder="Search staff..." 
-                  value={monthlySearchTerm} 
-                  onChange={(e) => setMonthlySearchTerm(e.target.value)}
-                  className="border rounded px-3 py-2 w-40"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700 block mb-1">Department</label>
-                <select 
-                  value={monthlyDeptFilter} 
-                  onChange={(e) => setMonthlyDeptFilter(e.target.value)}
-                  className="border rounded px-3 py-2 min-w-[200px]"
-                >
-                  <option value="">All Departments</option>
-                  {departmentOptions.map((d: any) => (
-                    <option key={d.id} value={String(d.id)}>{d.name}</option>
-                  ))}
-                </select>
+          <section className="bg-white border rounded-xl overflow-hidden shadow-md">
+            <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100">
+              <h2 className="text-xl font-semibold mb-3 text-slate-900">Final Salary Sheet - {month}</h2>
+              
+              {/* Monthly Sheet Filters */}
+              <div className="flex flex-wrap gap-3 items-end">
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Search (Name/ID)</label>
+                  <input 
+                    type="text" 
+                    placeholder="Search staff..." 
+                    value={monthlySearchTerm} 
+                    onChange={(e) => setMonthlySearchTerm(e.target.value)}
+                    className="border border-slate-300 rounded px-3 py-2 w-40 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Department</label>
+                  <select 
+                    value={monthlyDeptFilter} 
+                    onChange={(e) => setMonthlyDeptFilter(e.target.value)}
+                    className="border border-slate-300 rounded px-3 py-2 min-w-[200px] text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">All Departments</option>
+                    {departmentOptions.map((d: any) => (
+                      <option key={d.id} value={String(d.id)}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
-            <table className="min-w-[2000px] w-full text-sm">
-              <thead className="bg-slate-50 sticky top-0 z-10">
+            <div className="overflow-x-auto max-h-[72vh]">
+
+            <table className="min-w-max w-full text-xs">
+              <thead className="bg-slate-100 border-b border-slate-200 sticky top-0 z-20">
                 <tr>
-                  <th className="px-2 py-2 text-left">S.No</th>
-                  <th className="px-2 py-2 text-left">Staff ID</th>
-                  <th className="px-2 py-2 text-left">Staff Name</th>
-                  <th className="px-2 py-2 text-left">Dept</th>
-                  <th className="px-2 py-2 text-right">Basic salary</th>
-                  <th className="px-2 py-2 text-right">Allowance</th>
-                  <th className="px-2 py-2 text-right">Days</th>
-                  <th className="px-2 py-2 text-right">Gross salary</th>
-                  <th className="px-2 py-2 text-right">LOP amount</th>
-                  {(monthlySheet?.earn_types || []).map((e: any) => <th key={`earn-${e.id}`} className="px-2 py-2 text-right">{e.name}</th>)}
-                  <th className="px-2 py-2 text-right">Total salary</th>
-                  <th className="px-2 py-2 text-right">PF amount</th>
-                  <th className="px-2 py-2 text-right">OD New</th>
-                  {(monthlySheet?.deduction_types || []).map((d: any) => <th key={`ded-${d.id}`} className="px-2 py-2 text-right">{d.name}</th>)}
-                  <th className="px-2 py-2 text-right">Others</th>
-                  <th className="px-2 py-2 text-right">Net salary</th>
-                  <th className="px-2 py-2 text-center">Save</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-0 z-30 bg-slate-100 border-r border-slate-200 min-w-[60px]">S.No</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[60px] z-30 bg-slate-100 border-r border-slate-200 min-w-[100px]">Staff ID</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[160px] z-30 bg-slate-100 border-r border-slate-200 min-w-[150px]">Staff Name</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[310px] z-30 bg-slate-100 border-r border-slate-200 min-w-[120px]">Dept</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Basic salary</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Allowance</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[80px]">Days</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Gross salary</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">LOP amount</th>
+                  {(monthlySheet?.earn_types || []).map((e: any) => <th key={`earn-${e.id}`} className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[90px]">{e.name}</th>)}
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Total salary</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">PF amount</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">OD New</th>
+                  {(monthlySheet?.deduction_types || []).map((d: any) => <th key={`ded-${d.id}`} className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[90px]">{d.name}</th>)}
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Others</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[110px]">Net salary</th>
+                  <th className="px-3 py-2 text-center font-semibold text-slate-700 min-w-[80px]">Save</th>
                 </tr>
               </thead>
               <tbody>
@@ -893,52 +897,52 @@ export default function StaffSalaryPage() {
                       staffCounter++;
                       const r = item.data;
                       return (
-                        <tr key={`staff-${r.staff_user_id}`} className="border-t">
-                          <td className="px-2 py-2">{staffCounter}</td>
-                          <td className="px-2 py-2">{r.staff_id}</td>
-                          <td className="px-2 py-2">{r.staff_name}</td>
-                          <td className="px-2 py-2">{r.department.name}</td>
-                          <td className="px-2 py-2 text-right">{Number(r.basic_salary).toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{Number(r.allowance).toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{Number(r.days).toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{Number(r.gross_salary).toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{Number(r.lop_amount).toFixed(2)}</td>
+                        <tr key={`staff-${r.staff_user_id}`} className={`border-b border-slate-200 ${staffCounter % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}`}>
+                          <td className="px-3 py-2 font-semibold text-slate-900 sticky left-0 z-10 bg-inherit border-r border-slate-200">{staffCounter}</td>
+                          <td className="px-3 py-2 text-slate-900 sticky left-[60px] z-10 bg-inherit border-r border-slate-200">{r.staff_id}</td>
+                          <td className="px-3 py-2 text-slate-900 sticky left-[160px] z-10 bg-inherit border-r border-slate-200">{r.staff_name}</td>
+                          <td className="px-3 py-2 text-slate-700 sticky left-[310px] z-10 bg-inherit border-r border-slate-200">{r.department.name}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">{Number(r.basic_salary).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">{Number(r.allowance).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">{Number(r.days).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">{Number(r.gross_salary).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">{Number(r.lop_amount).toFixed(2)}</td>
                           {(monthlySheet?.earn_types || []).map((e: any) => (
-                            <td key={`earn-value-${r.staff_user_id}-${e.id}`} className="px-2 py-2 text-right">
+                            <td key={`earn-value-${r.staff_user_id}-${e.id}`} className="px-3 py-2 text-right">
                               <input type="number" value={r.earn_values?.[String(e.id)] ?? 0}
                                 onChange={(ev) => setMonthlySheet((p: any) => ({ ...p, results: p.results.map((x: any) => x.staff_user_id === r.staff_user_id ? { ...x, earn_values: { ...x.earn_values, [String(e.id)]: Number(ev.target.value) } } : x) }))}
-                                className="border rounded px-2 py-1 w-24 text-right" />
+                                className="border border-slate-300 rounded px-2 py-1 w-24 text-right text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                             </td>
                           ))}
-                          <td className="px-2 py-2 text-right">{Number(r.total_salary).toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{Number(r.pf_amount).toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">
+                          <td className="px-3 py-2 text-right font-semibold text-slate-900">{Number(r.total_salary).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">{Number(r.pf_amount).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">
                             <input type="number" value={r.od_new ?? 0}
                               onChange={(ev) => setMonthlySheet((p: any) => ({ ...p, results: p.results.map((x: any) => x.staff_user_id === r.staff_user_id ? { ...x, od_new: Number(ev.target.value) } : x) }))}
-                              className="border rounded px-2 py-1 w-24 text-right" />
+                              className="border border-slate-300 rounded px-2 py-1 w-24 text-right text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                           </td>
                           {(monthlySheet?.deduction_types || []).map((d: any) => {
                             const isEmi = d.mode === 'emi';
                             return (
-                              <td key={`ded-value-${r.staff_user_id}-${d.id}`} className="px-2 py-2 text-right">
+                              <td key={`ded-value-${r.staff_user_id}-${d.id}`} className="px-3 py-2 text-right">
                                 <input
                                   type="number"
                                   disabled={isEmi}
                                   value={r.deduction_values?.[String(d.id)] ?? 0}
                                   onChange={(ev) => setMonthlySheet((p: any) => ({ ...p, results: p.results.map((x: any) => x.staff_user_id === r.staff_user_id ? { ...x, deduction_values: { ...x.deduction_values, [String(d.id)]: Number(ev.target.value) } } : x) }))}
-                                  className="border rounded px-2 py-1 w-24 text-right disabled:bg-slate-100"
+                                  className="border border-slate-300 rounded px-2 py-1 w-24 text-right text-xs disabled:bg-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:cursor-not-allowed"
                                 />
                               </td>
                             );
                           })}
-                          <td className="px-2 py-2 text-right">
+                          <td className="px-3 py-2 text-right">
                             <input type="number" value={r.others ?? 0}
                               onChange={(ev) => setMonthlySheet((p: any) => ({ ...p, results: p.results.map((x: any) => x.staff_user_id === r.staff_user_id ? { ...x, others: Number(ev.target.value) } : x) }))}
-                              className="border rounded px-2 py-1 w-24 text-right" />
+                              className="border border-slate-300 rounded px-2 py-1 w-24 text-right text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                           </td>
-                          <td className="px-2 py-2 text-right font-semibold">{Number(r.net_salary).toFixed(2)}</td>
-                          <td className="px-2 py-2 text-center">
-                            <button onClick={() => handleSaveMonthlyRow(r)} className="px-3 py-1 rounded bg-blue-600 text-white inline-flex items-center gap-1">
+                          <td className="px-3 py-2 text-right font-semibold text-slate-900">{Number(r.net_salary).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-center">
+                            <button onClick={() => handleSaveMonthlyRow(r)} className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-medium inline-flex items-center gap-1 hover:bg-blue-700 transition-colors">
                               <Save className="w-3 h-3" /> Save
                             </button>
                           </td>
@@ -948,63 +952,63 @@ export default function StaffSalaryPage() {
                       const totals = item.totals;
                       const dept = item.dept;
                       return (
-                        <tr key={`dept-total-${dept.id}`} className="border-t bg-blue-100 font-semibold">
-                          <td className="px-2 py-2"></td>
-                          <td className="px-2 py-2"></td>
-                          <td className="px-2 py-2"></td>
-                          <td className="px-2 py-2">{dept.name} Total</td>
-                          <td className="px-2 py-2 text-right">{totals.basic_salary.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.allowance.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.days.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.gross_salary.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.lop_amount.toFixed(2)}</td>
+                        <tr key={`dept-total-${dept.id}`} className="border-b bg-gradient-to-r from-blue-50 to-blue-100/50 font-semibold text-slate-800">
+                          <td className="px-3 py-2 sticky left-0 z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[60px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[160px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[310px] z-10 bg-inherit border-r border-slate-200">{dept.name} Total</td>
+                          <td className="px-3 py-2 text-right">{totals.basic_salary.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.allowance.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.days.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.gross_salary.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.lop_amount.toFixed(2)}</td>
                           {(monthlySheet?.earn_types || []).map((e: any) => (
-                            <td key={`earn-total-${dept.id}-${e.id}`} className="px-2 py-2 text-right">
+                            <td key={`earn-total-${dept.id}-${e.id}`} className="px-3 py-2 text-right">
                               {(totals.earn_totals[e.id] || 0).toFixed(2)}
                             </td>
                           ))}
-                          <td className="px-2 py-2 text-right">{totals.total_salary.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.pf_amount.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.od_new.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.total_salary.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.pf_amount.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.od_new.toFixed(2)}</td>
                           {(monthlySheet?.deduction_types || []).map((d: any) => (
-                            <td key={`ded-total-${dept.id}-${d.id}`} className="px-2 py-2 text-right">
+                            <td key={`ded-total-${dept.id}-${d.id}`} className="px-3 py-2 text-right">
                               {(totals.deduction_totals[d.id] || 0).toFixed(2)}
                             </td>
                           ))}
-                          <td className="px-2 py-2 text-right">{totals.others.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.net_salary.toFixed(2)}</td>
-                          <td className="px-2 py-2"></td>
+                          <td className="px-3 py-2 text-right">{totals.others.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.net_salary.toFixed(2)}</td>
+                          <td className="px-3 py-2"></td>
                         </tr>
                       );
                     } else if (item.type === 'grand_total') {
                       const totals = item.totals;
                       return (
-                        <tr key="grand-total" className="border-t bg-green-100 font-bold">
-                          <td className="px-2 py-2"></td>
-                          <td className="px-2 py-2"></td>
-                          <td className="px-2 py-2"></td>
-                          <td className="px-2 py-2">Final College Total</td>
-                          <td className="px-2 py-2 text-right">{totals.basic_salary.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.allowance.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.days.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.gross_salary.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.lop_amount.toFixed(2)}</td>
+                        <tr key="grand-total" className="border-b bg-gradient-to-r from-green-50 to-green-100/50 font-bold text-slate-800">
+                          <td className="px-3 py-2 sticky left-0 z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[60px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[160px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[310px] z-10 bg-inherit border-r border-slate-200">Final College Total</td>
+                          <td className="px-3 py-2 text-right">{totals.basic_salary.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.allowance.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.days.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.gross_salary.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.lop_amount.toFixed(2)}</td>
                           {(monthlySheet?.earn_types || []).map((e: any) => (
-                            <td key={`grand-earn-${e.id}`} className="px-2 py-2 text-right">
+                            <td key={`grand-earn-${e.id}`} className="px-3 py-2 text-right">
                               {(totals.earn_totals[e.id] || 0).toFixed(2)}
                             </td>
                           ))}
-                          <td className="px-2 py-2 text-right">{totals.total_salary.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.pf_amount.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.od_new.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.total_salary.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.pf_amount.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.od_new.toFixed(2)}</td>
                           {(monthlySheet?.deduction_types || []).map((d: any) => (
-                            <td key={`grand-ded-${d.id}`} className="px-2 py-2 text-right">
+                            <td key={`grand-ded-${d.id}`} className="px-3 py-2 text-right">
                               {(totals.deduction_totals[d.id] || 0).toFixed(2)}
                             </td>
                           ))}
-                          <td className="px-2 py-2 text-right">{totals.others.toFixed(2)}</td>
-                          <td className="px-2 py-2 text-right">{totals.net_salary.toFixed(2)}</td>
-                          <td className="px-2 py-2"></td>
+                          <td className="px-3 py-2 text-right">{totals.others.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{totals.net_salary.toFixed(2)}</td>
+                          <td className="px-3 py-2"></td>
                         </tr>
                       );
                     }
@@ -1012,6 +1016,7 @@ export default function StaffSalaryPage() {
                 })()}
               </tbody>
             </table>
+            </div>
           </section>
         )}
       </div>
