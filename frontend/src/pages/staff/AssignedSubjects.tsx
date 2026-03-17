@@ -97,40 +97,26 @@ export default function AssignedSubjectsPage() {
   async function loadStaff() {
     setStaffLoading(true)
     try {
+      // Load all departments first
+      const deptRes = await fetchWithAuth('/api/academics/departments/?page_size=0')
+      let depts: any[] = []
+      if (deptRes.ok) {
+        const deptData = await deptRes.json()
+        depts = (deptData.results || deptData || []).sort((a: any, b: any) => {
+          const nameA = a.name || a.code || `Dept ${a.id}`
+          const nameB = b.name || b.code || `Dept ${b.id}`
+          return nameA.localeCompare(nameB)
+        })
+        console.log('Loaded departments:', depts)
+      }
+      setDepartments(depts)
+      
+      // Load all staff
       const staff = await fetchDepartmentStaff()
       console.log('Loaded staff:', staff)
       setStaffList(staff)
-      
-      // Extract unique departments from staff list
-      const deptMap = new Map<number, any>()
-      staff.forEach((s: any) => {
-        console.log('Processing staff:', s.staff_id, 'department:', s.department)
-        
-        // Check multiple possible department field names
-        let department = s.department || s.department_data || s.dept
-        
-        if (department) {
-          const dept = department
-          // Handle both object and primitive department references
-          const deptId = typeof dept === 'object' ? dept.id : dept
-          if (deptId && !deptMap.has(deptId)) {
-            const deptData = typeof dept === 'object' ? dept : { id: deptId }
-            console.log('Adding department:', deptId, deptData)
-            deptMap.set(deptId, deptData)
-          }
-        }
-      })
-      
-      // Sort departments by name or code
-      const depts = Array.from(deptMap.values()).sort((a, b) => {
-        const nameA = a.name || a.code || `Dept ${a.id}`
-        const nameB = b.name || b.code || `Dept ${b.id}`
-        return nameA.localeCompare(nameB)
-      })
-      console.log('Final departments list:', depts)
-      setDepartments(depts)
     } catch (e: any) {
-      console.error('Failed to load staff list:', e)
+      console.error('Failed to load staff or departments:', e)
       // Don't show error to user, just log it
     } finally {
       setStaffLoading(false)
@@ -455,10 +441,14 @@ export default function AssignedSubjectsPage() {
       setPickerOpen(false)
       setPickerStudents([])
       setPickerItem(null)
+      setPickerSelectedIds([])
+      setPickerStaffId(null)
+      setPickerSelectedDept(null)
       setSelectionFilter('all')
       setCustomNumbers('')
       setRangeStart('')
       setRangeEnd('')
+      setSearchQuery('')
       alert('Batch created for subject')
     }catch(e:any){
       console.error(e)
@@ -552,6 +542,7 @@ export default function AssignedSubjectsPage() {
     setEditingBatchStudents([])
     setEditingSelectedStudentIds([])
     setEditingStaffId(null)
+    setEditPickerSelectedDept(null)
     setEditSelectionFilter('all')
     setEditCustomNumbers('')
     setEditRangeStart('')
@@ -1063,6 +1054,9 @@ export default function AssignedSubjectsPage() {
                       setPickerOpen(false); 
                       setPickerStudents([]); 
                       setPickerItem(null);
+                      setPickerSelectedIds([]);
+                      setPickerStaffId(null);
+                      setPickerSelectedDept(null);
                       setSelectionFilter('all');
                       setCustomNumbers('');
                       setRangeStart('');
@@ -1388,6 +1382,25 @@ export default function AssignedSubjectsPage() {
                 />
               </div>
 
+              {/* Department Filter */}
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                  Filter by Department
+                </label>
+                <select
+                  value={editPickerSelectedDept || ''}
+                  onChange={(e) => setEditPickerSelectedDept(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Departments</option>
+                  {departments.map(dept => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name || dept.code || `Dept ${dept.id}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Staff Assignment */}
               <div className="mb-6">
                 <label className="block text-sm font-semibold text-gray-900 mb-2">
@@ -1399,7 +1412,7 @@ export default function AssignedSubjectsPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Select Staff</option>
-                  {staffList.map(staff => (
+                  {getFilteredStaffList(editPickerSelectedDept).map(staff => (
                     <option key={staff.id} value={staff.id}>
                       {staff.name} ({staff.staff_id})
                     </option>

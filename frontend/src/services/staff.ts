@@ -39,41 +39,39 @@ export async function fetchAssignedSubjects(staffId?: number): Promise<AssignedS
 }
 
 export async function fetchDepartmentStaff(): Promise<StaffMember[]> {
-  // Try to fetch all staff first (if user has permission)
+  // Fetch all staff from all departments using batch-staff endpoint
+  // This endpoint returns all active staff with their department information
   try {
-    const res = await fetchWithAuth('/api/academics/all-staff/')
+    const res = await fetchWithAuth('/api/academics/batch-staff/?page_size=0')
     if (res.ok) {
       const data = await res.json()
       const staffList = data.results || data
-      console.log('Fetched all-staff data:', staffList)
+      console.log('Fetched batch-staff data:', staffList)
       // Transform to match StaffMember interface with department info
       return staffList.map((s: any) => {
         let dept = null
-        // API returns current_department (not department)
-        const deptField = s.current_department || s.department
+        // API returns department
+        const deptField = s.department
         if (deptField) {
           dept = typeof deptField === 'object' ? deptField : { id: deptField }
         }
-        console.log(`Staff ${s.staff_id}: department field = `, deptField)
+        console.log(`Staff ${s.staff_id}: department = `, deptField)
         return {
           id: s.id,
           staff_id: s.staff_id,
-          name: s.user ? `${s.user.first_name || ''} ${s.user.last_name || ''}`.trim() || s.user.username : s.staff_id,
-          username: s.user?.username || s.staff_id,
+          name: s.name || (s.user ? `${s.user.first_name || ''} ${s.user.last_name || ''}`.trim() || s.user.username : s.staff_id),
+          username: s.username || (s.user?.username || s.staff_id),
           designation: s.designation,
           department: dept
         }
       })
     }
   } catch (e) {
-    console.warn('Failed to fetch all staff, falling back to department staff', e)
+    console.warn('Failed to fetch staff', e)
   }
   
-  // Fallback to department-specific staff
-  const res = await fetchWithAuth('/api/academics/department-staff/')
-  if (!res.ok) throw new Error('Failed to fetch department staff')
-  const data = await res.json()
-  return data.results || data
+  // Return empty array if fetch fails
+  return []
 }
 
 export default { fetchAssignedSubjects, fetchDepartmentStaff }

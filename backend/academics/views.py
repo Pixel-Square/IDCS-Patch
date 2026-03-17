@@ -2131,6 +2131,74 @@ class DepartmentStaffListView(APIView):
         return Response({'results': results})
 
 
+class BatchStaffListView(APIView):
+    """Return all staff members from all departments for batch creation.
+    
+    Used when creating student batches - allows selecting staff from any department.
+    Supports optional department filtering via ?department_id=<id> parameter.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        from .models import StaffProfile
+        from django.db.models import Q
+        
+        user = request.user
+        
+        # Require staff profile
+        staff_profile = getattr(user, 'staff_profile', None)
+        if not staff_profile:
+            return Response({'detail': 'You must be a staff member to access this endpoint.'}, status=403)
+        
+        # Optional department filter
+        dept_id = request.query_params.get('department_id')
+        
+        # Start with all active staff
+        staff_qs = StaffProfile.objects.filter(status='ACTIVE').select_related('user', 'department').order_by('user__first_name', 'user__last_name')
+        
+        # Apply department filter if provided
+        if dept_id:
+            try:
+                dept_id = int(dept_id)
+                staff_qs = staff_qs.filter(
+                    Q(department_id=dept_id) |
+                    Q(department_assignments__department_id=dept_id, department_assignments__end_date__isnull=True)
+                ).distinct()
+            except (ValueError, TypeError):
+                pass
+        
+        results = []
+        for s in staff_qs:
+            user_info = None
+            if s.user:
+                user_info = {
+                    'username': s.user.username,
+                    'first_name': getattr(s.user, 'first_name', ''),
+                    'last_name': getattr(s.user, 'last_name', ''),
+                }
+            
+            dept_info = None
+            if s.department:
+                dept_info = {
+                    'id': s.department.id,
+                    'name': s.department.name,
+                    'code': getattr(s.department, 'code', ''),
+                    'short_name': getattr(s.department, 'short_name', ''),
+                }
+            
+            results.append({
+                'id': s.id,
+                'staff_id': s.staff_id,
+                'user': user_info,
+                'name': f"{s.user.first_name} {s.user.last_name}".strip() or s.user.username if s.user else s.staff_id,
+                'username': s.user.username if s.user else '',
+                'designation': s.designation or '',
+                'department': dept_info
+            })
+        
+        return Response({'results': results})
+
+
 class StaffProfileCreateView(APIView):
     """Create a new staff profile with user account."""
     permission_classes = (IsAuthenticated,)
