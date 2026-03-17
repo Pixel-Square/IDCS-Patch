@@ -2,45 +2,48 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   User,
-  PlusCircle,
   CheckSquare,
   Clock,
   LogOut,
   Palette,
   ChevronLeft,
   ChevronRight,
-  LayoutTemplate,
   Sparkles,
+  Images,
 } from 'lucide-react';
 import LogoutConfirmationModal from '../../components/LogoutConfirmationModal';
+import { logout } from '../../services/auth';
 
 interface NavItem {
   key: string;
   label: string;
   to: string;
   icon: React.ElementType;
+  requiredPermission?: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'profile',        label: 'Profile',         to: '/branding/profile',        icon: User           },
-  { key: 'create',         label: 'Create',           to: '/branding/create',          icon: PlusCircle     },
-  { key: 'event-approval', label: 'Event Approval',   to: '/branding/event-approval',  icon: CheckSquare    },
   { key: 'recents',        label: 'Recents',          to: '/branding/recents',         icon: Clock          },
-  { key: 'poster-maker',   label: 'Canva Poster Maker', to: '/branding/poster-maker',  icon: Sparkles       },
-  { key: 'templates',      label: 'Templates',        to: '/branding/templates',       icon: LayoutTemplate },
+  { key: 'templates',      label: 'Templates',       to: '/branding/templates',      icon: CheckSquare    },
+  { key: 'poster-maker',   label: 'Create Event', to: '/branding/poster-maker',  icon: Sparkles       },
+  { key: 'list-posters',   label: 'List Posters',     to: '/branding/list-posters',    icon: Images,         requiredPermission: 'branding.list_posters' },
 ];
 
 interface Props {
   collapsed: boolean;
   onToggle: () => void;
+  user?: { permissions?: string[] } | null;
 }
 
-export default function BrandingSidebar({ collapsed, onToggle }: Props) {
+export default function BrandingSidebar({ collapsed, onToggle, user }: Props) {
   const location = useLocation();
   const navigate = useNavigate();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const permissionSet = new Set((user?.permissions || []).map((p) => String(p || '').toLowerCase()));
 
   function handleLogout() {
+    logout();
     localStorage.removeItem('branding_auth');
     localStorage.removeItem('branding_user');
     setShowLogoutModal(false);
@@ -88,7 +91,10 @@ export default function BrandingSidebar({ collapsed, onToggle }: Props) {
         {/* Navigation */}
         <nav className="flex-1 py-4 overflow-y-auto">
           <ul className="space-y-1 px-2">
-            {NAV_ITEMS.map(({ key, label, to, icon: Icon }) => {
+            {NAV_ITEMS.filter(({ requiredPermission }) => {
+              if (!requiredPermission) return true;
+              return permissionSet.has(requiredPermission.toLowerCase());
+            }).map(({ key, label, to, icon: Icon }) => {
               const active = location.pathname === to || location.pathname.startsWith(to + '/');
               return (
                 <li key={key}>

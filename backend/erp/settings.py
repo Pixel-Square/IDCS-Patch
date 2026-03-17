@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     'OBE',
     'question_bank',
     'template_api',
+    'announcements.apps.AnnouncementsConfig',
 ]
 # Staff requests dynamic forms & workflow engine
 INSTALLED_APPS.append('staff_requests')

@@ -39,6 +39,7 @@ urlpatterns = [
     path('api/staff-requests/', include('staff_requests.urls')),
     path('api/idscan/', include('idcsscan.urls')),
     path('api/feedback/', include('feedback.urls')),
+    path('api/announcements/', include('announcements.api_urls')),
 ]
 
 # Admin dashboard data endpoint (counts for models) - always available

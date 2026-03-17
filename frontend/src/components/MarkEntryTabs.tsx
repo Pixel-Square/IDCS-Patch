@@ -139,6 +139,7 @@ function getVisibleTabs(classType: string | null | undefined, enabledAssessments
   const raw = normalizeClassType(classType);
   const compactRaw = raw.replaceAll(/[^A-Z0-9]/g, '');
   const isPrbl = compactRaw === 'PRBL' || compactRaw.includes('PRBL');
+  const rawCt = String(classType ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   const ct = normalizeObeClassType(classType);
   const enabled = normalizeEnabledAssessments(enabledAssessments);
 
@@ -176,6 +177,17 @@ function getVisibleTabs(classType: string | null | undefined, enabledAssessments
 
   // PROJECT: show only Review 1 and Review 2 (plus dashboard)
   if (ct === 'PROJECT') {
+    // PRBL should additionally expose SSA tabs and MODEL in review format.
+    if (rawCt === 'PRBL') {
+      return [
+        { key: 'dashboard', label: 'Dashboard' },
+        { key: 'ssa1', label: 'SSA1' },
+        { key: 'review1', label: 'Review 1' },
+        { key: 'ssa2', label: 'SSA2' },
+        { key: 'review2', label: 'Review 2' },
+        { key: 'model', label: 'MODEL (Review Format)' },
+      ];
+    }
     return [
       { key: 'dashboard', label: 'Dashboard' },
       { key: 'review1', label: 'Review 1' },

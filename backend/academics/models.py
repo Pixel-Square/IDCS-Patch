@@ -705,6 +705,23 @@ class StaffProfile(models.Model):
     rfid_uid = models.CharField(max_length=32, blank=True, default='', db_index=True,
                                 help_text='RFID card UID (e.g. 539EA5BB) assigned by the physical scanner.')
 
+
+# ─────────────────────────────────────────────────────────────
+# Placeholder for StudentCourseEnrollment model (FIX IMPORT ERROR)
+# ─────────────────────────────────────────────────────────────
+class StudentCourseEnrollment(models.Model):
+    student = models.ForeignKey('StudentProfile', on_delete=models.CASCADE)
+    course = models.ForeignKey('Course', on_delete=models.CASCADE)
+    enrolled_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('student', 'course')
+        verbose_name = 'Student Course Enrollment'
+        verbose_name_plural = 'Student Course Enrollments'
+
+    def __str__(self):
+        return f"{self.student} enrolled in {self.course}"
+
     def __str__(self):
         return f"Staff {self.staff_id} ({self.user.username})"
 
