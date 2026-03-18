@@ -5,8 +5,9 @@ import { getApiBase } from '../services/apiBase';
 
 interface Course {
   id: number;
-  code: string;
-  title: string;
+  name: string;
+  program: number;
+  department: number;
 }
 
 interface AnnouncementCreateProps {
@@ -109,8 +110,7 @@ export default function AnnouncementCreate({ onClose, onSuccess, user }: Announc
   };
 
   const filteredCourses = courses.filter(course =>
-    course.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    course.title.toLowerCase().includes(searchTerm.toLowerCase())
+    course.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -205,7 +205,7 @@ export default function AnnouncementCreate({ onClose, onSuccess, user }: Announc
             <div className="mb-3">
               <input
                 type="text"
-                placeholder="Search courses by code or name..."
+                placeholder="Search courses by name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
@@ -233,8 +233,7 @@ export default function AnnouncementCreate({ onClose, onSuccess, user }: Announc
                         disabled={submitting}
                       />
                       <div className="ml-3 flex-1">
-                        <div className="font-medium text-gray-900">{course.code}</div>
-                        <div className="text-sm text-gray-600">{course.title}</div>
+                        <div className="font-medium text-gray-900">{course.name}</div>
                       </div>
                       {selectedCourses.has(course.id) && (
                         <CheckCircle className="w-5 h-5 text-blue-600" />

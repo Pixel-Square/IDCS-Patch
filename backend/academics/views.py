@@ -1905,7 +1905,16 @@ class HODStaffListView(APIView):
         ).select_related('user').distinct()
         results = []
         for s in staff_qs:
-            results.append({'id': s.id, 'user': getattr(s.user, 'username', None), 'staff_id': s.staff_id, 'department': getattr(s.department, 'id', None)})
+            # Return the full name of the staff member, formatted as "FirstName LastName"
+            full_name = None
+            if s.user:
+                full_name = s.user.get_full_name() or s.user.username
+            results.append({
+                'id': s.id, 
+                'user': full_name,  # Full name instead of just username
+                'staff_id': s.staff_id, 
+                'department': getattr(s.department, 'id', None)
+            })
         return Response({'results': results})
 
 
@@ -3026,17 +3035,27 @@ class PeriodAttendanceSessionViewSet(viewsets.ModelViewSet):
                 # Show sessions where staff is:
                 # 1. Created by this staff
                 # 2. Assigned to this staff (swap scenario)
-                # 3. Timetable assignment staff matches
+                # 3. Timetable assignment staff matches (advisor who created assignment)
                 # 4. Subject batch staff matches
                 # 5. Subject batch creator matches
+                # 6. Teaching assignment matches for the curriculum_row (actual subject teacher)
                 from timetable.models import TimetableAssignment
-                queryset = queryset.filter(
-                    Q(created_by=staff_profile) |
-                    Q(assigned_to=staff_profile) |
-                    Q(timetable_assignment__staff=staff_profile) |
-                    Q(subject_batch__staff=staff_profile) |
-                    Q(subject_batch__created_by=staff_profile)
-                ).distinct()
+                from .models import TeachingAssignment
+                
+                # Build the base filter
+                base_filter = Q(created_by=staff_profile) | \
+                              Q(assigned_to=staff_profile) | \
+                              Q(timetable_assignment__staff=staff_profile) | \
+                              Q(subject_batch__staff=staff_profile) | \
+                              Q(subject_batch__created_by=staff_profile)
+                
+                # Add filter for teaching assignment match - when staff is the teaching staff
+                # for a curriculum_row assigned in the timetable
+                teaching_filter = Q(
+                    teaching_assignment__staff=staff_profile
+                )
+                
+                queryset = queryset.filter(base_filter | teaching_filter).distinct()
         
         # Support date filtering for bulk attendance checking
         date_after = self.request.query_params.get('date_after')
@@ -3113,10 +3132,11 @@ class PeriodAttendanceSessionViewSet(viewsets.ModelViewSet):
                         section=section, period=period, day=day, staff=staff_profile
                     ).first()
                 
-                # If no explicit timetable assignment with staff, try resolving via TeachingAssignment
+                # If no explicit timetable assignment with this staff, check if they are the teaching staff
+                # for any curriculum_row assigned to this period (handles advisor assignment case)
                 if ta is None and not batch_assignments.exists():
                     assign = TimetableAssignment.objects.filter(section=section, period=period, day=day).first()
-                    if assign and not getattr(assign, 'staff', None):
+                    if assign and getattr(assign, 'curriculum_row', None):
                         from .models import TeachingAssignment as _TA
                         _acr_name = getattr(getattr(assign, 'curriculum_row', None), 'course_name', None)
                         _sec_dept_id_a = getattr(getattr(getattr(section, 'batch', None), 'course', None), 'department_id', None) if section else None
@@ -3703,10 +3723,42 @@ class PeriodAttendanceSessionViewSet(viewsets.ModelViewSet):
                 special_entry = SpecialTimetableEntry.objects.filter(timetable__section=section_obj, period=period_obj, date=day, is_active=True).first()
                 if special_entry:
                     logger.warning('Found special_entry id=%s for date=%s', getattr(special_entry, 'id', None), day)
-                    allow = True
+                    allow = False
                     ta = None
                     assign = None
                     assign_for_matching = special_entry
+                    
+                    # Check if current staff can mark this special entry
+                    # 1. Check if staff is explicitly assigned to this entry
+                    if getattr(special_entry, 'staff_id', None) == staff_profile.id:
+                        allow = True
+                        logger.warning('special_entry staff matches %s', staff_profile.staff_id)
+                    
+                    # 2. Check if staff is in the subject_batch for this entry
+                    if not allow and special_entry.subject_batch:
+                        if getattr(special_entry.subject_batch, 'created_by_id', None) == staff_profile.id or getattr(special_entry.subject_batch, 'staff_id', None) == staff_profile.id:
+                            allow = True
+                            logger.warning('special_entry batch staff matches %s', staff_profile.staff_id)
+                    
+                    # 3. Check if staff is the teaching assignment for the curriculum_row
+                    if not allow and special_entry.curriculum_row:
+                        try:
+                            from academics.models import TeachingAssignment as _TA
+                            _spec_cr_name = getattr(special_entry.curriculum_row, 'course_name', None)
+                            _spec_dept_id = getattr(getattr(getattr(section_obj, 'batch', None), 'course', None), 'department_id', None) if section_obj else None
+                            spec_ta_match = _TA.objects.filter(is_active=True, staff=staff_profile).filter(
+                                Q(curriculum_row=special_entry.curriculum_row) |
+                                Q(elective_subject__parent=special_entry.curriculum_row) |
+                                Q(elective_subject__department_group__isnull=False,
+                                  elective_subject__parent__course_name=_spec_cr_name,
+                                  elective_subject__department_group__department_mappings__department_id=_spec_dept_id,
+                                  elective_subject__department_group__department_mappings__is_active=True)
+                            ).filter(Q(section=section_obj) | Q(section__isnull=True)).exists()
+                            if spec_ta_match:
+                                allow = True
+                                logger.warning('special_entry teaching assignment matches for %s', staff_profile.staff_id)
+                        except Exception as e:
+                            logger.warning('Error checking special_entry teaching assignment: %s', str(e))
                 else:
                     # check timetable assignment exists for this section/period/day and that staff can mark it
                     ta = TimetableAssignment.objects.filter(section=section_obj, period=period_obj, day=dow, staff=staff_profile).first()

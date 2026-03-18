@@ -32,7 +32,13 @@ class TimetableAssignmentSerializer(serializers.ModelSerializer):
         read_only_fields = ('period', 'section')
     
     def get_staff(self, obj):
-        """Return the batch's assigned staff if subject_batch exists, otherwise return the timetable's staff"""
+        """Return the actual staff who teaches the subject.
+        
+        Priority:
+        1. Subject batch staff
+        2. Subject teaching assignment staff
+        3. Timetable assignment staff (the one who created the assignment)
+        """
         try:
             # If there's a subject_batch with assigned staff, use that
             if obj.subject_batch and obj.subject_batch.staff:
@@ -43,8 +49,29 @@ class TimetableAssignmentSerializer(serializers.ModelSerializer):
                     'name': batch_staff.user.get_full_name() if batch_staff.user else batch_staff.staff_id,
                     'user': batch_staff.user_id
                 }
-            # Otherwise, use the timetable assignment's staff
-            elif obj.staff:
+            
+            # If there's a curriculum_row, get the actual teaching staff
+            if obj.curriculum_row and obj.section:
+                try:
+                    from academics.models import TeachingAssignment
+                    ta = TeachingAssignment.objects.filter(
+                        section=obj.section,
+                        curriculum_row=obj.curriculum_row,
+                        is_active=True
+                    ).select_related('staff__user').first()
+                    if ta and ta.staff:
+                        teaching_staff = ta.staff
+                        return {
+                            'id': teaching_staff.id,
+                            'staff_id': teaching_staff.staff_id,
+                            'name': teaching_staff.user.get_full_name() if teaching_staff.user else teaching_staff.staff_id,
+                            'user': teaching_staff.user_id
+                        }
+                except Exception:
+                    pass
+            
+            # Fallback: return the timetable assignment staff
+            if obj.staff:
                 return {
                     'id': obj.staff.id,
                     'staff_id': obj.staff.staff_id,
@@ -56,12 +83,36 @@ class TimetableAssignmentSerializer(serializers.ModelSerializer):
             return None
     
     def get_effective_staff(self, obj):
-        """Return the actual staff who should mark attendance (batch staff or timetable staff)"""
+        """Return the actual staff who should mark attendance.
+        
+        Priority:
+        1. Subject batch staff (if batch-specific assignment)
+        2. Subject teaching assignment staff (if curriculum_row is assigned)
+        3. Timetable assignment staff (fallback)
+        """
         try:
+            # If there's a subject_batch with assigned staff, use that
             if obj.subject_batch and obj.subject_batch.staff:
                 return obj.subject_batch.staff.id
-            elif obj.staff:
+            
+            # If there's a curriculum_row, get the actual teaching staff from TeachingAssignment
+            if obj.curriculum_row and obj.section:
+                try:
+                    from academics.models import TeachingAssignment
+                    ta = TeachingAssignment.objects.filter(
+                        section=obj.section,
+                        curriculum_row=obj.curriculum_row,
+                        is_active=True
+                    ).select_related('staff').first()
+                    if ta and ta.staff:
+                        return ta.staff.id
+                except Exception:
+                    pass
+            
+            # Fallback to timetable assignment staff
+            if obj.staff:
                 return obj.staff.id
+            
             return None
         except Exception:
             return None
@@ -151,7 +202,13 @@ class SpecialTimetableEntrySerializer(serializers.ModelSerializer):
         fields = ('id', 'timetable_id', 'date', 'period_id', 'staff', 'effective_staff', 'staff_id', 'curriculum_row', 'subject_batch', 'subject_batch_id', 'subject_text', 'is_active')
     
     def get_staff(self, obj):
-        """Return the batch's assigned staff if subject_batch exists, otherwise return the entry's staff"""
+        """Return the actual staff who teaches the subject.
+        
+        Priority:
+        1. Subject batch staff
+        2. Subject teaching assignment staff (from curriculum_row)
+        3. Special timetable entry staff (the one who created the entry)
+        """
         try:
             # If there's a subject_batch with assigned staff, use that
             if obj.subject_batch and obj.subject_batch.staff:
@@ -162,8 +219,29 @@ class SpecialTimetableEntrySerializer(serializers.ModelSerializer):
                     'name': batch_staff.user.get_full_name() if batch_staff.user else batch_staff.staff_id,
                     'user': batch_staff.user_id
                 }
-            # Otherwise, use the special timetable entry's staff
-            elif obj.staff:
+            
+            # If there's a curriculum_row, get the actual teaching staff
+            if obj.curriculum_row and obj.timetable and obj.timetable.section:
+                try:
+                    from academics.models import TeachingAssignment
+                    ta = TeachingAssignment.objects.filter(
+                        section=obj.timetable.section,
+                        curriculum_row=obj.curriculum_row,
+                        is_active=True
+                    ).select_related('staff__user').first()
+                    if ta and ta.staff:
+                        teaching_staff = ta.staff
+                        return {
+                            'id': teaching_staff.id,
+                            'staff_id': teaching_staff.staff_id,
+                            'name': teaching_staff.user.get_full_name() if teaching_staff.user else teaching_staff.staff_id,
+                            'user': teaching_staff.user_id
+                        }
+                except Exception:
+                    pass
+            
+            # Fallback: return the special entry staff
+            if obj.staff:
                 return {
                     'id': obj.staff.id,
                     'staff_id': obj.staff.staff_id,
@@ -175,12 +253,36 @@ class SpecialTimetableEntrySerializer(serializers.ModelSerializer):
             return None
     
     def get_effective_staff(self, obj):
-        """Return the actual staff who should mark attendance (batch staff or entry staff)"""
+        """Return the actual staff who should mark attendance.
+        
+        Priority:
+        1. Subject batch staff (if batch-specific assignment)
+        2. Subject teaching assignment staff (if curriculum_row is assigned)
+        3. Special timetable entry staff (fallback)
+        """
         try:
+            # If there's a subject_batch with assigned staff, use that
             if obj.subject_batch and obj.subject_batch.staff:
                 return obj.subject_batch.staff.id
-            elif obj.staff:
+            
+            # If there's a curriculum_row, get the actual teaching staff from TeachingAssignment
+            if obj.curriculum_row and obj.timetable and obj.timetable.section:
+                try:
+                    from academics.models import TeachingAssignment
+                    ta = TeachingAssignment.objects.filter(
+                        section=obj.timetable.section,
+                        curriculum_row=obj.curriculum_row,
+                        is_active=True
+                    ).select_related('staff').first()
+                    if ta and ta.staff:
+                        return ta.staff.id
+                except Exception:
+                    pass
+            
+            # Fallback to special timetable entry staff
+            if obj.staff:
                 return obj.staff.id
+            
             return None
         except Exception:
             return None

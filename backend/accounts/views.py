@@ -298,14 +298,29 @@ class MobileOtpVerifyView(APIView):
 
                 # Send WhatsApp confirmation (optional, best-effort)
                 try:
-                    template_text = (
+                    is_student_user = bool(
+                        hasattr(request.user, 'student_profile') and getattr(request.user, 'student_profile', None) is not None
+                    )
+
+                    student_default_template = (
+                        'IDCS: Your mobile number {mobile} has been verified successfully. Thank you.'
+                    )
+                    faculty_default_template = (
                         'IDCS: Your mobile number {mobile} has been verified successfully. '
                         'You now have access to your Academic Panel. Thank you.'
                     )
+                    template_text = student_default_template if is_student_user else faculty_default_template
+
                     try:
-                        tpl = NotificationTemplate.objects.filter(code='mobile_verified', enabled=True).first()
-                        if tpl and str(getattr(tpl, 'template', '') or '').strip():
-                            template_text = str(tpl.template)
+                        if is_student_user:
+                            # Keep student message isolated from faculty template wording.
+                            tpl = NotificationTemplate.objects.filter(code='mobile_verified_student', enabled=True).first()
+                            if tpl and str(getattr(tpl, 'template', '') or '').strip():
+                                template_text = str(tpl.template)
+                        else:
+                            tpl = NotificationTemplate.objects.filter(code='mobile_verified', enabled=True).first()
+                            if tpl and str(getattr(tpl, 'template', '') or '').strip():
+                                template_text = str(tpl.template)
                     except Exception:
                         pass
 

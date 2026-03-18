@@ -66,6 +66,9 @@ let initTime       = null;   // ISO timestamp of last init attempt
 
 /** @type {import('whatsapp-web.js').Client|null} */
 let waClient = null;
+let initPromise = null;
+let restartTimer = null;
+let sendQueue = Promise.resolve();
 
 /** @type {Set<import('express').Response>} */
 const sseClients = new Set();
@@ -138,8 +141,82 @@ function destroyClient() {
   return c.destroy().catch(() => {});
 }
 
+function isRecoverableWhatsAppError(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    msg.includes('detached frame') ||
+    msg.includes('target closed') ||
+    msg.includes('session closed') ||
+    msg.includes('execution context was destroyed') ||
+    msg.includes('most likely the page has been closed') ||
+    msg.includes('protocol error')
+  );
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForConnected(timeoutMs = 45_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (waStatus === 'CONNECTED' && waClient) return true;
+    await wait(500);
+  }
+  return false;
+}
+
+function scheduleRestart(reason, delayMs = 300) {
+  if (restartTimer) return;
+  waStatus = 'INITIALIZING';
+  lastError = `Recovering client: ${reason}`;
+  pushSSE('status', statusSnapshot());
+  console.warn('[WA] Scheduling client restart:', reason);
+  restartTimer = setTimeout(async () => {
+    restartTimer = null;
+    await initClient();
+  }, delayMs);
+}
+
+function enqueueSend(task) {
+  const next = sendQueue.then(task, task);
+  sendQueue = next.catch(() => {});
+  return next;
+}
+
+function getConnectedClient() {
+  if (!waClient || waStatus !== 'CONNECTED') {
+    throw new Error('WhatsApp client is not connected.');
+  }
+  return waClient;
+}
+
+async function runWithClientRecovery(operationName, operation, options = {}) {
+  const retries = Number.isInteger(options.retries) ? options.retries : 1;
+  let attempt = 0;
+  while (attempt <= retries) {
+    try {
+      return await operation();
+    } catch (e) {
+      const msg = String(e?.message || e);
+      const canRecover = isRecoverableWhatsAppError(e) || waStatus !== 'CONNECTED' || !waClient;
+      if (!canRecover || attempt >= retries) throw e;
+      scheduleRestart(`${operationName}: ${msg}`);
+      const recovered = await waitForConnected(45_000);
+      if (!recovered) {
+        throw new Error(`WhatsApp client crashed; restarting. ${msg}`);
+      }
+      attempt += 1;
+    }
+  }
+  throw new Error('Unexpected recovery loop exit.');
+}
+
 async function initClient() {
-  await destroyClient();
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
+    await destroyClient();
 
   waStatus        = 'INITIALIZING';
   currentQrText   = null;
@@ -237,19 +314,29 @@ async function initClient() {
     lastError       = `Disconnected: ${reason}`;
     console.warn('[WA]', lastError);
     pushSSE('status', statusSnapshot());
+    if (String(reason || '').toUpperCase() !== 'LOGOUT') {
+      scheduleRestart(`disconnected: ${reason}`);
+    }
   });
 
   waClient.on('change_state', (state) => {
     console.log('[WA] State changed:', state);
   });
 
+    try {
+      await waClient.initialize();
+    } catch (e) {
+      waStatus  = 'DISCONNECTED';
+      lastError = `Init error: ${e.message}`;
+      console.error('[WA] Init error:', e.message);
+      pushSSE('status', statusSnapshot());
+    }
+  })();
+
   try {
-    await waClient.initialize();
-  } catch (e) {
-    waStatus  = 'DISCONNECTED';
-    lastError = `Init error: ${e.message}`;
-    console.error('[WA] Init error:', e.message);
-    pushSSE('status', statusSnapshot());
+    await initPromise;
+  } finally {
+    initPromise = null;
   }
 }
 
@@ -358,11 +445,15 @@ app.post('/mobile/request-otp', requireApiKey, async (req, res) => {
   }
 
   if (waStatus !== 'CONNECTED' || !waClient) {
-    return res.status(503).json({
-      ok: false,
-      error: 'WhatsApp is not connected. Pair the device first.',
-      status: waStatus,
-    });
+    scheduleRestart('OTP requested while client not connected');
+    const recovered = await waitForConnected(25_000);
+    if (!recovered) {
+      return res.status(503).json({
+        ok: false,
+        error: 'WhatsApp is not connected. Pair the device first.',
+        status: waStatus,
+      });
+    }
   }
 
   const now = Date.now();
@@ -392,7 +483,11 @@ app.post('/mobile/request-otp', requireApiKey, async (req, res) => {
   // Verify number is registered on WhatsApp
   let numberId;
   try {
-    numberId = await waClient.getNumberId(mobile);
+    numberId = await runWithClientRecovery(
+      'getNumberId',
+      () => getConnectedClient().getNumberId(mobile),
+      { retries: 1 },
+    );
   } catch (e) {
     otpStore.delete(mobile);
     return res.status(400).json({ ok: false, error: 'Failed to verify WhatsApp number.', detail: e.message });
@@ -407,7 +502,11 @@ app.post('/mobile/request-otp', requireApiKey, async (req, res) => {
   const message = `Your IDCS OTP is *${code}*. It is valid for ${OTP_EXPIRY_MINUTES} minutes. Do not share this code with anyone.`;
 
   try {
-    await waClient.sendMessage(chatId, message);
+    await enqueueSend(() => runWithClientRecovery(
+      'send OTP message',
+      () => getConnectedClient().sendMessage(chatId, message),
+      { retries: 1 },
+    ));
     console.log(`[WA] OTP sent to ${chatId}`);
   } catch (e) {
     otpStore.delete(mobile);
@@ -473,11 +572,15 @@ app.post('/mobile/verify-otp', requireApiKey, async (req, res) => {
 // ─── POST /send-whatsapp ─────────────────────
 app.post('/send-whatsapp', requireApiKey, async (req, res) => {
   if (waStatus !== 'CONNECTED' || !waClient) {
-    return res.status(503).json({
-      ok:     false,
-      status: waStatus,
-      detail: 'WhatsApp is not connected. Pair the device first.',
-    });
+    scheduleRestart('send-whatsapp requested while client not connected');
+    const recovered = await waitForConnected(25_000);
+    if (!recovered) {
+      return res.status(503).json({
+        ok:     false,
+        status: waStatus,
+        detail: 'WhatsApp is not connected. Pair the device first.',
+      });
+    }
   }
 
   let { to, message } = req.body;
@@ -493,7 +596,11 @@ app.post('/send-whatsapp', requireApiKey, async (req, res) => {
 
   const chatId = `${to}@c.us`;
   try {
-    await waClient.sendMessage(chatId, String(message).trim());
+    await enqueueSend(() => runWithClientRecovery(
+      'send-whatsapp message',
+      () => getConnectedClient().sendMessage(chatId, String(message).trim()),
+      { retries: 1 },
+    ));
     console.log(`[WA] Sent to ${chatId}`);
     res.json({ ok: true, to: chatId });
   } catch (e) {

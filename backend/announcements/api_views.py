@@ -40,10 +40,10 @@ class AnnouncementViewSet(viewsets.ModelViewSet):
     pagination_class = AnnouncementPagination
     
     def get_permission(self):
-        """Return permission class based on action."""
+        """Return permission classes based on action."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsHodOrIqac()]
-        return [permissions.IsAuthenticated()]
+            return [IsHodOrIqac]
+        return [permissions.IsAuthenticated]
     
     def get_permissions(self):
         """Return list of permission instances."""
@@ -148,6 +148,6 @@ class AnnouncementViewSet(viewsets.ModelViewSet):
             return Response([], status=status.HTTP_403_FORBIDDEN)
         
         # Return all courses
-        courses = Course.objects.all().order_by('code')
+        courses = Course.objects.all().order_by('name')
         serializer = CourseSimpleSerializer(courses, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)

@@ -8,7 +8,7 @@ class CourseSimpleSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Course
-        fields = ['id', 'code', 'title']
+        fields = ['id', 'name', 'program', 'department']
 
 
 class AnnouncementCourseSerializer(serializers.ModelSerializer):
@@ -73,7 +73,7 @@ class AnnouncementDetailSerializer(serializers.ModelSerializer):
             'published_at', 'scheduled_for', 'is_read', 'read_count'
         ]
         read_only_fields = [
-            'id', 'created_by', 'created_at', 'updated_at', 'published_at'
+            'id', 'created_by', 'created_at', 'updated_at', 'published_at', 'source'
         ]
     
     def get_is_read(self, obj):
@@ -91,13 +91,18 @@ class AnnouncementDetailSerializer(serializers.ModelSerializer):
         validated_data['created_by'] = request.user
         
         # Determine source based on user role
-        if hasattr(request.user, 'staff_profile'):
+        source = 'iqac'  # Default to IQAC
+        if hasattr(request.user, 'staff_profile') and request.user.staff_profile:
             designation = request.user.staff_profile.designation
             if 'HOD' in designation.upper():
-                validated_data['source'] = 'hod'
-            else:
-                validated_data['source'] = 'iqac'
+                source = 'hod'
+        else:
+            # Check user roles if no staff_profile
+            user_roles = request.user.roles.values_list('name', flat=True)
+            if 'HOD' in user_roles:
+                source = 'hod'
         
+        validated_data['source'] = source
         announcement = Announcement.objects.create(**validated_data)
         
         # Add courses

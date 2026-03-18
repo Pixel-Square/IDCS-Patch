@@ -686,6 +686,25 @@ def _sync_student_section_on_assignment_delete(sender, instance: StudentSectionA
         pass
 
 
+class StudentCourseEnrollment(models.Model):
+    """Tracks student enrollment in courses.
+    
+    Records which students are enrolled in which courses for academic records
+    and announcement targeting purposes.
+    """
+    student = models.ForeignKey('StudentProfile', on_delete=models.CASCADE, related_name='course_enrollments')
+    course = models.ForeignKey('Course', on_delete=models.CASCADE, related_name='student_enrollments')
+    enrolled_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Student Course Enrollment'
+        verbose_name_plural = 'Student Course Enrollments'
+        unique_together = ('student', 'course')
+
+    def __str__(self):
+        return f"{self.student.reg_no} enrolled in {self.course}"
+
+
 class StaffProfile(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -705,29 +724,27 @@ class StaffProfile(models.Model):
     rfid_uid = models.CharField(max_length=32, blank=True, default='', db_index=True,
                                 help_text='RFID card UID (e.g. 539EA5BB) assigned by the physical scanner.')
 
-
-# ─────────────────────────────────────────────────────────────
-# Placeholder for StudentCourseEnrollment model (FIX IMPORT ERROR)
-# ─────────────────────────────────────────────────────────────
-class StudentCourseEnrollment(models.Model):
-    student = models.ForeignKey('StudentProfile', on_delete=models.CASCADE)
-    course = models.ForeignKey('Course', on_delete=models.CASCADE)
-    enrolled_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('student', 'course')
-        verbose_name = 'Student Course Enrollment'
-        verbose_name_plural = 'Student Course Enrollments'
-
     def __str__(self):
-        return f"{self.student} enrolled in {self.course}"
-
-    def __str__(self):
-        return f"Staff {self.staff_id} ({self.user.username})"
+        """Return staff name and ID for display in dropdowns and admin."""
+        try:
+            if self.user:
+                # Try full name first (first_name + last_name)
+                full_name = self.user.get_full_name()
+                if full_name and full_name.strip():
+                    return f"{full_name} ({self.staff_id})"
+                # Fallback to username if no full name is set
+                username = self.user.username
+                if username:
+                    return f"{username} ({self.staff_id})"
+        except Exception:
+            pass
+        return f"Staff {self.staff_id}"
 
     def get_current_department_assignment(self):
         """Return the active StaffDepartmentAssignment or None."""
         try:
+            if not self.pk:
+                return None
             return self.department_assignments.filter(end_date__isnull=True).select_related('department').order_by('-start_date').first()
         except Exception:
             return None

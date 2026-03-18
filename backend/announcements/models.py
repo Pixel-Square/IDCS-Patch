@@ -76,7 +76,7 @@ class AnnouncementCourse(models.Model):
         ]
     
     def __str__(self):
-        return f"{self.announcement.title} -> {self.course.code}"
+        return f"{self.announcement.title} -> {self.course.name}"
 
 
 class AnnouncementRead(models.Model):

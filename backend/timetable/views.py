@@ -1992,11 +1992,17 @@ class SpecialTimetableEntryViewSet(viewsets.ModelViewSet):
         if staff_profile:
             try:
                 from academics.models import TeachingAssignment
+                
                 # entries explicitly assigned to this staff
                 staff_q = qs.filter(staff=staff_profile)
+                
                 # entries where a TeachingAssignment maps this staff to the curriculum_row for the same section
                 ta_q = TeachingAssignment.objects.filter(staff=staff_profile, is_active=True)
-                mapped_q = qs.filter(curriculum_row__in=ta_q.values_list('curriculum_row', flat=True), timetable__section__in=ta_q.values_list('section', flat=True))
+                mapped_q = qs.filter(
+                    curriculum_row__in=ta_q.values_list('curriculum_row', flat=True), 
+                    timetable__section__in=ta_q.values_list('section', flat=True)
+                )
+                
                 return (staff_q | mapped_q).distinct()
             except Exception:
                 return qs.filter(staff=staff_profile)
@@ -2064,60 +2070,86 @@ class SpecialTimetableEntryViewSet(viewsets.ModelViewSet):
         if not allowed:
             raise PermissionDenied('You do not have permission to create special timetable entries')
 
-        staff_profile = getattr(user, 'staff_profile', None)
+        # Extract the entry data
+        curriculum_row = serializer.validated_data.get('curriculum_row')
+        timetable_obj = serializer.validated_data.get('timetable')
+        staff_provided = serializer.validated_data.get('staff')
+        
+        # Key Logic: If this is a CONFIGURED SUBJECT (has curriculum_row), ALWAYS assign to subject's teaching staff
+        # NOT to the advisor who is creating it
+        resolved_staff = None
+        
+        if staff_provided:
+            # Staff explicitly provided - use it
+            resolved_staff = staff_provided
+            logger.info(f'📌 Staff explicitly provided: {resolved_staff.id}')
+        elif curriculum_row and timetable_obj:
+            # CONFIGURED SUBJECT - Must assign to the subject's teaching staff, NOT the advisor
+            logger.info(f'🔍 Looking up teaching staff for curriculum_row={curriculum_row.id} in section={timetable_obj.section.id}')
+            
+            try:
+                from academics.models import TeachingAssignment
+                
+                # Query 1: Section-specific teaching assignment
+                ta = TeachingAssignment.objects.filter(
+                    section=timetable_obj.section,
+                    curriculum_row=curriculum_row,
+                    is_active=True
+                ).select_related('staff').first()
+                
+                logger.info(f'  Section-specific query result: {ta}')
+                
+                # Query 2: Fallback - any active teaching assignment for this curriculum
+                if not ta:
+                    ta = TeachingAssignment.objects.filter(
+                        curriculum_row=curriculum_row,
+                        is_active=True
+                    ).select_related('staff').first()
+                    logger.info(f'  General curriculum query result: {ta}')
+                
+                # Use the found teaching staff
+                if ta and ta.staff:
+                    resolved_staff = ta.staff
+                    logger.info(f'✅ SUCCESS: Resolved to teaching staff {resolved_staff.id} ({resolved_staff.staff_id})')
+                else:
+                    logger.warning(f'❌ PROBLEM: No teaching assignment found for curriculum_row={curriculum_row.id}')
+                    
+            except Exception as e:
+                logger.error(f'❌ ERROR resolving teaching staff: {e}', exc_info=True)
+        else:
+            # CUSTOM SUBJECT (no curriculum_row) - assign to advisor who is creating it
+            staff_profile = getattr(user, 'staff_profile', None)
+            if staff_profile:
+                resolved_staff = staff_profile
+                logger.info(f'📝 Custom subject - using advisor as staff: {staff_profile.id}')
+        
+        # Save the entry with the resolved staff
+        if resolved_staff:
+            logger.info(f'💾 SAVING special entry with staff_id={resolved_staff.id}')
+            serializer.save(staff=resolved_staff)
+        else:
+            logger.warning(f'⚠️ WARNING: Could not resolve staff, saving without explicit staff assignment')
+            serializer.save()
 
-        # Attempt to auto-resolve a staff for this special entry if not provided.
-        resolved_entry = None
-        try:
-            data = serializer.validated_data
-            staff_provided = data.get('staff', None)
-            curriculum_row = data.get('curriculum_row', None)
-            timetable_obj = data.get('timetable', None)
-            subject_text = data.get('subject_text', None)
-            if not staff_provided:
-                if curriculum_row and timetable_obj:
-                    try:
-                        from academics.models import TeachingAssignment
-                        ta = TeachingAssignment.objects.filter(section=timetable_obj.section, curriculum_row=curriculum_row, is_active=True).select_related('staff').first()
-                        if not ta:
-                            ta = TeachingAssignment.objects.filter(curriculum_row=curriculum_row, is_active=True).select_related('staff').first()
-                        if ta and getattr(ta, 'staff', None):
-                            resolved_entry = serializer.save(staff=ta.staff)
-                    except Exception:
-                        pass
-                # For event/custom-text or any other no-staff case: auto-assign the requesting staff.
-                if resolved_entry is None and staff_profile:
-                    resolved_entry = serializer.save(staff=staff_profile)
-        except Exception:
-            pass
+        entry = serializer.instance
 
-        entry = resolved_entry if resolved_entry is not None else serializer.save()
-
-        # Ensure a PeriodAttendanceSession exists for this special entry so
-        # staff can mark attendance for the special period on the date.
+        # Ensure a PeriodAttendanceSession exists for this special entry
         try:
             from academics.models import PeriodAttendanceSession
-            from academics.models import Section as _Section
-            from academics.models import StaffProfile as _StaffProfile
-            from academics.models import PeriodAttendanceSession as _PAS
-        except Exception:
-            _PAS = None
-
-        try:
             if entry and getattr(entry, 'timetable', None):
                 section_obj = entry.timetable.section
                 period_obj = entry.period
                 date_val = entry.date
-                # create session if not exists
-                from academics.models import PeriodAttendanceSession as PAS
-                PAS.objects.get_or_create(
+                # Create session if not exists
+                PeriodAttendanceSession.objects.get_or_create(
                     section=section_obj,
                     period=period_obj,
                     date=date_val,
-                    defaults={'timetable_assignment': None, 'created_by': getattr(entry, 'staff', None)}
+                    defaults={'timetable_assignment': None, 'created_by': resolved_staff or staff_profile}
                 )
         except Exception:
-            # non-fatal; do not block entry creation
+            # Non-fatal; do not block entry creation
+            pass
             pass
 
 
@@ -2199,17 +2231,61 @@ class BulkSpecialTimetableEntryCreateView(APIView):
             if date_start > date_end:
                 return Response({'detail': 'date_start cannot be after date_end'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Get staff profile
+            # Get staff profile and explicit staff if provided
             staff_profile = getattr(user, 'staff_profile', None)
             if staff_id and staff_profile.id != int(staff_id) and not user.is_staff:
                 # Non-staff cannot assign to other staff
                 return Response({'detail': 'You cannot assign entries to other staff'}, status=status.HTTP_403_FORBIDDEN)
             
-            # Resolve staff
-            resolved_staff = staff_profile
+            # Resolve staff for the entries
+            # Key Logic: If curriculum_row is provided, ALWAYS resolve to subject's teaching staff
+            # NOT to the advisor who is creating it
+            resolved_staff = None
+            
             if staff_id:
+                # Explicit staff provided
                 from academics.models import StaffProfile
                 resolved_staff = StaffProfile.objects.get(pk=int(staff_id))
+                logger.info(f'📌 Explicit staff_id provided: {resolved_staff.id}')
+            elif curriculum_row_id:
+                # CONFIGURED SUBJECT - look up teaching staff for this subject
+                logger.info(f'🔍 Resolving teaching staff for curriculum_row={curriculum_row_id}')
+                
+                try:
+                    from academics.models import TeachingAssignment
+                    
+                    # Query 1: Section-specific teaching assignment (most likely)
+                    ta = TeachingAssignment.objects.filter(
+                        section=timetable.section,
+                        curriculum_row_id=int(curriculum_row_id),
+                        is_active=True
+                    ).select_related('staff').first()
+                    
+                    logger.info(f'  Section-specific query: {ta}')
+                    
+                    # Query 2: Fallback - any active teaching assignment for this curriculum
+                    if not ta:
+                        ta = TeachingAssignment.objects.filter(
+                            curriculum_row_id=int(curriculum_row_id),
+                            is_active=True
+                        ).select_related('staff').first()
+                        logger.info(f'  General curriculum query: {ta}')
+                    
+                    # Assign to the found teaching staff
+                    if ta and ta.staff:
+                        resolved_staff = ta.staff
+                        logger.info(f'✅ SUCCESS: Resolved to teaching staff {resolved_staff.id} ({resolved_staff.staff_id})')
+                    else:
+                        logger.warning(f'❌ PROBLEM: No teaching assignment found for curriculum_row={curriculum_row_id}')
+                        # For configured subjects with no teaching staff assigned, don't default to advisor
+                        # Let it be None so it creates without a staff assignment
+                        
+                except Exception as e:
+                    logger.error(f'❌ ERROR resolving teaching staff: {e}', exc_info=True)
+            else:
+                # CUSTOM SUBJECT (no curriculum_row) - assign to advisor
+                resolved_staff = staff_profile
+                logger.info(f'📝 Custom subject - using advisor as staff: {staff_profile.id}')
 
             # Convert period_ids and day_numbers to integers
             period_ids = [int(p) for p in period_ids]
@@ -2221,6 +2297,7 @@ class BulkSpecialTimetableEntryCreateView(APIView):
             logger.info(f'  ✓ date_range={date_start} to {date_end}')
             logger.info(f'  ✓ timetable_id={timetable_id}')
             logger.info(f'  ✓ subject_type: curriculum_row={curriculum_row_id}, subject_text={subject_text}')
+            logger.info(f'  ✓ resolved_staff_id={resolved_staff.id if resolved_staff else None} staff_profile_id={staff_profile.id if staff_profile else None}')
 
             entries_created = []
             current_date = date_start

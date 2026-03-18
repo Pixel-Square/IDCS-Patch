@@ -654,6 +654,11 @@ class StaffProfileAdmin(admin.ModelAdmin):
     search_fields = ('staff_id', 'rfid_uid', 'user__username', 'user__email', 'user__first_name', 'user__last_name')
     list_filter = ('department', 'designation')
     
+    def get_queryset(self, request):
+        """Optimize queryset with select_related for user and department."""
+        qs = super().get_queryset(request)
+        return qs.select_related('user', 'department').prefetch_related('department_assignments')
+    
     def get_full_name(self, obj):
         if obj.user:
             return f"{obj.user.first_name} {obj.user.last_name}".strip() or obj.user.username
@@ -692,10 +697,13 @@ class StaffProfileAdmin(admin.ModelAdmin):
     delete_profiles_and_users.short_description = 'Permanently delete selected profiles and their users'
 
     def current_department_display(self, obj):
-        dept = obj.current_department
-        if dept is None:
-            return None
-        return getattr(dept, 'code', str(dept))
+        try:
+            dept = obj.current_department
+            if dept is None:
+                return None
+            return getattr(dept, 'code', str(dept))
+        except Exception:
+            return 'N/A'
     current_department_display.short_description = 'Current Department'
 
     def get_urls(self):

@@ -70,8 +70,6 @@ INSTALLED_APPS = [
     'curriculum',  # Must come before academics
     'academics',
     'timetable',
-    'bi.apps.BiConfig',
-    'powerbi_portal.apps.PowerbiPortalConfig',
     'pbas.apps.PbasConfig',
     'staff_attendance.apps.StaffAttendanceConfig',
     'idcsscan',
@@ -112,7 +110,6 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-                'powerbi_portal.context_processors.powerbi_notifications',
             ],
         },
     },
@@ -165,25 +162,7 @@ else:
         }
     }
 
-# Optional: read-only reporting DB connection for BI portal.
-# If BI_DB_NAME is set, the portal will query using DATABASES['bi'].
-BI_DB_NAME = os.getenv('BI_DB_NAME')
-if BI_DB_NAME:
-    DATABASES['bi'] = {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': BI_DB_NAME,
-        'USER': os.getenv('BI_DB_USER'),
-        'PASSWORD': os.getenv('BI_DB_PASS'),
-        'HOST': os.getenv('BI_DB_HOST', DB_HOST),
-        'PORT': os.getenv('BI_DB_PORT', DB_PORT),
-        'DISABLE_SERVER_SIDE_CURSORS': True,
-        'CONN_MAX_AGE': int(os.getenv('BI_DB_CONN_MAX_AGE', os.getenv('DB_CONN_MAX_AGE', '60'))),
-        'CONN_HEALTH_CHECKS': True,
-        'OPTIONS': {
-            'server_side_binding': False,
-            'connect_timeout': int(os.getenv('BI_DB_CONNECT_TIMEOUT', os.getenv('DB_CONNECT_TIMEOUT', '5'))),
-        },
-    }
+
 
 # Django cache config using Redis (shared across all gunicorn workers).
 # django-redis is installed; locmem is NEVER shared between workers so sessions
@@ -247,7 +226,6 @@ AUTH_USER_MODEL = 'accounts.User'
 SILENCED_SYSTEM_CHECKS = ['auth.W004']
 
 AUTHENTICATION_BACKENDS = [
-    'powerbi_portal.auth_backends.PowerBIIdentifierBackend',
     'django.contrib.auth.backends.ModelBackend',
 ]
 
