@@ -1,5 +1,7 @@
 import ast
 import calendar
+import csv
+import io
 from datetime import date
 
 from django.contrib.auth import get_user_model
@@ -18,8 +20,10 @@ from .models import (
     SalaryEMIPlan,
     SalaryEarnType,
     SalaryFormulaConfig,
+    SalaryMonthPublish,
     SalaryMonthlyInput,
     SalaryPFConfig,
+    SalaryPublishedReceipt,
     StaffSalaryDeclaration,
 )
 
@@ -126,6 +130,189 @@ class StaffSalaryViewSet(viewsets.ViewSet):
         expr = dict(DEFAULT_FORMULAS)
         expr.update(formula_obj.expressions or {})
         return formula_obj, expr
+
+    def _add_months(self, dt, months):
+        y = dt.year + (dt.month - 1 + months) // 12
+        m = (dt.month - 1 + months) % 12 + 1
+        return date(y, m, 1)
+
+    def _build_monthly_sheet_data(self, month_date, department_id=None):
+        month_str = month_date.strftime('%Y-%m')
+        days_in_month = calendar.monthrange(month_date.year, month_date.month)[1]
+        pf_config = self._get_pf_config()
+        _, formulas = self._get_formula_config()
+
+        earn_types = list(SalaryEarnType.objects.filter(is_active=True).order_by('sort_order', 'id'))
+        deduction_types = list(SalaryDeductionType.objects.filter(is_active=True).order_by('sort_order', 'id'))
+        emi_type_ids = {d.id for d in deduction_types if d.mode == 'emi'}
+
+        staff_users = list(self._get_staff_queryset(department_id=department_id))
+        staff_ids = [u.id for u in staff_users]
+
+        declaration_map = {d.staff_id: d for d in StaffSalaryDeclaration.objects.filter(staff_id__in=staff_ids)}
+        monthly_map = {
+            m.staff_id: m
+            for m in SalaryMonthlyInput.objects.filter(staff_id__in=staff_ids, month=month_date)
+        }
+
+        lop_map = {
+            b.staff_id: float(b.balance or 0)
+            for b in StaffLeaveBalance.objects.filter(staff_id__in=staff_ids, leave_type='LOP')
+        }
+
+        historical_inputs = SalaryMonthlyInput.objects.filter(
+            staff_id__in=staff_ids,
+            month__lte=month_date,
+        ).values('staff_id', 'month', 'include_in_salary')
+        include_flag_map = {
+            (row['staff_id'], row['month']): bool(row['include_in_salary'])
+            for row in historical_inputs
+        }
+
+        emi_plans = SalaryEMIPlan.objects.filter(
+            staff_id__in=staff_ids,
+            deduction_type_id__in=list(emi_type_ids),
+            is_active=True,
+        ).select_related('deduction_type')
+
+        emi_amount_map = {}
+        for plan in emi_plans:
+            if month_date < plan.start_month:
+                continue
+
+            payable_before = 0
+            month_cursor = plan.start_month
+            while month_cursor < month_date:
+                include_before = include_flag_map.get((plan.staff_id, month_cursor), True)
+                if include_before:
+                    payable_before += 1
+                month_cursor = self._add_months(month_cursor, 1)
+
+            include_current = include_flag_map.get((plan.staff_id, month_date), True)
+            if include_current and payable_before < plan.months:
+                key = (plan.staff_id, plan.deduction_type_id)
+                emi_amount_map[key] = round(float(plan.total_amount or 0) / max(1, plan.months), 2)
+
+        published_obj = SalaryMonthPublish.objects.filter(month=month_date).first()
+
+        rows = []
+        for idx, staff in enumerate(staff_users, start=1):
+            profile = getattr(staff, 'staff_profile', None)
+            dept = getattr(profile, 'department', None) if profile else None
+            declaration = declaration_map.get(staff.id)
+            monthly = monthly_map.get(staff.id)
+
+            include_in_salary = bool(monthly.include_in_salary) if monthly else True
+            basic_salary = float(declaration.basic_salary if declaration else 0)
+            allowance = float(declaration.allowance if declaration else 0)
+            pf_enabled = bool(declaration.pf_enabled) if declaration else True
+            lop_days = max(0.0, float(lop_map.get(staff.id, 0.0)))
+
+            earn_values = {}
+            total_earn = 0.0
+            monthly_earn_values = (monthly.earn_values if monthly else {}) or {}
+            for e in earn_types:
+                amount = float(monthly_earn_values.get(str(e.id), 0) or 0)
+                earn_values[str(e.id)] = amount
+                total_earn += amount
+
+            deduction_values = {}
+            total_deduction = 0.0
+            monthly_deduction_values = (monthly.deduction_values if monthly else {}) or {}
+            for d in deduction_types:
+                if d.mode == 'emi':
+                    amount = float(emi_amount_map.get((staff.id, d.id), 0) or 0)
+                else:
+                    amount = float(monthly_deduction_values.get(str(d.id), 0) or 0)
+                deduction_values[str(d.id)] = amount
+                total_deduction += amount
+
+            od_new = float(monthly.od_new if monthly else 0)
+            others = float(monthly.others if monthly else 0)
+
+            context = {
+                'days_in_month': float(days_in_month),
+                'lop_days': lop_days,
+                'basic_salary': basic_salary,
+                'allowance': allowance,
+                'total_earn': total_earn,
+                'total_deduction': total_deduction,
+                'od_new': od_new,
+                'others': others,
+            }
+
+            working_days = SafeFormulaEvaluator.evaluate(formulas.get('working_days'), context, default=context['days_in_month'] - lop_days)
+            context['working_days'] = working_days
+            lop_amount = SafeFormulaEvaluator.evaluate(formulas.get('lop_amount'), context, default=((basic_salary + allowance) / lop_days if lop_days > 0 else 0))
+            context['lop_amount'] = lop_amount
+            gross_salary = SafeFormulaEvaluator.evaluate(formulas.get('gross_salary'), context, default=(basic_salary + allowance) - lop_amount)
+            context['gross_salary'] = gross_salary
+            total_salary = SafeFormulaEvaluator.evaluate(formulas.get('total_salary'), context, default=gross_salary + total_earn)
+            context['total_salary'] = total_salary
+
+            pf_amount = 0.0
+            dept_id = dept.id if dept else None
+            if pf_enabled and dept_id in (pf_config.type1_department_ids or []):
+                if total_salary >= float(pf_config.threshold_amount):
+                    pf_amount = float(pf_config.fixed_pf_amount)
+                else:
+                    pf_amount = total_salary * float(pf_config.percentage_rate) / 100.0
+            elif pf_enabled and dept_id in (pf_config.type2_department_ids or []):
+                try:
+                    declaration = StaffSalaryDeclaration.objects.get(staff_id=staff.id)
+                    pf_amount = float(declaration.type2_pf_value)
+                except StaffSalaryDeclaration.DoesNotExist:
+                    pf_amount = 0.0
+
+            context['pf_amount'] = pf_amount
+            net_salary = SafeFormulaEvaluator.evaluate(
+                formulas.get('net_salary'),
+                context,
+                default=(total_salary + pf_amount - od_new - total_deduction - others),
+            )
+
+            if not include_in_salary:
+                working_days = 0.0
+                gross_salary = 0.0
+                lop_amount = 0.0
+                total_salary = 0.0
+                pf_amount = 0.0
+                total_deduction = 0.0
+                net_salary = 0.0
+                deduction_values = {str(d.id): 0.0 for d in deduction_types}
+
+            rows.append({
+                's_no': idx,
+                'staff_user_id': staff.id,
+                'staff_id': getattr(profile, 'staff_id', None) or staff.username,
+                'staff_name': staff.get_full_name() or staff.username,
+                'department': {'id': dept.id if dept else None, 'name': dept.name if dept else 'N/A'},
+                'include_in_salary': include_in_salary,
+                'basic_salary': round(basic_salary if include_in_salary else 0.0, 2),
+                'allowance': round(allowance if include_in_salary else 0.0, 2),
+                'days': round(working_days, 2),
+                'gross_salary': round(gross_salary, 2),
+                'lop_days': round(lop_days, 2),
+                'lop_amount': round(lop_amount, 2),
+                'earn_values': earn_values,
+                'total_salary': round(total_salary, 2),
+                'pf_amount': round(pf_amount, 2),
+                'od_new': round(od_new, 2),
+                'deduction_values': deduction_values,
+                'others': round(others, 2),
+                'net_salary': round(net_salary, 2),
+            })
+
+        return {
+            'month': month_str,
+            'days_in_month': days_in_month,
+            'earn_types': [{'id': e.id, 'name': e.name} for e in earn_types],
+            'deduction_types': [{'id': d.id, 'name': d.name, 'mode': d.mode} for d in deduction_types],
+            'results': rows,
+            'formulas': formulas,
+            'published': bool(published_obj),
+            'published_at': published_obj.published_at.isoformat() if published_obj else None,
+        }
 
     @action(detail=False, methods=['get', 'post'])
     def declarations(self, request):
@@ -363,148 +550,132 @@ class StaffSalaryViewSet(viewsets.ViewSet):
                 row, _ = SalaryMonthlyInput.objects.get_or_create(staff=staff, month=month_date)
                 row.earn_values = item.get('earn_values') or row.earn_values or {}
                 row.deduction_values = item.get('deduction_values') or row.deduction_values or {}
+                if 'include_in_salary' in item:
+                    row.include_in_salary = bool(item.get('include_in_salary'))
                 row.od_new = float(item.get('od_new', row.od_new or 0))
                 row.others = float(item.get('others', row.others or 0))
                 row.save()
+        payload = self._build_monthly_sheet_data(
+            month_date,
+            department_id=request.query_params.get('department_id') or request.data.get('department_id'),
+        )
+        return Response(payload)
 
-        days_in_month = calendar.monthrange(month_date.year, month_date.month)[1]
-        pf_config = self._get_pf_config()
-        _, formulas = self._get_formula_config()
+    @action(detail=False, methods=['get'])
+    def monthly_sheet_download(self, request):
+        month_str = request.query_params.get('month')
+        if not month_str:
+            return Response({'error': 'month is required (YYYY-MM)'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            month_date = self._month_to_date(month_str)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        earn_types = list(SalaryEarnType.objects.filter(is_active=True).order_by('sort_order', 'id'))
-        deduction_types = list(SalaryDeductionType.objects.filter(is_active=True).order_by('sort_order', 'id'))
-        emi_type_ids = {d.id for d in deduction_types if d.mode == 'emi'}
+        payload = self._build_monthly_sheet_data(month_date, department_id=request.query_params.get('department_id'))
 
-        staff_users = list(self._get_staff_queryset(department_id=request.query_params.get('department_id')))
-        staff_ids = [u.id for u in staff_users]
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Staff Salary Monthly Sheet'])
+        writer.writerow(['Month', payload['month']])
+        writer.writerow([])
 
-        declaration_map = {d.staff_id: d for d in StaffSalaryDeclaration.objects.filter(staff_id__in=staff_ids)}
-        monthly_map = {
-            m.staff_id: m
-            for m in SalaryMonthlyInput.objects.filter(staff_id__in=staff_ids, month=month_date)
-        }
+        header = [
+            'Staff ID', 'Staff Name', 'Department', 'Include In Salary', 'Basic Salary', 'Allowance',
+            'Days', 'Gross Salary', 'LOP Amount'
+        ]
+        for e in payload.get('earn_types', []):
+            header.append(e['name'])
+        header.extend(['Total Salary', 'PF Amount', 'OD New'])
+        for d in payload.get('deduction_types', []):
+            header.append(d['name'])
+        header.extend(['Others', 'Net Salary'])
+        writer.writerow(header)
 
-        lop_map = {
-            b.staff_id: float(b.balance or 0)
-            for b in StaffLeaveBalance.objects.filter(staff_id__in=staff_ids, leave_type='LOP')
-        }
+        for r in payload.get('results', []):
+            row = [
+                r.get('staff_id', ''),
+                r.get('staff_name', ''),
+                (r.get('department') or {}).get('name', ''),
+                'Yes' if r.get('include_in_salary', True) else 'No',
+                r.get('basic_salary', 0),
+                r.get('allowance', 0),
+                r.get('days', 0),
+                r.get('gross_salary', 0),
+                r.get('lop_amount', 0),
+            ]
+            earn_values = r.get('earn_values') or {}
+            for e in payload.get('earn_types', []):
+                row.append(earn_values.get(str(e['id']), 0))
+            row.extend([r.get('total_salary', 0), r.get('pf_amount', 0), r.get('od_new', 0)])
+            deduction_values = r.get('deduction_values') or {}
+            for d in payload.get('deduction_types', []):
+                row.append(deduction_values.get(str(d['id']), 0))
+            row.extend([r.get('others', 0), r.get('net_salary', 0)])
+            writer.writerow(row)
 
-        emi_plans = SalaryEMIPlan.objects.filter(
-            staff_id__in=staff_ids,
-            deduction_type_id__in=list(emi_type_ids),
-            is_active=True,
-        ).select_related('deduction_type')
+        response = Response(output.getvalue(), content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="salary_monthly_sheet_{payload["month"]}.csv"'
+        return response
 
-        emi_amount_map = {}
-        for plan in emi_plans:
-            month_delta = (month_date.year - plan.start_month.year) * 12 + (month_date.month - plan.start_month.month)
-            if month_delta < 0 or month_delta >= plan.months:
+    @action(detail=False, methods=['post'])
+    def publish_month(self, request):
+        if not self._check_hr(request):
+            return Response({'error': 'Only HR/Admin can publish salary receipts'}, status=status.HTTP_403_FORBIDDEN)
+
+        month_str = request.data.get('month')
+        if not month_str:
+            return Response({'error': 'month is required (YYYY-MM)'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            month_date = self._month_to_date(month_str)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        payload = self._build_monthly_sheet_data(month_date, department_id=None)
+
+        published_obj, _ = SalaryMonthPublish.objects.get_or_create(month=month_date)
+        published_obj.published_by = request.user
+        published_obj.save()
+
+        for row in payload.get('results', []):
+            staff_id = row.get('staff_user_id')
+            if not staff_id:
                 continue
-            key = (plan.staff_id, plan.deduction_type_id)
-            emi_amount_map[key] = round(float(plan.total_amount or 0) / max(1, plan.months), 2)
-
-        rows = []
-        for idx, staff in enumerate(staff_users, start=1):
-            profile = getattr(staff, 'staff_profile', None)
-            dept = getattr(profile, 'department', None) if profile else None
-            declaration = declaration_map.get(staff.id)
-            monthly = monthly_map.get(staff.id)
-
-            basic_salary = float(declaration.basic_salary if declaration else 0)
-            allowance = float(declaration.allowance if declaration else 0)
-            pf_enabled = bool(declaration.pf_enabled) if declaration else True
-            lop_days = max(0.0, float(lop_map.get(staff.id, 0.0)))
-
-            earn_values = {}
-            total_earn = 0.0
-            monthly_earn_values = (monthly.earn_values if monthly else {}) or {}
-            for e in earn_types:
-                amount = float(monthly_earn_values.get(str(e.id), 0) or 0)
-                earn_values[str(e.id)] = amount
-                total_earn += amount
-
-            deduction_values = {}
-            total_deduction = 0.0
-            monthly_deduction_values = (monthly.deduction_values if monthly else {}) or {}
-            for d in deduction_types:
-                if d.mode == 'emi':
-                    amount = float(emi_amount_map.get((staff.id, d.id), 0) or 0)
-                else:
-                    amount = float(monthly_deduction_values.get(str(d.id), 0) or 0)
-                deduction_values[str(d.id)] = amount
-                total_deduction += amount
-
-            od_new = float(monthly.od_new if monthly else 0)
-            others = float(monthly.others if monthly else 0)
-
-            context = {
-                'days_in_month': float(days_in_month),
-                'lop_days': lop_days,
-                'basic_salary': basic_salary,
-                'allowance': allowance,
-                'total_earn': total_earn,
-                'total_deduction': total_deduction,
-                'od_new': od_new,
-                'others': others,
-            }
-
-            working_days = SafeFormulaEvaluator.evaluate(formulas.get('working_days'), context, default=context['days_in_month'] - lop_days)
-            context['working_days'] = working_days
-            lop_amount = SafeFormulaEvaluator.evaluate(formulas.get('lop_amount'), context, default=((basic_salary + allowance) / lop_days if lop_days > 0 else 0))
-            context['lop_amount'] = lop_amount
-            gross_salary = SafeFormulaEvaluator.evaluate(formulas.get('gross_salary'), context, default=(basic_salary + allowance) - lop_amount)
-            context['gross_salary'] = gross_salary
-            total_salary = SafeFormulaEvaluator.evaluate(formulas.get('total_salary'), context, default=gross_salary + total_earn)
-            context['total_salary'] = total_salary
-
-            pf_amount = 0.0
-            dept_id = dept.id if dept else None
-            if pf_enabled and dept_id in (pf_config.type1_department_ids or []):
-                if total_salary >= float(pf_config.threshold_amount):
-                    pf_amount = float(pf_config.fixed_pf_amount)
-                else:
-                    pf_amount = total_salary * float(pf_config.percentage_rate) / 100.0
-            elif pf_enabled and dept_id in (pf_config.type2_department_ids or []):
-                # Use staff's individual Type 2 PF value from declaration
-                try:
-                    declaration = StaffSalaryDeclaration.objects.get(staff_id=staff.id)
-                    pf_amount = float(declaration.type2_pf_value)
-                except StaffSalaryDeclaration.DoesNotExist:
-                    pf_amount = 0.0
-
-            context['pf_amount'] = pf_amount
-            net_salary = SafeFormulaEvaluator.evaluate(
-                formulas.get('net_salary'),
-                context,
-                default=(total_salary + pf_amount - od_new - total_deduction - others),
+            SalaryPublishedReceipt.objects.update_or_create(
+                month=month_date,
+                staff_id=staff_id,
+                defaults={
+                    'is_salary_included': bool(row.get('include_in_salary', True)),
+                    'receipt_data': row,
+                    'published_by': request.user,
+                },
             )
 
-            rows.append({
-                's_no': idx,
-                'staff_user_id': staff.id,
-                'staff_id': getattr(profile, 'staff_id', None) or staff.username,
-                'staff_name': staff.get_full_name() or staff.username,
-                'department': {'id': dept.id if dept else None, 'name': dept.name if dept else 'N/A'},
-                'basic_salary': round(basic_salary, 2),
-                'allowance': round(allowance, 2),
-                'days': round(working_days, 2),
-                'gross_salary': round(gross_salary, 2),
-                'lop_days': round(lop_days, 2),
-                'lop_amount': round(lop_amount, 2),
-                'earn_values': earn_values,
-                'total_salary': round(total_salary, 2),
-                'pf_amount': round(pf_amount, 2),
-                'od_new': round(od_new, 2),
-                'deduction_values': deduction_values,
-                'others': round(others, 2),
-                'net_salary': round(net_salary, 2),
-            })
-
         return Response({
+            'message': 'Salary receipts published successfully',
             'month': month_str,
-            'days_in_month': days_in_month,
-            'earn_types': [{'id': e.id, 'name': e.name} for e in earn_types],
-            'deduction_types': [{'id': d.id, 'name': d.name, 'mode': d.mode} for d in deduction_types],
-            'results': rows,
-            'formulas': formulas,
+            'count': len(payload.get('results', [])),
+            'published_at': published_obj.published_at.isoformat(),
         })
+
+    @action(detail=False, methods=['get'])
+    def my_receipts(self, request):
+        month_str = request.query_params.get('month')
+        receipts = SalaryPublishedReceipt.objects.filter(staff=request.user)
+
+        if month_str:
+            try:
+                month_date = self._month_to_date(month_str)
+                receipts = receipts.filter(month=month_date)
+            except ValueError as exc:
+                return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        results = []
+        for r in receipts.order_by('-month'):
+            results.append({
+                'id': r.id,
+                'month': r.month.strftime('%Y-%m'),
+                'is_salary_included': r.is_salary_included,
+                'published_at': r.published_at.isoformat() if r.published_at else None,
+                'receipt': r.receipt_data or {},
+            })
+        return Response({'results': results})

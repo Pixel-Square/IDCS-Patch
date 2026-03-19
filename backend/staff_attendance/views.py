@@ -15,9 +15,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from accounts.models import User
-from .models import AttendanceRecord, UploadLog, HalfDayRequest, Holiday, AttendanceSettings, DepartmentAttendanceSettings
-from .serializers import AttendanceRecordSerializer, UploadLogSerializer, CSVUploadSerializer, HalfDayRequestSerializer, HalfDayRequestCreateSerializer, HalfDayRequestReviewSerializer, HolidaySerializer, HolidayCreateSerializer, AttendanceSettingsSerializer, DepartmentAttendanceSettingsSerializer
-from .permissions import StaffAttendanceViewPermission, StaffAttendanceUploadPermission
+from .models import AttendanceRecord, UploadLog, HalfDayRequest, Holiday, AttendanceSettings, DepartmentAttendanceSettings, SpecialDepartmentDateAttendanceLimit
+from .serializers import AttendanceRecordSerializer, UploadLogSerializer, CSVUploadSerializer, HalfDayRequestSerializer, HalfDayRequestCreateSerializer, HalfDayRequestReviewSerializer, HolidaySerializer, HolidayCreateSerializer, AttendanceSettingsSerializer, DepartmentAttendanceSettingsSerializer, SpecialDepartmentDateAttendanceLimitSerializer
+from .permissions import StaffAttendanceViewPermission, StaffAttendanceUploadPermission, StaffAttendanceConfigPermission
 
 
 class AttendanceRecordViewSet(viewsets.ModelViewSet):
@@ -670,7 +670,7 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                 return ''
             diff = out_dt - in_dt
             total_minutes = int(diff.total_seconds() // 60)
-            return f"{total_minutes // 60}:{total_minutes % 60:02d} hrs"
+            return f"{total_minutes // 60}:{total_minutes % 60:02d}"
 
         def _in_out_text(record):
             if not record or not record.morning_in or not record.evening_out:
@@ -731,7 +731,7 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                 an_code = _to_code(rec.an_status)
                 overall_code = _to_code(rec.status)
                 form_display = _form_code_display(fn_code, an_code, overall_code)
-                if form_display and report_type not in ['3', '4', '5']:
+                if form_display and report_type not in ['2', '3', '4', '5']:
                     row['values'][key] = {'value': form_display, 'is_holiday': is_holiday}
                     continue
 
@@ -739,11 +739,11 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                     in_out = _in_out_text(rec)
                     status_text = _session_status_text(fn_code, an_code, overall_code)
                     if in_out and status_text:
-                        value = f"{status_text} | {in_out}"
+                        value = f"{status_text}\n({in_out})"
                     elif status_text:
                         value = status_text
                     else:
-                        value = in_out if in_out else ('H' if is_holiday else '-')
+                        value = f"({in_out})" if in_out else ('H' if is_holiday else '-')
                     row['values'][key] = {'value': value, 'is_holiday': is_holiday}
                     continue
 
@@ -752,19 +752,19 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                     in_out = _in_out_text(rec)
                     status_text = _session_status_text(fn_code, an_code, overall_code)
                     if dur and in_out and status_text:
-                        value = f"{status_text} | {dur} ({in_out})"
+                        value = f"{status_text}\n{dur}\n({in_out})"
                     elif dur and status_text:
-                        value = f"{status_text} | {dur}"
+                        value = f"{status_text}\n{dur}"
                     elif in_out and status_text:
-                        value = f"{status_text} | {in_out}"
+                        value = f"{status_text}\n({in_out})"
                     elif status_text:
                         value = status_text
                     elif dur and in_out:
-                        value = f"{dur} ({in_out})"
+                        value = f"{dur}\n({in_out})"
                     elif dur:
                         value = dur
                     elif in_out:
-                        value = in_out
+                        value = f"({in_out})"
                     else:
                         value = 'H' if is_holiday else '-'
                     row['values'][key] = {'value': value, 'is_holiday': is_holiday}
@@ -785,11 +785,11 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                     continue
 
                 dur = _duration_hrs(rec)
-                status_text = f"FN:{fn_code or '-'} AN:{an_code or '-'}" if (fn_code or an_code) else ''
+                status_text = _session_status_text(fn_code, an_code, overall_code)
                 if dur and status_text:
-                    value = f"{status_text} | {dur}"
+                    value = f"{status_text}\n{dur}"
                 elif status_text:
-                    value = '-' if status_text == 'FN:A AN:A' else status_text
+                    value = status_text
                 elif dur:
                     value = dur
                 else:
@@ -2404,7 +2404,7 @@ class AttendanceSettingsViewSet(viewsets.ModelViewSet):
     """ViewSet for managing attendance time settings"""
     queryset = AttendanceSettings.objects.all()
     serializer_class = AttendanceSettingsSerializer
-    permission_classes = [StaffAttendanceUploadPermission]  # Only PS can manage settings
+    permission_classes = [StaffAttendanceConfigPermission]  # HR/PS/Admin can manage settings
     
     def perform_create(self, serializer):
         """Save settings with the current user"""
@@ -2457,7 +2457,7 @@ class DepartmentAttendanceSettingsViewSet(viewsets.ModelViewSet):
     """ViewSet for managing department-specific attendance time settings (PS only)"""
     queryset = DepartmentAttendanceSettings.objects.all()
     serializer_class = DepartmentAttendanceSettingsSerializer
-    permission_classes = [StaffAttendanceUploadPermission]  # Only PS can manage
+    permission_classes = [StaffAttendanceConfigPermission]  # HR/PS/Admin can manage
     filterset_fields = ['enabled', 'departments']
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'created_at', 'updated_at']
@@ -2491,4 +2491,66 @@ class DepartmentAttendanceSettingsViewSet(viewsets.ModelViewSet):
                 {'message': 'No department-specific settings found. Using global defaults.'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class SpecialDepartmentDateAttendanceLimitViewSet(viewsets.ModelViewSet):
+    """HR/PS special date-range attendance limits by department."""
+    queryset = SpecialDepartmentDateAttendanceLimit.objects.all().prefetch_related('departments')
+    serializer_class = SpecialDepartmentDateAttendanceLimitSerializer
+    permission_classes = [StaffAttendanceConfigPermission]
+    filterset_fields = ['enabled', 'departments', 'from_date', 'to_date']
+    search_fields = ['name', 'description']
+    ordering_fields = ['from_date', 'to_date', 'created_at', 'updated_at']
+
+    def _reprocess_records_for_limit(self, instance):
+        """Recalculate attendance for already-saved rows covered by this limit."""
+        start_date = instance.from_date
+        end_date = instance.to_date or instance.from_date
+        dept_ids = list(instance.departments.values_list('id', flat=True))
+        if not dept_ids:
+            return 0
+
+        records = AttendanceRecord.objects.filter(
+            date__gte=start_date,
+            date__lte=end_date,
+        ).select_related('user', 'user__staff_profile', 'user__staff_profile__department')
+
+        processed = 0
+        for record in records:
+            dept_id = None
+            profile = getattr(record.user, 'staff_profile', None)
+            if profile:
+                try:
+                    if hasattr(profile, 'get_current_department'):
+                        current_dept = profile.get_current_department()
+                        if current_dept:
+                            dept_id = getattr(current_dept, 'id', None)
+                except Exception:
+                    dept_id = None
+
+                if dept_id is None:
+                    fallback_dept = getattr(profile, 'department', None)
+                    dept_id = getattr(fallback_dept, 'id', None) if fallback_dept else None
+
+            if dept_id not in dept_ids:
+                continue
+
+            record.update_status()
+            record.save(update_fields=['fn_status', 'an_status', 'status'])
+            processed += 1
+        return processed
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user, updated_by=self.request.user)
+        self._reprocess_records_for_limit(instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save(updated_by=self.request.user)
+        self._reprocess_records_for_limit(instance)
+
+    @action(detail=True, methods=['post'])
+    def reapply(self, request, pk=None):
+        instance = self.get_object()
+        processed = self._reprocess_records_for_limit(instance)
+        return Response({'success': True, 'reprocessed_records': processed})
 

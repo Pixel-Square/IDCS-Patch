@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import AttendanceRecordViewSet, UploadLogViewSet, CSVUploadViewSet, HalfDayRequestViewSet, HolidayViewSet, AttendanceSettingsViewSet, DepartmentAttendanceSettingsViewSet
+from .views import AttendanceRecordViewSet, UploadLogViewSet, CSVUploadViewSet, HalfDayRequestViewSet, HolidayViewSet, AttendanceSettingsViewSet, DepartmentAttendanceSettingsViewSet, SpecialDepartmentDateAttendanceLimitViewSet
 
 router = DefaultRouter()
 router.register(r'records', AttendanceRecordViewSet, basename='attendance-record')
@@ -10,6 +10,7 @@ router.register(r'half-day-requests', HalfDayRequestViewSet, basename='half-day-
 router.register(r'holidays', HolidayViewSet, basename='holiday')
 router.register(r'settings', AttendanceSettingsViewSet, basename='attendance-settings')
 router.register(r'department-settings', DepartmentAttendanceSettingsViewSet, basename='department-attendance-settings')
+router.register(r'special-department-date-limits', SpecialDepartmentDateAttendanceLimitViewSet, basename='special-department-date-limits')
 
 urlpatterns = [
     path('', include(router.urls)),

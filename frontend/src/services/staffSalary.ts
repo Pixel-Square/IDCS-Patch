@@ -129,3 +129,37 @@ export async function getMonthlySalarySheet(month: string, department_id?: strin
 export async function saveMonthlySalarySheet(month: string, items: any[]) {
   return postWithFallback('/monthly_sheet/', { month, items });
 }
+
+export async function downloadMonthlySalarySheet(month: string, department_id?: string) {
+  const params: any = { month };
+  if (department_id) params.department_id = department_id;
+
+  const roots = getSalaryBaseCandidates();
+  let lastError: any;
+  for (const root of roots) {
+    try {
+      const res = await apiClient.get(`${root}/monthly_sheet_download/`, {
+        params,
+        responseType: 'blob',
+      });
+      return res;
+    } catch (err: any) {
+      lastError = err;
+      const status = err?.response?.status;
+      if (status && status !== 404) {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
+}
+
+export async function publishSalaryMonth(month: string, department_id?: string) {
+  return postWithFallback('/publish_month/', { month, department_id });
+}
+
+export async function getMySalaryReceipts(month?: string) {
+  const params: any = {};
+  if (month) params.month = month;
+  return getWithFallback('/my_receipts/', { params });
+}

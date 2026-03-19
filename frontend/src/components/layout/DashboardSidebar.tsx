@@ -45,6 +45,7 @@ import { ApplicationsNavResponse, fetchApplicationsNav } from '../../services/ap
   hr_request_templates: FileText,
   hr_staff_validation: UserCheck,
   hr_staff_salary: Wallet,
+  staff_salary: Wallet,
   staff_requests_approvals: Bell,
   applications_admin: Layout,
   applications_inbox: ClipboardList,
@@ -270,6 +271,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   // My Calendar for staff (combined attendance + requests)
   if (flags.is_staff) {
     items.push({ key: 'my_attendance', label: 'My Calendar', to: '/staff/my-attendance' });
+    items.push({ key: 'staff_salary', label: 'Salary', to: '/staff/salary' });
   }
 
   // Period attendance for staff

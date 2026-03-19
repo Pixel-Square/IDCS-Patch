@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Download, Calendar, BarChart3, Loader, Search } from 'lucide-react';
+import { Download, Calendar, BarChart3, Loader, Search, Plus, Trash2 } from 'lucide-react';
 import { getApiBase } from '../../services/apiBase';
 import fetchWithAuth from '../../services/fetchAuth';
 
@@ -59,6 +59,21 @@ interface MonthlyMatrixData {
   }>;
 }
 
+interface SpecialLimitItem {
+  id: number;
+  name: string;
+  description?: string;
+  from_date: string;
+  to_date: string | null;
+  attendance_in_time_limit: string;
+  attendance_out_time_limit: string;
+  mid_time_split: string;
+  apply_time_based_absence: boolean;
+  enabled: boolean;
+  departments: number[];
+  departments_info: Array<{ id: number; name: string; code?: string }>;
+}
+
 export default function OrganizationStaffAttendanceAnalytics() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -70,10 +85,23 @@ export default function OrganizationStaffAttendanceAnalytics() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
+  const [specialLimits, setSpecialLimits] = useState<SpecialLimitItem[]>([]);
+  const [loadingSpecialLimits, setLoadingSpecialLimits] = useState(false);
+  const [savingSpecialLimit, setSavingSpecialLimit] = useState(false);
+  const [showSpecialForm, setShowSpecialForm] = useState(false);
+  const [specialName, setSpecialName] = useState('');
+  const [specialDescription, setSpecialDescription] = useState('');
+  const [specialFromDate, setSpecialFromDate] = useState('');
+  const [specialToDate, setSpecialToDate] = useState('');
+  const [specialInTime, setSpecialInTime] = useState('08:45');
+  const [specialOutTime, setSpecialOutTime] = useState('17:00');
+  const [specialNoonTime, setSpecialNoonTime] = useState('13:00');
+  const [specialDeptIds, setSpecialDeptIds] = useState<number[]>([]);
 
   // Load departments on mount
   React.useEffect(() => {
     loadDepartments();
+    loadSpecialLimits();
   }, []);
 
   const loadDepartments = async () => {
@@ -87,6 +115,129 @@ export default function OrganizationStaffAttendanceAnalytics() {
       }
     } catch (err) {
       console.error('Failed to load departments:', err);
+    }
+  };
+
+  const loadSpecialLimits = async () => {
+    try {
+      setLoadingSpecialLimits(true);
+      const response = await fetchWithAuth(
+        `${getApiBase()}/api/staff-attendance/special-department-date-limits/`
+      );
+      if (!response.ok) {
+        throw new Error('Failed to load special attendance limits');
+      }
+      const data = await response.json();
+      setSpecialLimits(Array.isArray(data) ? data : (data?.results || []));
+    } catch (err: any) {
+      setError(err.message || 'Failed to load special attendance limits');
+    } finally {
+      setLoadingSpecialLimits(false);
+    }
+  };
+
+  const resetSpecialForm = () => {
+    setSpecialName('');
+    setSpecialDescription('');
+    setSpecialFromDate('');
+    setSpecialToDate('');
+    setSpecialInTime('08:45');
+    setSpecialOutTime('17:00');
+    setSpecialNoonTime('13:00');
+    setSpecialDeptIds([]);
+  };
+
+  const handleToggleSpecialDept = (deptId: number) => {
+    setSpecialDeptIds((prev) =>
+      prev.includes(deptId) ? prev.filter((id) => id !== deptId) : [...prev, deptId]
+    );
+  };
+
+  const handleCreateSpecialLimit = async () => {
+    if (!specialName.trim()) {
+      setError('Special limit name is required');
+      return;
+    }
+    if (!specialFromDate) {
+      setError('From date is required');
+      return;
+    }
+    if (specialToDate && new Date(specialToDate) < new Date(specialFromDate)) {
+      setError('To date must be on or after From date');
+      return;
+    }
+    if (specialDeptIds.length === 0) {
+      setError('Select at least one department');
+      return;
+    }
+
+    try {
+      setSavingSpecialLimit(true);
+      setError(null);
+      const response = await fetchWithAuth(
+        `${getApiBase()}/api/staff-attendance/special-department-date-limits/`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: specialName.trim(),
+            description: specialDescription,
+            from_date: specialFromDate,
+            to_date: specialToDate || null,
+            attendance_in_time_limit: `${specialInTime}:00`,
+            attendance_out_time_limit: `${specialOutTime}:00`,
+            mid_time_split: `${specialNoonTime}:00`,
+            apply_time_based_absence: true,
+            enabled: true,
+            departments: specialDeptIds,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData?.error || errData?.detail || 'Failed to save special attendance limit');
+      }
+
+      resetSpecialForm();
+      setShowSpecialForm(false);
+      await loadSpecialLimits();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save special attendance limit');
+    } finally {
+      setSavingSpecialLimit(false);
+    }
+  };
+
+  const handleDeleteSpecialLimit = async (id: number) => {
+    if (!window.confirm('Delete this special attendance time limit?')) return;
+    try {
+      const response = await fetchWithAuth(
+        `${getApiBase()}/api/staff-attendance/special-department-date-limits/${id}/`,
+        { method: 'DELETE' }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to delete special attendance limit');
+      }
+      await loadSpecialLimits();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete special attendance limit');
+    }
+  };
+
+  const handleReapplySpecialLimit = async (id: number) => {
+    try {
+      setError(null);
+      const response = await fetchWithAuth(
+        `${getApiBase()}/api/staff-attendance/special-department-date-limits/${id}/reapply/`,
+        { method: 'POST' }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to reapply special attendance limit');
+      }
+      await loadSpecialLimits();
+    } catch (err: any) {
+      setError(err.message || 'Failed to reapply special attendance limit');
     }
   };
 
@@ -370,6 +521,192 @@ export default function OrganizationStaffAttendanceAnalytics() {
           )}
         </div>
 
+        {/* HR Special Department-Specific Time Limits */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Special Department-Specific Time Limits</h2>
+              <p className="text-sm text-slate-600">
+                HR can define date-wise override time limits per department. Existing saved attendance in that date range is reprocessed automatically.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setShowSpecialForm((p) => !p);
+                if (showSpecialForm) resetSpecialForm();
+              }}
+              className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              {showSpecialForm ? 'Close' : 'Add Special Limit'}
+            </button>
+          </div>
+
+          {showSpecialForm && (
+            <div className="border border-slate-200 rounded-lg p-4 mb-4 bg-slate-50">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={specialName}
+                    onChange={(e) => setSpecialName(e.target.value)}
+                    placeholder="e.g. CSE Special Shift"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">From Date</label>
+                  <input
+                    type="date"
+                    value={specialFromDate}
+                    onChange={(e) => setSpecialFromDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">To Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={specialToDate}
+                    onChange={(e) => setSpecialToDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                  <input
+                    type="text"
+                    value={specialDescription}
+                    onChange={(e) => setSpecialDescription(e.target.value)}
+                    placeholder="Optional"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">In Time</label>
+                  <input
+                    type="time"
+                    value={specialInTime}
+                    onChange={(e) => setSpecialInTime(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Out Time</label>
+                  <input
+                    type="time"
+                    value={specialOutTime}
+                    onChange={(e) => setSpecialOutTime(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Noon Split</label>
+                  <input
+                    type="time"
+                    value={specialNoonTime}
+                    onChange={(e) => setSpecialNoonTime(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Departments</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-40 overflow-auto p-2 border border-slate-200 rounded bg-white">
+                  {departments.map((dept) => (
+                    <label key={`special-${dept.id}`} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={specialDeptIds.includes(dept.id)}
+                        onChange={() => handleToggleSpecialDept(dept.id)}
+                      />
+                      {dept.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={handleCreateSpecialLimit}
+                  disabled={savingSpecialLimit}
+                  className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-400"
+                >
+                  {savingSpecialLimit ? 'Saving...' : 'Save Special Limit'}
+                </button>
+                <button
+                  onClick={() => {
+                    resetSpecialForm();
+                    setShowSpecialForm(false);
+                  }}
+                  className="px-4 py-2 rounded border border-slate-300 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-3 py-2 text-left">Name</th>
+                  <th className="px-3 py-2 text-left">Date Range</th>
+                  <th className="px-3 py-2 text-left">Departments</th>
+                  <th className="px-3 py-2 text-left">In</th>
+                  <th className="px-3 py-2 text-left">Out</th>
+                  <th className="px-3 py-2 text-left">Noon</th>
+                  <th className="px-3 py-2 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingSpecialLimits ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-4 text-center text-slate-500">Loading special limits...</td>
+                  </tr>
+                ) : specialLimits.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-4 text-center text-slate-500">No special limits configured</td>
+                  </tr>
+                ) : (
+                  specialLimits.map((item) => (
+                    <tr key={item.id} className="border-b border-slate-100">
+                      <td className="px-3 py-2 font-medium text-slate-800">{item.name}</td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {item.from_date}
+                        {item.to_date ? ` to ${item.to_date}` : ''}
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {(item.departments_info || []).map((d) => d.name).join(', ')}
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">{item.attendance_in_time_limit?.substring(0, 5)}</td>
+                      <td className="px-3 py-2 text-slate-700">{item.attendance_out_time_limit?.substring(0, 5)}</td>
+                      <td className="px-3 py-2 text-slate-700">{item.mid_time_split?.substring(0, 5)}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={() => handleReapplySpecialLimit(item.id)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 mr-2"
+                        >
+                          Reapply
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSpecialLimit(item.id)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100"
+                        >
+                          <Trash2 className="w-4 h-4" /> Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         {/* Analytics Results */}
         {filteredAnalyticsData && reportType === '1' && 'summary' in filteredAnalyticsData && (
           <>
@@ -510,7 +847,7 @@ export default function OrganizationStaffAttendanceAnalytics() {
                               className={`px-2 py-2 text-center align-top ${cell.is_holiday ? 'bg-amber-100/70 text-amber-900 font-semibold' : 'text-slate-700'}`}
                               title={cell.is_holiday ? 'Holiday' : cell.value}
                             >
-                              <span className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 leading-tight ${cell.is_holiday ? 'bg-amber-200/70' : 'bg-slate-100'}`}>
+                              <span className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 leading-tight whitespace-pre-line ${cell.is_holiday ? 'bg-amber-200/70' : 'bg-slate-100'}`}>
                                 {cell.value}
                               </span>
                             </td>

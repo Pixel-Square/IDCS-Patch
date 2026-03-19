@@ -94,10 +94,49 @@ class SalaryMonthlyInput(models.Model):
     month = models.DateField(help_text='Use first day of month')
     earn_values = models.JSONField(default=dict, blank=True)
     deduction_values = models.JSONField(default=dict, blank=True)
+    include_in_salary = models.BooleanField(default=True)
     od_new = models.FloatField(default=0.0)
     others = models.FloatField(default=0.0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = [['staff', 'month']]
+        ordering = ['-month', 'staff_id']
+
+
+class SalaryMonthPublish(models.Model):
+    month = models.DateField(unique=True, help_text='Use first day of month')
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='salary_month_publishes',
+    )
+    published_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-month']
+
+
+class SalaryPublishedReceipt(models.Model):
+    month = models.DateField(help_text='Use first day of month')
+    staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='salary_published_receipts',
+    )
+    is_salary_included = models.BooleanField(default=True)
+    receipt_data = models.JSONField(default=dict, blank=True)
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='salary_receipts_published',
+    )
+    published_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [['month', 'staff']]
         ordering = ['-month', 'staff_id']

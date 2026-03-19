@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Save, FileText, Settings, DollarSign, Calculator, Table as TableIcon } from 'lucide-react';
+import { Loader2, Plus, Save, FileText, Settings, DollarSign, Calculator, Table as TableIcon, Download, Send } from 'lucide-react';
 import {
   getDeductionTypes,
   getEarnTypes,
@@ -10,6 +10,8 @@ import {
   saveDeductionTypes,
   saveEarnTypes,
   saveMonthlySalarySheet,
+  downloadMonthlySalarySheet,
+  publishSalaryMonth,
   savePfConfig,
   saveSalaryDeclarations,
   saveSalaryFormulas,
@@ -65,6 +67,7 @@ export default function StaffSalaryPage() {
   const [monthlySheet, setMonthlySheet] = useState<any>(null);
   const [monthlySearchTerm, setMonthlySearchTerm] = useState('');
   const [monthlyDeptFilter, setMonthlyDeptFilter] = useState('');
+  const [publishing, setPublishing] = useState(false);
 
   const [newEmi, setNewEmi] = useState<any>({
     staff_user_id: '',
@@ -223,6 +226,7 @@ export default function StaffSalaryPage() {
     try {
       await saveMonthlySalarySheet(month, [{
         staff_user_id: row.staff_user_id,
+        include_in_salary: Boolean(row.include_in_salary),
         earn_values: row.earn_values,
         deduction_values: row.deduction_values,
         od_new: row.od_new,
@@ -231,6 +235,61 @@ export default function StaffSalaryPage() {
       await loadAll();
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Failed to save monthly values');
+    }
+  };
+
+  const handleToggleMonthlyInclude = async (row: any, checked: boolean) => {
+    try {
+      setMonthlySheet((prev: any) => {
+        if (!prev?.results) return prev;
+        return {
+          ...prev,
+          results: prev.results.map((x: any) =>
+            x.staff_user_id === row.staff_user_id ? { ...x, include_in_salary: checked } : x,
+          ),
+        };
+      });
+
+      await saveMonthlySalarySheet(month, [{
+        staff_user_id: row.staff_user_id,
+        include_in_salary: checked,
+        earn_values: row.earn_values,
+        deduction_values: row.deduction_values,
+        od_new: row.od_new,
+        others: row.others,
+      }]);
+      await loadAll();
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to update salary inclusion');
+    }
+  };
+
+  const handleDownloadMonthlySheet = async () => {
+    try {
+      const response = await downloadMonthlySalarySheet(month, monthlyDeptFilter || undefined);
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `salary_monthly_sheet_${month}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to download monthly sheet');
+    }
+  };
+
+  const handlePublishMonthlySheet = async () => {
+    try {
+      setPublishing(true);
+      await publishSalaryMonth(month);
+      await loadAll();
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to publish salary receipts');
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -526,11 +585,11 @@ export default function StaffSalaryPage() {
                     <input type="number" value={pfConfig?.threshold_amount || 0} onChange={(e) => setPfConfig((p: any) => ({ ...p, threshold_amount: Number(e.target.value) }))} className="w-full border rounded px-3 py-2 mt-1" />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-700">Fixed PF Amount</label>
+                    <label className="text-sm font-medium text-slate-700">PF Amount Greater than Threshhold </label>
                     <input type="number" value={pfConfig?.fixed_pf_amount || 0} onChange={(e) => setPfConfig((p: any) => ({ ...p, fixed_pf_amount: Number(e.target.value) }))} className="w-full border rounded px-3 py-2 mt-1" />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-700">Percentage Rate (%)</label>
+                    <label className="text-sm font-medium text-slate-700">Percentage Rate (%) Less than Threshold</label>
                     <input type="number" value={pfConfig?.percentage_rate || 0} onChange={(e) => setPfConfig((p: any) => ({ ...p, percentage_rate: Number(e.target.value) }))} className="w-full border rounded px-3 py-2 mt-1" />
                   </div>
 
@@ -741,7 +800,30 @@ export default function StaffSalaryPage() {
         {activeTab === 'monthly' && (
           <section className="bg-white border rounded-xl overflow-hidden shadow-md">
             <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100">
-              <h2 className="text-xl font-semibold mb-3 text-slate-900">Final Salary Sheet - {month}</h2>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-xl font-semibold text-slate-900">Final Salary Sheet - {month}</h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  {monthlySheet?.published && (
+                    <span className="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700 font-semibold">
+                      Published
+                    </span>
+                  )}
+                  <button
+                    onClick={handleDownloadMonthlySheet}
+                    className="px-3 py-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-2 text-sm"
+                  >
+                    <Download className="w-4 h-4" /> Download
+                  </button>
+                  <button
+                    onClick={handlePublishMonthlySheet}
+                    disabled={publishing}
+                    className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-400 inline-flex items-center gap-2 text-sm"
+                  >
+                    {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    Publish
+                  </button>
+                </div>
+              </div>
               
               {/* Monthly Sheet Filters */}
               <div className="flex flex-wrap gap-3 items-end">
@@ -776,10 +858,11 @@ export default function StaffSalaryPage() {
             <table className="min-w-max w-full text-xs">
               <thead className="bg-slate-100 border-b border-slate-200 sticky top-0 z-20">
                 <tr>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-0 z-30 bg-slate-100 border-r border-slate-200 min-w-[60px]">S.No</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[60px] z-30 bg-slate-100 border-r border-slate-200 min-w-[100px]">Staff ID</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[160px] z-30 bg-slate-100 border-r border-slate-200 min-w-[150px]">Staff Name</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[310px] z-30 bg-slate-100 border-r border-slate-200 min-w-[120px]">Dept</th>
+                  <th className="px-3 py-2 text-center font-semibold text-slate-700 sticky left-0 z-30 bg-slate-100 border-r border-slate-200 min-w-[70px]">Pay</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[70px] z-30 bg-slate-100 border-r border-slate-200 min-w-[60px]">S.No</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[130px] z-30 bg-slate-100 border-r border-slate-200 min-w-[100px]">Staff ID</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[230px] z-30 bg-slate-100 border-r border-slate-200 min-w-[150px]">Staff Name</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[380px] z-30 bg-slate-100 border-r border-slate-200 min-w-[120px]">Dept</th>
                   <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Basic salary</th>
                   <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Allowance</th>
                   <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[80px]">Days</th>
@@ -898,10 +981,18 @@ export default function StaffSalaryPage() {
                       const r = item.data;
                       return (
                         <tr key={`staff-${r.staff_user_id}`} className={`border-b border-slate-200 ${staffCounter % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}`}>
-                          <td className="px-3 py-2 font-semibold text-slate-900 sticky left-0 z-10 bg-inherit border-r border-slate-200">{staffCounter}</td>
-                          <td className="px-3 py-2 text-slate-900 sticky left-[60px] z-10 bg-inherit border-r border-slate-200">{r.staff_id}</td>
-                          <td className="px-3 py-2 text-slate-900 sticky left-[160px] z-10 bg-inherit border-r border-slate-200">{r.staff_name}</td>
-                          <td className="px-3 py-2 text-slate-700 sticky left-[310px] z-10 bg-inherit border-r border-slate-200">{r.department.name}</td>
+                          <td className="px-3 py-2 text-center sticky left-0 z-10 bg-inherit border-r border-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(r.include_in_salary ?? true)}
+                              onChange={(ev) => handleToggleMonthlyInclude(r, ev.target.checked)}
+                              className="w-4 h-4"
+                            />
+                          </td>
+                          <td className="px-3 py-2 font-semibold text-slate-900 sticky left-[70px] z-10 bg-inherit border-r border-slate-200">{staffCounter}</td>
+                          <td className="px-3 py-2 text-slate-900 sticky left-[130px] z-10 bg-inherit border-r border-slate-200">{r.staff_id}</td>
+                          <td className="px-3 py-2 text-slate-900 sticky left-[230px] z-10 bg-inherit border-r border-slate-200">{r.staff_name}</td>
+                          <td className="px-3 py-2 text-slate-700 sticky left-[380px] z-10 bg-inherit border-r border-slate-200">{r.department.name}</td>
                           <td className="px-3 py-2 text-right text-slate-700">{Number(r.basic_salary).toFixed(2)}</td>
                           <td className="px-3 py-2 text-right text-slate-700">{Number(r.allowance).toFixed(2)}</td>
                           <td className="px-3 py-2 text-right text-slate-700">{Number(r.days).toFixed(2)}</td>
@@ -954,9 +1045,10 @@ export default function StaffSalaryPage() {
                       return (
                         <tr key={`dept-total-${dept.id}`} className="border-b bg-gradient-to-r from-blue-50 to-blue-100/50 font-semibold text-slate-800">
                           <td className="px-3 py-2 sticky left-0 z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[60px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[160px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[310px] z-10 bg-inherit border-r border-slate-200">{dept.name} Total</td>
+                          <td className="px-3 py-2 sticky left-[70px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[130px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[230px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[380px] z-10 bg-inherit border-r border-slate-200">{dept.name} Total</td>
                           <td className="px-3 py-2 text-right">{totals.basic_salary.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">{totals.allowance.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">{totals.days.toFixed(2)}</td>
@@ -985,9 +1077,10 @@ export default function StaffSalaryPage() {
                       return (
                         <tr key="grand-total" className="border-b bg-gradient-to-r from-green-50 to-green-100/50 font-bold text-slate-800">
                           <td className="px-3 py-2 sticky left-0 z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[60px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[160px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[310px] z-10 bg-inherit border-r border-slate-200">Final College Total</td>
+                          <td className="px-3 py-2 sticky left-[70px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[130px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[230px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[380px] z-10 bg-inherit border-r border-slate-200">Final College Total</td>
                           <td className="px-3 py-2 text-right">{totals.basic_salary.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">{totals.allowance.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">{totals.days.toFixed(2)}</td>

@@ -1,5 +1,13 @@
 from rest_framework import serializers
-from .models import AttendanceRecord, UploadLog, HalfDayRequest, Holiday, AttendanceSettings, DepartmentAttendanceSettings
+from .models import (
+    AttendanceRecord,
+    UploadLog,
+    HalfDayRequest,
+    Holiday,
+    AttendanceSettings,
+    DepartmentAttendanceSettings,
+    SpecialDepartmentDateAttendanceLimit,
+)
 from academics.models import Department
 
 
@@ -206,6 +214,43 @@ class DepartmentAttendanceSettingsSerializer(serializers.ModelSerializer):
                 'id': dept.id,
                 'name': dept.name,
                 'code': dept.code
+            }
+            for dept in obj.departments.all()
+        ]
+
+
+class SpecialDepartmentDateAttendanceLimitSerializer(serializers.ModelSerializer):
+    departments_info = serializers.SerializerMethodField()
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    updated_by_name = serializers.CharField(source='updated_by.username', read_only=True)
+
+    class Meta:
+        model = SpecialDepartmentDateAttendanceLimit
+        fields = [
+            'id', 'name', 'description', 'from_date', 'to_date',
+            'attendance_in_time_limit', 'attendance_out_time_limit', 'mid_time_split',
+            'apply_time_based_absence', 'departments', 'departments_info', 'enabled',
+            'created_by', 'created_by_name', 'updated_by', 'updated_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'created_by', 'created_by_name', 'updated_by', 'updated_by_name',
+            'created_at', 'updated_at'
+        ]
+
+    def validate(self, attrs):
+        from_date = attrs.get('from_date', getattr(self.instance, 'from_date', None))
+        to_date = attrs.get('to_date', getattr(self.instance, 'to_date', None))
+        if to_date and from_date and to_date < from_date:
+            raise serializers.ValidationError({'to_date': 'to_date must be on or after from_date'})
+        return attrs
+
+    def get_departments_info(self, obj):
+        return [
+            {
+                'id': dept.id,
+                'name': dept.name,
+                'code': dept.code,
             }
             for dept in obj.departments.all()
         ]
