@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Superuser Impersonation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+        
+        .alert.error {
+            background-color: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+            display: block;
+        }
+        
+        .alert.success {
+            background-color: #efe;
+            color: #3c3;
+            border: 1px solid #cfc;
+            display: block;
+        }
+        
+        .alert.info {
+            background-color: #eef;
+            color: #33c;
+            border: 1px solid #ccf;
+            display: block;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+        
+        input, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        
+        .hint {
+            display: block;
+            margin-top: 5px;
+            font-size: 12px;
+            color: #999;
+        }
+        
+        .button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+        }
+        
+        .button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .samples {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        
+        .samples h4 {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 12px;
+        }
+        
+        .sample-item {
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 13px;
+            color: #555;
+        }
+        
+        .sample-item strong {
+            color: #333;
+        }
+        
+        .sample-list {
+            margin-top: 8px;
+            margin-left: 20px;
+            font-size: 13px;
+        }
+        
+        .token-display {
+            background: #f0f7ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 15px;
+            font-size: 12px;
+            color: #0066cc;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 Superuser Impersonation</h1>
+            <p>Login to access another user's account</p>
+        </div>
+        
+        <div id="alertContainer"></div>
+        
+        <form id="impersonationForm">
+            <!-- Superuser Identifier -->
+            <div class="form-group">
+                <label for="superuser_identifier">Superuser Email / ID:</label>
+                <input
+                    type="text"
+                    id="superuser_identifier"
+                    name="superuser_identifier"
+                    placeholder="admin@example.com or staff_id"
+                    required
+                />
+                <span class="hint">Email, reg_no, or staff_id</span>
+            </div>
+            
+            <!-- Superuser Password -->
+            <div class="form-group">
+                <label for="superuser_password">Superuser Password:</label>
+                <input
+                    type="password"
+                    id="superuser_password"
+                    name="superuser_password"
+                    placeholder="Your password"
+                    required
+                />
+            </div>
+            
+            <!-- Target User ID -->
+            <div class="form-group">
+                <label for="target_user_id">Target User ID:</label>
+                <input
+                    type="number"
+                    id="target_user_id"
+                    name="target_user_id"
+                    placeholder="e.g., 8665"
+                    required
+                />
+                <span class="hint">ID of user to impersonate</span>
+            </div>
+            
+            <!-- Reason -->
+            <div class="form-group">
+                <label for="reason">Reason (Optional):</label>
+                <textarea
+                    id="reason"
+                    name="reason"
+                    placeholder="Why are you impersonating this user?"
+                ></textarea>
+                <span class="hint">For audit log</span>
+            </div>
+            
+            <!-- Submit Button -->
+            <button type="submit" class="button" id="submitBtn">
+                🔓 Impersonate User
+            </button>
+        </form>
+        
+        <!-- Sample Data -->
+        <div class="samples">
+            <h4>📚 Sample Test Data:</h4>
+            <div class="sample-item">
+                <strong>Superuser:</strong> iqac@krct.ac.in
+            </div>
+            <div class="sample-item">
+                <strong>Target Students:</strong>
+                <ul class="sample-list">
+                    <li>ID 8665: AAFFRIN A R</li>
+                    <li>ID 8666: AARYA A</li>
+                    <li>ID 8667: AATHIL AHAMED H</li>
+                    <li>ID 8668: ABHINAY V</li>
+                    <li>ID 8669: ADITYA_S</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const form = document.getElementById('impersonationForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const alertContainer = document.getElementById('alertContainer');
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Validate inputs
+            const superuser_identifier = document.getElementById('superuser_identifier').value.trim();
+            const superuser_password = document.getElementById('superuser_password').value;
+            const target_user_id = parseInt(document.getElementById('target_user_id').value);
+            const reason = document.getElementById('reason').value.trim() || 'Superuser access';
+            
+            if (!superuser_identifier || !superuser_password || !target_user_id) {
+                showAlert('❌ Please fill in all required fields', 'error');
+                return;
+            }
+            
+            // Disable button
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Processing...';
+            
+            try {
+                const response = await fetch('http://localhost:8000/api/accounts/impersonate/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        superuser_identifier,
+                        superuser_password,
+                        target_user_id,
+                        reason
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Success
+                    showAlert(`✅ Successfully impersonating user: ${data.name}`, 'success');
+                    
+                    // Store tokens
+                    localStorage.setItem('access_token', data.access);
+                    localStorage.setItem('refresh_token', data.refresh);
+                    localStorage.setItem('impersonation_notice', data.impersonation_notice);
+                    
+                    // Show token
+                    setTimeout(() => {
+                        const tokenDisplay = document.createElement('div');
+                        tokenDisplay.className = 'token-display';
+                        tokenDisplay.innerHTML = `
+                            <strong>📋 Access Token:</strong><br>
+                            ${data.access.substring(0, 80)}...<br><br>
+                            <strong>⚠️ Impersonation Notice:</strong><br>
+                            ${data.impersonation_notice}
+                        `;
+                        alertContainer.appendChild(tokenDisplay);
+                    }, 500);
+                    
+                    // Clear form
+                    form.reset();
+                    
+                    // Redirect after 3 seconds
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 3000);
+                } else {
+                    // Error response
+                    const errorMsg = data.detail || 
+                                    Object.values(data).join(', ') || 
+                                    'Failed to impersonate user';
+                    showAlert(`❌ ${errorMsg}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`❌ Network Error: ${error.message}`, 'error');
+                console.error('Error:', error);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🔓 Impersonate User';
+            }
+        });
+        
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert ${type}`;
+            alertDiv.textContent = message;
+            alertContainer.innerHTML = '';
+            alertContainer.appendChild(alertDiv);
+        }
+    </script>
+</body>
+</html>

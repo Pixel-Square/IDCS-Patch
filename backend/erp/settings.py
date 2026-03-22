@@ -34,7 +34,6 @@ SECRET_KEY = _django_secret_key
 
 DEBUG = os.getenv('DEBUG', '0') == '1'
 RUNNING_RUNSERVER = 'runserver' in sys.argv
-ALLOW_SQLITE_FALLBACK = os.getenv('ALLOW_SQLITE_FALLBACK', '1' if DEBUG else '0') == '1'
 
 ALLOWED_HOSTS = (
     ['*'] if DEBUG else [
@@ -122,45 +121,45 @@ DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
 DB_HOST = os.getenv('DB_HOST')
 DB_PORT = os.getenv('DB_PORT', '5432')
-# Prefer PostgreSQL only when DB env vars are explicitly provided.
-# This makes local development easy: leave DB_* unset to use SQLite.
-if DB_NAME:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': DB_NAME,
-            'USER': DB_USER,
-            'PASSWORD': DB_PASS,
-            'HOST': DB_HOST,
-            'PORT': DB_PORT,
-            # Prevent "cursor ... does not exist" errors when running behind
-            # PgBouncer in transaction pooling mode (named/server-side cursors
-            # are not compatible with transaction pooling).
-            'DISABLE_SERVER_SIDE_CURSORS': True,
-            # Keep default short-lived connections unless explicitly overridden.
-            # Reuse DB connections to avoid reconnect overhead under concurrent login bursts.
-            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '60')),
-            'CONN_HEALTH_CHECKS': True,
-            'OPTIONS': {
-                'server_side_binding': False,
-                # Fail faster on unhealthy DB instead of hanging workers for long periods.
-                'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '5')),
-            },
-        }
+_missing_db_env = [
+    key for key, value in (
+        ('DB_NAME', DB_NAME),
+        ('DB_USER', DB_USER),
+        ('DB_PASS', DB_PASS),
+        ('DB_HOST', DB_HOST),
+    )
+    if not value
+]
+if _missing_db_env:
+    raise RuntimeError(
+        'Missing required database environment variables: '
+        + ', '.join(_missing_db_env)
+        + '. Add them to backend/.env before starting the server.'
+    )
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': DB_NAME,
+        'USER': DB_USER,
+        'PASSWORD': DB_PASS,
+        'HOST': DB_HOST,
+        'PORT': DB_PORT,
+        # Prevent "cursor ... does not exist" errors when running behind
+        # PgBouncer in transaction pooling mode (named/server-side cursors
+        # are not compatible with transaction pooling).
+        'DISABLE_SERVER_SIDE_CURSORS': True,
+        # Keep default short-lived connections unless explicitly overridden.
+        # Reuse DB connections to avoid reconnect overhead under concurrent login bursts.
+        'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '60')),
+        'CONN_HEALTH_CHECKS': True,
+        'OPTIONS': {
+            'server_side_binding': False,
+            # Fail faster on unhealthy DB instead of hanging workers for long periods.
+            'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '5')),
+        },
     }
-else:
-    if not ALLOW_SQLITE_FALLBACK:
-        raise RuntimeError(
-            'SQLite fallback is disabled in this environment. '
-            'Set DB_NAME (PostgreSQL) or ALLOW_SQLITE_FALLBACK=1 explicitly.'
-        )
-    # Fall back to SQLite for local development
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 
 

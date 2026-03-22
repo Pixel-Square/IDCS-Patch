@@ -728,6 +728,20 @@ export default function OBEPage(): JSX.Element {
     window.location.href = path;
   };
 
+  const rememberSelectedTeachingAssignment = (it: any) => {
+    try {
+      const code = String(it?.subject_code || '').trim();
+      const taId = Number(it?.id);
+      // Only persist real TeachingAssignment ids. Some fallback rows (e.g. subject-batch)
+      // may be negative ids and are not valid TA ids.
+      if (!code) return;
+      if (!Number.isFinite(taId) || taId <= 0) return;
+      window.localStorage.setItem(`markEntry_selectedTa_${code}`, String(taId));
+    } catch {
+      // ignore
+    }
+  };
+
   const visibleQuestions = useMemo(() => {
     return (scannedQuestions || []).filter((q) => {
       const marks = String((q as any)?.marks ?? '').trim().toUpperCase();
@@ -1107,19 +1121,13 @@ export default function OBEPage(): JSX.Element {
                         <span style={{ fontSize: 14, marginTop: 12, display: 'block' }}>(If you expect to see courses here, please check with your backend/API or contact admin.)</span>
                       </div>
                     ) : (
-                      (assignments.length > 0
-                        ? assignments.reduce((acc: TeachingAssignmentItem[], it) => {
-                            if (!acc.some(a => a.subject_code === it.subject_code)) acc.push(it);
-                            return acc;
-                          }, [] as TeachingAssignmentItem[])
-                        : academicCourses
-                      ).map((it: any) => (
+                      (assignments.length > 0 ? assignments : academicCourses).map((it: any) => (
                           <div
-                            key={it.subject_code}
-                            onClick={() => navigateToCourse(it.subject_code)}
+                            key={typeof it?.id === 'number' ? it.id : String(it.subject_code || '')}
+                            onClick={() => { rememberSelectedTeachingAssignment(it); navigateToCourse(it.subject_code); }}
                             role="button"
                             tabIndex={0}
-                            onKeyDown={(e) => { if (e.key === 'Enter') navigateToCourse(it.subject_code); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { rememberSelectedTeachingAssignment(it); navigateToCourse(it.subject_code); } }}
                             onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.06)'; e.currentTarget.style.borderColor = '#3b82f6'; }}
                             onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.05)'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
                             style={{
@@ -1139,9 +1147,14 @@ export default function OBEPage(): JSX.Element {
                           >
                             <div style={{ fontWeight: 700, fontSize: 19, marginBottom: 6, color: '#0f172a', lineHeight: 1.3 }}>{it.subject_name}</div>
                             <div style={{ fontSize: 14, color: '#3b82f6', marginBottom: 16, fontWeight: 600, background: '#eff6ff', padding: '4px 10px', borderRadius: 6 }}>{it.subject_code}</div>
+                            {it.section_name ? (
+                              <div style={{ fontSize: 13, color: '#64748b', marginBottom: 10, fontWeight: 600 }}>
+                                {String(it.section_name)}
+                              </div>
+                            ) : null}
                             <div style={{ marginTop: 'auto', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                               <button
-                                onClick={(e) => { e.stopPropagation(); navigateToCourse(it.subject_code); }}
+                                onClick={(e) => { e.stopPropagation(); rememberSelectedTeachingAssignment(it); navigateToCourse(it.subject_code); }}
                                 onMouseEnter={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'; e.currentTarget.style.transform = 'scale(1.05)'; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'; e.currentTarget.style.transform = 'scale(1)'; }}
                                 style={{
@@ -1161,7 +1174,7 @@ export default function OBEPage(): JSX.Element {
                               </button>
 
                               <button
-                                onClick={(e) => { e.stopPropagation(); window.location.href = `/obe/course/${encodeURIComponent(it.subject_code)}/lca`; }}
+                                onClick={(e) => { e.stopPropagation(); rememberSelectedTeachingAssignment(it); window.location.href = `/obe/course/${encodeURIComponent(it.subject_code)}/lca`; }}
                                 onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#3b82f6'; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
                                 style={{
@@ -1180,7 +1193,7 @@ export default function OBEPage(): JSX.Element {
                               </button>
 
                               <button
-                                onClick={(e) => { e.stopPropagation(); window.location.href = `/obe/course/${encodeURIComponent(it.subject_code)}/co_attainment`; }}
+                                onClick={(e) => { e.stopPropagation(); rememberSelectedTeachingAssignment(it); window.location.href = `/obe/course/${encodeURIComponent(it.subject_code)}/co_attainment`; }}
                                 onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#3b82f6'; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
                                 style={{

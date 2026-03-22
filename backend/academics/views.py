@@ -380,10 +380,24 @@ class TeachingAssignmentStudentsView(APIView):
                     'section': section_name,
                 })
 
-        # fallback: include legacy StudentProfile.section entries if none found (section-based only)
-        if not students and getattr(ta, 'section', None) is not None:
+        # Also include legacy StudentProfile.section entries (section-based only).
+        # IMPORTANT: do this even when StudentSectionAssignment already returned rows,
+        # because some deployments still have students mapped only via the legacy
+        # StudentProfile.section field (e.g., bulk imports that bypass signals).
+        if getattr(ta, 'section', None) is not None:
+            try:
+                existing_ids = {int(r.get('id')) for r in students if isinstance(r, dict) and r.get('id') is not None}
+            except Exception:
+                existing_ids = set()
+
             sp_qs = StudentProfile.objects.filter(section=ta.section).exclude(status__in=['INACTIVE', 'DEBAR']).select_related('user')
             for sp in sp_qs:
+                try:
+                    sid = int(sp.id)
+                except Exception:
+                    continue
+                if sid in existing_ids:
+                    continue
                 u = getattr(sp, 'user', None)
                 students.append({
                     'id': sp.id,
@@ -1885,17 +1899,36 @@ class HODStaffListView(APIView):
         staff_profile = getattr(user, 'staff_profile', None)
         if not staff_profile:
             return Response({'results': []})
+        perms = get_user_permissions(user)
         dept_ids = get_user_effective_departments(user)
-        # optionally allow department param
+
+        # optionally allow department param; for globally-authorized users this
+        # can be ANY department, otherwise it must be one of the user's
+        # effective departments.
         dept_param = request.query_params.get('department')
-        if dept_param:
-            try:
-                dept_id = int(dept_param)
-                if dept_id not in dept_ids:
+        try:
+            dept_filter = int(dept_param) if dept_param else None
+        except Exception:
+            dept_filter = None
+
+        global_access = (
+            user.is_superuser
+            or ('academics.view_all_staff' in perms)
+            or ('academics.view_all_departments' in perms)
+            or ('academics.assign_advisor' in perms)
+        )
+
+        if global_access:
+            from .models import Department
+            if dept_filter:
+                dept_ids = [dept_filter]
+            else:
+                dept_ids = list(Department.objects.values_list('id', flat=True))
+        else:
+            if dept_filter:
+                if dept_filter not in (dept_ids or []):
                     return Response({'results': []})
-                dept_ids = [dept_id]
-            except Exception:
-                pass
+                dept_ids = [dept_filter]
         # include staff whose `department` FK matches OR who have an active
         # StaffDepartmentAssignment pointing to the department
         from django.db.models import Q
@@ -2678,7 +2711,7 @@ class AdvisorStaffListView(APIView):
         except Exception:
             dept_filter = None
 
-        if 'academics.view_all_staff' in perms or user.is_staff:
+        if ('academics.view_all_staff' in perms) or ('academics.view_all_departments' in perms) or user.is_staff:
             staff_qs = StaffProfile.objects.all().select_related('user')
             if dept_filter:
                 staff_qs = staff_qs.filter(
@@ -2829,7 +2862,157 @@ class StaffAssignedSubjectsView(APIView):
             except Exception:
                 pass
         ser = TeachingAssignmentInfoSerializer(qs, many=True)
-        return Response({'results': ser.data})
+
+        # Also include subject batch assignments (StudentSubjectBatch.staff=target).
+        # This ensures staff who are assigned only to a batch (not the main subject)
+        # still see the subject in their Assigned Subjects page with batch reference.
+        results = list(ser.data)
+        try:
+            from academics.models import StudentSubjectBatch
+            from timetable.models import TimetableAssignment
+            from academics.models import AcademicYear
+
+            active_ay = None
+            try:
+                active_ay = AcademicYear.objects.filter(is_active=True).order_by('-id').first()
+            except Exception:
+                active_ay = None
+
+            bqs = StudentSubjectBatch.objects.filter(
+                staff=target,
+                is_active=True,
+                curriculum_row__isnull=False,
+            ).select_related(
+                'curriculum_row',
+                'curriculum_row__department',
+                'curriculum_row__semester',
+                'section',
+                'academic_year',
+            )
+            if active_ay:
+                bqs = bqs.filter(academic_year=active_ay)
+
+            # Index existing results by (curriculum_row_id, section_id) so we can attach
+            # batch refs without mixing batches across multiple sections.
+            by_key: dict = {}
+            for r in results:
+                try:
+                    cid = r.get('curriculum_row_id')
+                    if cid is None:
+                        continue
+                    sid = r.get('section_id')
+                    sid_int = int(sid) if sid is not None else None
+                    key = (int(cid), sid_int)
+                    by_key.setdefault(key, []).append(r)
+                except Exception:
+                    continue
+
+            def _infer_batch_section(sb_obj):
+                section_id = None
+                section_name = None
+
+                try:
+                    if getattr(sb_obj, 'section_id', None):
+                        section_id = getattr(sb_obj, 'section_id', None)
+                        try:
+                            section_name = getattr(getattr(sb_obj, 'section', None), 'name', None)
+                        except Exception:
+                            section_name = None
+                        return section_id, section_name
+                except Exception:
+                    section_id = None
+                    section_name = None
+
+                try:
+                    ta = TimetableAssignment.objects.filter(subject_batch=sb_obj, section__isnull=False).select_related('section').first()
+                    if ta and getattr(ta, 'section', None):
+                        section_id = getattr(ta.section, 'id', None)
+                        section_name = getattr(ta.section, 'name', None)
+                        return section_id, section_name
+                except Exception:
+                    pass
+
+                try:
+                    st = sb_obj.students.select_related('section').first()
+                    if st and getattr(st, 'section', None):
+                        section_id = getattr(st.section, 'id', None)
+                        section_name = getattr(st.section, 'name', None)
+                        return section_id, section_name
+                except Exception:
+                    pass
+
+                return None, None
+
+            for sb in bqs:
+                try:
+                    cr = getattr(sb, 'curriculum_row', None)
+                    if not cr:
+                        continue
+
+                    batch_info = {'id': sb.pk, 'name': getattr(sb, 'name', None)}
+
+                    section_id, section_name = _infer_batch_section(sb)
+
+                    # If the subject already exists (as a TeachingAssignment), attach the batch
+                    # only to the matching section row.
+                    key = (int(cr.pk), int(section_id) if section_id is not None else None)
+                    existing_rows = by_key.get(key)
+                    if not existing_rows and section_id is None:
+                        existing_rows = by_key.get((int(cr.pk), None))
+                    if existing_rows:
+                        for existing in existing_rows:
+                            lst = existing.get('subject_batches')
+                            if not isinstance(lst, list):
+                                lst = []
+                            if not any(int(x.get('id')) == int(sb.pk) for x in lst if isinstance(x, dict) and x.get('id') is not None):
+                                lst.append(batch_info)
+                            existing['subject_batches'] = lst
+                        continue
+
+                    # Otherwise create a minimal row so the batch-staff can still see the subject.
+
+                    dept_obj = None
+                    try:
+                        dept = getattr(cr, 'department', None)
+                        if dept:
+                            dept_obj = {
+                                'id': getattr(dept, 'id', None),
+                                'code': getattr(dept, 'code', None),
+                                'name': getattr(dept, 'name', None),
+                                'short_name': getattr(dept, 'short_name', None),
+                            }
+                    except Exception:
+                        dept_obj = None
+
+                    sem_num = None
+                    try:
+                        sem_num = getattr(getattr(cr, 'semester', None), 'number', None)
+                    except Exception:
+                        sem_num = None
+
+                    results.append({
+                        'id': -int(sb.pk),
+                        'subject_code': getattr(cr, 'course_code', None),
+                        'subject_name': getattr(cr, 'course_name', None),
+                        'class_type': 'BATCH',
+                        'section_name': section_name,
+                        'section_id': section_id,
+                        'elective_subject_id': None,
+                        'elective_subject_name': None,
+                        'curriculum_row_id': getattr(cr, 'pk', None),
+                        'batch': None,
+                        'semester': sem_num,
+                        'academic_year': getattr(getattr(sb, 'academic_year', None), 'name', None),
+                        'department': dept_obj,
+                        'subject_batches': [batch_info],
+                    })
+                    by_key.setdefault(key, []).append(results[-1])
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        return Response({'results': results})
 
 
 class IQACCourseTeachingMapView(APIView):
@@ -2954,9 +3137,25 @@ class SubjectBatchViewSet(viewsets.ModelViewSet):
             return []
         from .models import StudentSubjectBatch
         # staff sees only their own batches; superusers can see all
-        qs = StudentSubjectBatch.objects.select_related('staff', 'created_by', 'academic_year').prefetch_related('students')
+        qs = StudentSubjectBatch.objects.select_related('staff', 'created_by', 'academic_year', 'section').prefetch_related('students')
         # allow callers to request all batches (useful for timetable editors)
         include_all = str(self.request.query_params.get('include_all') or '').lower() in ('1', 'true', 'yes')
+
+        # optional filter: section_id (critical for multi-section subjects)
+        section_id = self.request.query_params.get('section_id') or self.request.query_params.get('section')
+        section_id_int = None
+        if section_id not in (None, '', 'null'):
+            try:
+                section_id_int = int(section_id)
+                qs = qs.filter(section_id=section_id_int)
+            except Exception:
+                section_id_int = None
+
+        # Only superusers can truly include_all without a section filter.
+        # For non-superusers, include_all is honored only when section_id is provided.
+        if include_all and (not user.is_superuser) and not section_id_int:
+            include_all = False
+
         if not user.is_superuser and not include_all:
             # Show batches created by this staff OR assigned to this staff
             qs = qs.filter(Q(staff=staff_profile) | Q(created_by=staff_profile))

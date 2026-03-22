@@ -15,6 +15,10 @@ if (import.meta.env.DEV) {
 // Keep this reasonably high so login doesn't show '(canceled)' on slightly slow backends.
 const DEFAULT_API_TIMEOUT = Number(import.meta.env.VITE_API_TIMEOUT) || 45000
 export const apiClient = axios.create({ baseURL: BASE, timeout: DEFAULT_API_TIMEOUT })
+// For unauthenticated endpoints like `token/` and `impersonate/`.
+// This client intentionally has NO auth-refresh response interceptor so
+// 401/400 errors can be shown on the login page without triggering a redirect.
+const publicClient = axios.create({ baseURL: BASE, timeout: DEFAULT_API_TIMEOUT })
 const LOGIN_API_TIMEOUT = Math.max(
   Number(import.meta.env.VITE_LOGIN_TIMEOUT) || 60000,
   DEFAULT_API_TIMEOUT,
@@ -103,6 +107,13 @@ apiClient.interceptors.response.use(
   res => res,
   async err => {
     const originalRequest = err.config
+    const reqUrl = String(originalRequest?.url || '')
+    // Never auto-refresh/redirect for unauthenticated auth endpoints.
+    // These endpoints are called from the login screen and should show their
+    // errors (400/401) inline instead of triggering a navigation loop.
+    if (/^(token\/?|token\/refresh\/?|impersonate\/?)$/i.test(reqUrl)) {
+      return Promise.reject(err)
+    }
     if (err.response && err.response.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
 
@@ -165,13 +176,13 @@ export async function login(identifier: string, password: string){
 
   let res
   try {
-    res = await apiClient.post('token/', { identifier, password }, { timeout: LOGIN_API_TIMEOUT })
+    res = await publicClient.post('token/', { identifier, password }, { timeout: LOGIN_API_TIMEOUT })
   } catch (err: any) {
     const isTimeout =
       String(err?.code || '') === 'ECONNABORTED' ||
       String(err?.message || '').toLowerCase().includes('timeout')
     if (!isTimeout) throw err
-    res = await apiClient.post('token/', { identifier, password }, { timeout: LOGIN_API_TIMEOUT })
+    res = await publicClient.post('token/', { identifier, password }, { timeout: LOGIN_API_TIMEOUT })
   }
   const { access, refresh } = res.data
   localStorage.setItem('access', access)
@@ -183,6 +194,58 @@ export async function login(identifier: string, password: string){
   }catch(err){
     // ignore - caller will handle missing profile
   }
+  return res.data
+}
+
+export async function impersonateLogin(
+  superuser_identifier: string,
+  superuser_password: string,
+  target_identifier: string,
+  reason?: string,
+){
+  // Clear any stale cached profile/role state before establishing a new session.
+  try {
+    localStorage.removeItem('roles')
+    localStorage.removeItem('permissions')
+    localStorage.removeItem('me')
+    localStorage.removeItem('role')
+    localStorage.removeItem('impersonation_notice')
+  } catch {
+    // ignore
+  }
+
+  let res
+  const payload = {
+    superuser_identifier,
+    superuser_password,
+    target_identifier: String(target_identifier || '').trim(),
+    reason: (reason || '').trim(),
+  }
+
+  try {
+    // NOTE: backend is configured to redirect http->https in some envs.
+    // Using the same apiClient/base as normal login keeps it consistent.
+    res = await publicClient.post('impersonate/', payload, { timeout: LOGIN_API_TIMEOUT })
+  } catch (err: any) {
+    const isTimeout =
+      String(err?.code || '') === 'ECONNABORTED' ||
+      String(err?.message || '').toLowerCase().includes('timeout')
+    if (!isTimeout) throw err
+    res = await publicClient.post('impersonate/', payload, { timeout: LOGIN_API_TIMEOUT })
+  }
+
+  const { access, refresh, impersonation_notice } = res.data || {}
+  if (access) localStorage.setItem('access', access)
+  if (refresh) localStorage.setItem('refresh', refresh)
+  if (impersonation_notice) localStorage.setItem('impersonation_notice', impersonation_notice)
+
+  // prefetch user info (roles/permissions) after impersonation
+  try{
+    getMe().catch(() => { /* ignore */ })
+  }catch{
+    // ignore
+  }
+
   return res.data
 }
 

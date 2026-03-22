@@ -17,6 +17,80 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _get_student_core_department_id(student_profile) -> int | None:
+    """Return the student's core/home department id when available.
+
+    Priority:
+    1) StudentProfile.home_department_id
+    2) Active SECONDARY section's department (core-dept section mapping)
+    """
+    try:
+        core_id = getattr(student_profile, 'home_department_id', None)
+        if core_id:
+            return int(core_id)
+    except Exception:
+        core_id = None
+
+    try:
+        from academics.models import StudentSectionAssignment
+
+        sec_assign = (
+            StudentSectionAssignment.objects.filter(
+                student=student_profile,
+                end_date__isnull=True,
+                section_type=StudentSectionAssignment.SECTION_TYPE_SECONDARY,
+            )
+            .select_related('section__batch__course__department', 'section__batch__department')
+            .order_by('-start_date')
+            .first()
+        )
+        if not sec_assign or not getattr(sec_assign, 'section', None):
+            return None
+
+        sec = sec_assign.section
+        try:
+            dept_id = getattr(getattr(getattr(sec, 'batch', None), 'course', None), 'department_id', None)
+            if dept_id:
+                return int(dept_id)
+        except Exception:
+            pass
+        try:
+            dept_id = getattr(getattr(sec, 'batch', None), 'department_id', None)
+            if dept_id:
+                return int(dept_id)
+        except Exception:
+            pass
+    except Exception:
+        return None
+
+    return None
+
+
+def _apply_shared_section_student_dept_filter(qs, sec, student_profile):
+    """In shared (Year-1 S&H) sections, hide other-department curriculum rows for students."""
+    try:
+        # Only apply for shared sections where batch.course is NULL.
+        if getattr(getattr(sec, 'batch', None), 'course_id', None) is not None:
+            return qs
+        core_dept_id = _get_student_core_department_id(student_profile)
+        if not core_dept_id:
+            return qs
+        allowed = {
+            core_dept_id,
+            getattr(sec, 'managing_department_id', None),
+            getattr(getattr(sec, 'batch', None), 'department_id', None),
+        }
+        allowed_ids = [int(x) for x in allowed if x]
+        if not allowed_ids:
+            return qs
+        return qs.filter(
+            Q(curriculum_row__isnull=True) |
+            Q(curriculum_row__department_id__in=allowed_ids)
+        )
+    except Exception:
+        return qs
+
+
 class CurriculumBySectionView(APIView):
     permission_classes = (IsAuthenticated,)
 
@@ -203,51 +277,59 @@ class SectionTimetableView(APIView):
             return Response({'results': []})
 
         # collect assignments for this section
-        qs = TimetableAssignment.objects.select_related('period', 'staff', 'curriculum_row', 'subject_batch').filter(section=sec)
+        qs = TimetableAssignment.objects.select_related(
+            'period',
+            'staff',
+            'curriculum_row',
+            'subject_batch',
+            'subject_batch__staff',
+            'subject_batch__staff__user',
+        ).filter(section=sec)
         # If requesting student is a student profile, apply strict batch filtering:
-        # For subjects that have batch assignments, only show the student's specific batch
-        # For subjects that don't have batch assignments, show the unbatched assignments
+        # Show unbatched assignments for all students.
+        # Show batched assignments only when the student is a member of that batch.
+        # IMPORTANT: Do NOT hide an unbatched assignment just because the same subject
+        # has batch assignments in other periods.
         student_profile = getattr(request.user, 'student_profile', None)
         if student_profile:
-            from django.db.models import Q
-            
-            # Find curriculum rows that have batch assignments for this section
-            batched_curriculum_rows = TimetableAssignment.objects.filter(
-                section=sec, 
-                subject_batch__isnull=False
-            ).values_list('curriculum_row_id', flat=True).distinct()
-            
-            # Filter assignments based on batch logic:
-            # 1. For batched subjects: only show assignments where student is in the batch
-            # 2. For non-batched subjects: show unbatched assignments
             qs = qs.filter(
-                Q(curriculum_row_id__in=batched_curriculum_rows, subject_batch__students=student_profile) |
-                Q(curriculum_row_id__isnull=True, subject_batch__isnull=True) |
-                Q(~Q(curriculum_row_id__in=batched_curriculum_rows), subject_batch__isnull=True)
+                Q(subject_batch__isnull=True) |
+                Q(subject_batch__students=student_profile)
             ).distinct()
+
+            # Shared-section (Year-1 S&H) multi-subject periods can include one subject
+            # per core department in the same slot. Students must only see their
+            # own core/home department variant.
+            qs = _apply_shared_section_student_dept_filter(qs, sec, student_profile)
         # group by day -> list of assignments with period index and times
         out = {}
         for a in qs:
             day = a.day
             lst = out.setdefault(day, [])
-            # determine staff to present: explicit staff on the assignment or
-            # resolve via active TeachingAssignment mapping if not set.
+            # Use only the explicitly assigned subject_batch - do not try to resolve
+            # batch information for unbatched assignments as they are meant for all students
+            sb = getattr(a, 'subject_batch', None)
+
+            # determine staff to present.
+            # Priority: batch staff (if present) > explicit staff on assignment > TeachingAssignment resolved staff
             staff_obj = None
-            if a.staff:
+            if sb and getattr(sb, 'staff', None):
+                staff_obj = sb.staff
+            elif a.staff:
                 staff_obj = a.staff
             else:
                 try:
                     from academics.models import TeachingAssignment
                     if getattr(a, 'curriculum_row', None) and getattr(a, 'section', None):
-                        ta = TeachingAssignment.objects.filter(section=a.section, curriculum_row=a.curriculum_row, is_active=True).select_related('staff').first()
+                        ta = TeachingAssignment.objects.filter(
+                            section=a.section,
+                            curriculum_row=a.curriculum_row,
+                            is_active=True,
+                        ).select_related('staff', 'staff__user').first()
                         if ta and getattr(ta, 'staff', None):
                             staff_obj = ta.staff
                 except Exception:
                     staff_obj = None
-
-            # Use only the explicitly assigned subject_batch - do not try to resolve
-            # batch information for unbatched assignments as they are meant for all students
-            sb = getattr(a, 'subject_batch', None)
 
             # prefer elective subject display when applicable
             subj_text = a.subject_text
@@ -367,6 +449,17 @@ class SectionTimetableView(APIView):
                         new_batch_id = new_entry.get('subject_batch', {}).get('id') if new_entry.get('subject_batch') else None
                         exist_curriculum_id = exist.get('curriculum_row', {}).get('id') if exist.get('curriculum_row') else None
                         new_curriculum_id = new_entry.get('curriculum_row', {}).get('id') if new_entry.get('curriculum_row') else None
+
+                        # Student view: if a batched assignment exists for the same period+subject,
+                        # prefer the batched one and hide the unbatched one.
+                        if student_profile and exist_curriculum_id == new_curriculum_id:
+                            if exist_batch_id is None and new_batch_id is not None:
+                                lst[i] = new_entry
+                                replaced = True
+                                break
+                            if exist_batch_id is not None and new_batch_id is None:
+                                replaced = True
+                                break
                         
                         # If different batches or different curriculums, this is a separate assignment - don't replace
                         if exist_batch_id != new_batch_id or exist_curriculum_id != new_curriculum_id:
@@ -418,26 +511,27 @@ class SectionTimetableView(APIView):
             ).filter(
                 # Swap entries only show from today onwards; other specials show for the full week
                 ~Q(timetable__name__startswith='[SWAP]') | Q(date__gte=_today_sec)
-            ).select_related('timetable', 'period', 'staff', 'curriculum_row', 'subject_batch')
+            ).select_related(
+                'timetable',
+                'period',
+                'staff',
+                'staff__user',
+                'curriculum_row',
+                'subject_batch',
+                'subject_batch__staff',
+                'subject_batch__staff__user',
+            )
             # Filter special entries by student batch using the same strict logic
             # For subjects with batch assignments, only show the student's batch
             # For subjects without batch assignments, show unbatched entries
             if student_profile:
-                from django.db.models import Q
-                
-                # Find curriculum rows that have batch assignments for special entries in this section this week
-                batched_special_curriculum_rows = SpecialTimetableEntry.objects.filter(
-                    timetable__section=sec,
-                    is_active=True,
-                    date__gte=_week_mon, date__lte=_week_sun,
-                    subject_batch__isnull=False
-                ).values_list('curriculum_row_id', flat=True).distinct()
-                
                 special_qs = special_qs.filter(
-                    Q(curriculum_row_id__in=batched_special_curriculum_rows, subject_batch__students=student_profile) |
-                    Q(curriculum_row_id__isnull=True, subject_batch__isnull=True) |
-                    Q(~Q(curriculum_row_id__in=batched_special_curriculum_rows), subject_batch__isnull=True)
+                    Q(subject_batch__isnull=True) |
+                    Q(subject_batch__students=student_profile)
                 ).distinct()
+
+                # Apply the same shared-section dept filtering for specials.
+                special_qs = _apply_shared_section_student_dept_filter(special_qs, sec, student_profile)
             
             for e in special_qs:
                 try:
@@ -483,6 +577,26 @@ class SectionTimetableView(APIView):
                     # Use only the explicitly assigned subject_batch for special entries
                     sb = getattr(e, 'subject_batch', None)
 
+                    # determine staff for special entry (same priority as normal assignments)
+                    staff_obj = None
+                    if sb and getattr(sb, 'staff', None):
+                        staff_obj = sb.staff
+                    elif getattr(e, 'staff', None):
+                        staff_obj = e.staff
+                    else:
+                        try:
+                            from academics.models import TeachingAssignment
+                            if getattr(e, 'curriculum_row', None) and sec is not None:
+                                ta = TeachingAssignment.objects.filter(
+                                    section=sec,
+                                    curriculum_row=e.curriculum_row,
+                                    is_active=True,
+                                ).select_related('staff', 'staff__user').first()
+                                if ta and getattr(ta, 'staff', None):
+                                    staff_obj = ta.staff
+                        except Exception:
+                            staff_obj = None
+
                     lst.append({
                         'id': f"special-{getattr(e, 'id', None)}",
                         'period_index': getattr(e.period, 'index', None),
@@ -497,12 +611,12 @@ class SectionTimetableView(APIView):
                         'elective_subject_id': elective_id,
                         'subject_batch': {'id': sb.pk, 'name': getattr(sb, 'name', None)} if sb else None,
                         'staff': {
-                            'id': getattr(e.staff, 'pk', None), 
-                            'staff_id': getattr(e.staff, 'staff_id', None),
-                            'username': getattr(getattr(e.staff, 'user', None), 'username', None),
-                            'first_name': getattr(getattr(e.staff, 'user', None), 'first_name', ''),
-                            'last_name': getattr(getattr(e.staff, 'user', None), 'last_name', '')
-                        } if getattr(e, 'staff', None) else None,
+                            'id': getattr(staff_obj, 'pk', None),
+                            'staff_id': getattr(staff_obj, 'staff_id', None),
+                            'username': getattr(getattr(staff_obj, 'user', None), 'username', None),
+                            'first_name': getattr(getattr(staff_obj, 'user', None), 'first_name', ''),
+                            'last_name': getattr(getattr(staff_obj, 'user', None), 'last_name', ''),
+                        } if staff_obj else None,
                         'section': {'id': getattr(sec, 'pk', None), 'name': getattr(sec, 'name', None)} if sec else None,
                         'is_special': True,
                         'is_swap': (getattr(e.timetable, 'name', '') or '').startswith('[SWAP]'),
@@ -587,16 +701,95 @@ class SectionSubjectsStaffView(APIView):
             # fetch curriculum rows for the section
             from curriculum.models import CurriculumDepartment, ElectiveSubject
             from django.db.models import Q
+            from academics.models import AcademicYear
+
+            # For shared (S&H Year-1) sections, teaching assignments for dept-core
+            # subjects live on each student's SECONDARY (core-dept) section.
+            # We'll aggregate staff across those secondary sections.
+            section_ids_for_teaching_assignments = [sec.id]
+
+            active_ay = AcademicYear.objects.filter(is_active=True).order_by('-id').first()
 
             # Shared section (S&H-type): derive dept curriculum from enrolled students' home depts
             if getattr(sec.batch, 'course_id', None) is None:
                 from academics.models import StudentSectionAssignment
                 home_dept_ids = list(
                     StudentSectionAssignment.objects.filter(
-                        section=sec, end_date__isnull=True,
+                        section=sec,
+                        end_date__isnull=True,
+                        section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
                         student__home_department__isnull=False,
                     ).values_list('student__home_department_id', flat=True).distinct()
                 )
+
+                # Legacy fallback: if PRIMARY assignments are missing, infer student IDs
+                # from StudentProfile.section and read their home_department.
+                if not home_dept_ids:
+                    try:
+                        from academics.models import StudentProfile
+                        home_dept_ids = list(
+                            StudentProfile.objects.filter(
+                                section=sec,
+                                home_department__isnull=False,
+                            ).values_list('home_department_id', flat=True).distinct()
+                        )
+                    except Exception:
+                        home_dept_ids = []
+
+                try:
+                    primary_student_ids = list(
+                        StudentSectionAssignment.objects.filter(
+                            section=sec,
+                            end_date__isnull=True,
+                            section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
+                        ).values_list('student_id', flat=True).distinct()
+                    )
+                    # Fallback for legacy data: some installs may not have
+                    # StudentSectionAssignment PRIMARY rows; rely on the
+                    # canonical StudentProfile.section link instead.
+                    if not primary_student_ids:
+                        try:
+                            from academics.models import StudentProfile
+                            primary_student_ids = list(
+                                StudentProfile.objects.filter(section=sec).values_list('id', flat=True).distinct()
+                            )
+                        except Exception:
+                            primary_student_ids = []
+                    if primary_student_ids:
+                        secondary_section_ids = list(
+                            StudentSectionAssignment.objects.filter(
+                                student_id__in=primary_student_ids,
+                                end_date__isnull=True,
+                                section_type=StudentSectionAssignment.SECTION_TYPE_SECONDARY,
+                            ).values_list('section_id', flat=True).distinct()
+                        )
+                        if secondary_section_ids:
+                            section_ids_for_teaching_assignments.extend(secondary_section_ids)
+                except Exception:
+                    pass
+
+                # Additional robustness: even if student-secondary mappings are missing,
+                # core-dept sections for the same batch_year/regulation+semester can be
+                # derived and used for TeachingAssignment lookup.
+                try:
+                    batch_year_id = getattr(sec.batch, 'batch_year_id', None)
+                    regulation_id = getattr(sec.batch, 'regulation_id', None)
+                    if batch_year_id and home_dept_ids:
+                        core_dept_section_ids = list(
+                            Section.objects.filter(
+                                semester__number=sem_num,
+                                batch__batch_year_id=batch_year_id,
+                            ).filter(
+                                Q(batch__course__department_id__in=home_dept_ids) |
+                                Q(batch__department_id__in=home_dept_ids)
+                            ).filter(
+                                Q(batch__regulation_id=regulation_id) if regulation_id else Q()
+                            ).values_list('id', flat=True).distinct()
+                        )
+                        if core_dept_section_ids:
+                            section_ids_for_teaching_assignments.extend(core_dept_section_ids)
+                except Exception:
+                    pass
                 # Also include managing_department (S&H) and batch.department
                 managing_dept_id2 = getattr(getattr(sec, 'managing_department', None), 'pk', None)
                 batch_dept_id2 = None
@@ -626,12 +819,68 @@ class SectionSubjectsStaffView(APIView):
                     return Response({'results': []})
                 qs = CurriculumDepartment.objects.filter(department=dept, semester__number=sem_num)
             # build a map from curriculum_row id -> staff (from TeachingAssignment)
-            staff_map = {}
             from academics.models import TeachingAssignment
-            tas = TeachingAssignment.objects.filter(section=sec, is_active=True).select_related('staff__user', 'curriculum_row', 'elective_subject')
+
+            def _staff_display(sp):
+                try:
+                    if not sp:
+                        return None
+                    u = getattr(sp, 'user', None)
+                    if u:
+                        full = (u.get_full_name() or '').strip()
+                        if full:
+                            return full
+                        if getattr(u, 'username', None):
+                            return u.username
+                    return getattr(sp, 'staff_id', None) or None
+                except Exception:
+                    return None
+
+            def _keys_for_curriculum(cd):
+                if not cd:
+                    return []
+                keys = []
+                code = getattr(cd, 'course_code', None)
+                if code:
+                    keys.append(f'code:{str(code).strip().upper()}')
+                name = (getattr(cd, 'course_name', None) or '').strip().lower()
+                if name:
+                    keys.append(f'name:{name}')
+                # final fallback to pk to keep a stable key even if fields are missing
+                if not keys:
+                    keys.append(f'pk:{getattr(cd, "pk", None)}')
+                return keys
+
+            # Map subject -> set(staff names) using course_code/name so it works
+            # across departments (Program Core / shared curriculum rows) and
+            # also maps elective-subject teaching assignments back to the parent.
+            staff_by_key: dict = {}
+
+            tas = TeachingAssignment.objects.filter(
+                is_active=True,
+            ).filter(
+                Q(section_id__in=section_ids_for_teaching_assignments) | Q(section__isnull=True)
+            )
+            if active_ay is not None:
+                tas = tas.filter(academic_year=active_ay)
+            tas = tas.select_related('staff__user', 'curriculum_row', 'elective_subject', 'elective_subject__parent')
             for ta in tas:
-                if getattr(ta, 'curriculum_row', None) and getattr(ta, 'staff', None):
-                    staff_map[ta.curriculum_row.id] = getattr(getattr(ta.staff, 'user', None), 'username', None)
+                staff_name = _staff_display(getattr(ta, 'staff', None))
+                if not staff_name:
+                    continue
+
+                cr = getattr(ta, 'curriculum_row', None)
+                if cr is not None:
+                    for k in _keys_for_curriculum(cr):
+                        staff_by_key.setdefault(k, set()).add(staff_name)
+
+                # Electives / dept-core teaching assignments may be stored against
+                # the elective_subject; map them to the parent curriculum row too.
+                es = getattr(ta, 'elective_subject', None)
+                parent = getattr(es, 'parent', None) if es is not None else None
+                if parent is not None:
+                    for k2 in _keys_for_curriculum(parent):
+                        staff_by_key.setdefault(k2, set()).add(staff_name)
 
             # also consider direct timetable assignments that may override
             from .models import TimetableAssignment
@@ -639,10 +888,22 @@ class SectionSubjectsStaffView(APIView):
             for a in tassigns:
                 cr = getattr(a, 'curriculum_row', None)
                 if cr is not None:
-                    if getattr(a, 'staff', None):
-                        staff_map[cr.id] = getattr(getattr(a.staff, 'user', None), 'username', None)
+                    staff_name = _staff_display(getattr(a, 'staff', None))
+                    if staff_name:
+                        for k in _keys_for_curriculum(cr):
+                            staff_by_key.setdefault(k, set()).add(staff_name)
 
             for c in qs:
+                staff_val = None
+                try:
+                    merged = set()
+                    for k in _keys_for_curriculum(c):
+                        if k in staff_by_key:
+                            merged |= set(staff_by_key.get(k) or set())
+                    if merged:
+                        staff_val = ', '.join(sorted(merged))
+                except Exception:
+                    staff_val = None
                 results.append({
                     'id': c.id,
                     'course_code': c.course_code,
@@ -650,7 +911,7 @@ class SectionSubjectsStaffView(APIView):
                     'regulation': c.regulation,
                     'class_type': c.class_type,
                     'is_elective': c.is_elective,
-                    'staff': staff_map.get(c.id)
+                    'staff': staff_val
                 })
 
             # --- Elective subjects (ElectiveSubject rows, keyed by their own pk) ---
@@ -662,11 +923,13 @@ class SectionSubjectsStaffView(APIView):
                 elective_subject__semester__number=sem_num,
                 is_active=True,
             ).filter(
-                Q(section=sec) | Q(section__isnull=True)
+                Q(section_id__in=section_ids_for_teaching_assignments) | Q(section__isnull=True)
             ).select_related('staff__user', 'elective_subject')
+            if active_ay is not None:
+                elective_tas = elective_tas.filter(academic_year=active_ay)
             for ta in elective_tas:
                 if ta.elective_subject and ta.staff:
-                    staff_name = getattr(getattr(ta.staff, 'user', None), 'username', None)
+                    staff_name = _staff_display(ta.staff)
                     if staff_name:
                         elective_staff_map[ta.elective_subject_id] = staff_name
 
@@ -693,7 +956,7 @@ class SectionSubjectsStaffView(APIView):
             for a in tassigns:
                 if not getattr(a, 'curriculum_row', None) and (a.subject_text or getattr(a, 'staff', None)):
                     key = f"txt-{(a.subject_text or '')[:100]}"
-                    results.append({'id': key, 'course_code': None, 'course_name': a.subject_text, 'staff': getattr(getattr(a.staff, 'user', None), 'username', None)})
+                    results.append({'id': key, 'course_code': None, 'course_name': a.subject_text, 'staff': _staff_display(getattr(a, 'staff', None))})
 
         except Exception:
             return Response({'results': []})
@@ -1385,7 +1648,10 @@ class TimetableAssignmentViewSet(viewsets.ModelViewSet):
             pass
 
         # accept slot_id/section_id/academic_year_id in payload
-        # if an assignment already exists for (section, day, period) -> update it (upsert)
+        # If an assignment already exists for (section, day, period) -> update it (upsert)
+        # Historically we upserted even for unbatched assignments, which prevented
+        # assigning multiple subjects in the same period. To support multi-subject
+        # per slot, we only upsert when the *same subject* is being re-saved.
         sec_id = data.get('section_id') or data.get('section')
         period_id = data.get('period_id') or data.get('period')
         day = data.get('day')
@@ -1403,9 +1669,36 @@ class TimetableAssignmentViewSet(viewsets.ModelViewSet):
                 except Exception:
                     sb_id = None
 
+                # Determine the incoming subject identity (if any)
+                incoming_curriculum_id = None
+                incoming_subject_text = None
+                try:
+                    if data.get('curriculum_row') not in (None, ''):
+                        incoming_curriculum_id = int(data.get('curriculum_row'))
+                except Exception:
+                    incoming_curriculum_id = None
+                try:
+                    if data.get('subject_text') not in (None, ''):
+                        incoming_subject_text = str(data.get('subject_text')).strip() or None
+                except Exception:
+                    incoming_subject_text = None
+
                 if sb_id is None:
-                    # match unbatched assignment
-                    existing = TimetableAssignment.objects.filter(section_id=sec_id, period_id=period_id, day=day, subject_batch__isnull=True).first()
+                    # match unbatched assignment ONLY if it's the same subject
+                    existing_qs = TimetableAssignment.objects.filter(
+                        section_id=sec_id,
+                        period_id=period_id,
+                        day=day,
+                        subject_batch__isnull=True,
+                    )
+                    if incoming_curriculum_id is not None:
+                        existing_qs = existing_qs.filter(curriculum_row_id=incoming_curriculum_id)
+                    elif incoming_subject_text is not None:
+                        existing_qs = existing_qs.filter(subject_text=incoming_subject_text)
+                    else:
+                        # No subject identity provided; do not upsert.
+                        existing_qs = TimetableAssignment.objects.none()
+                    existing = existing_qs.first()
                 else:
                     existing = TimetableAssignment.objects.filter(section_id=sec_id, period_id=period_id, day=day, subject_batch_id=sb_id).first()
                 if existing:
@@ -2008,8 +2301,10 @@ class SpecialTimetableEntryViewSet(viewsets.ModelViewSet):
                 return qs.filter(staff=staff_profile)
 
         if student_profile:
-            # Apply strict batch filtering for students: only show entries for subjects
-            # where the student is in the assigned batch, or unbatched subjects with no batch assignments
+            # Student view: include all unbatched entries, and include batched entries
+            # only when the student is a member of that batch.
+            # IMPORTANT: Do NOT hide an unbatched entry just because the same subject
+            # has batched entries elsewhere.
             try:
                 from academics.models import StudentSubjectBatch
                 sec = getattr(student_profile, 'section', None)
@@ -2019,19 +2314,15 @@ class SpecialTimetableEntryViewSet(viewsets.ModelViewSet):
                 # entries for the section
                 sec_q = qs.filter(timetable__section=sec)
                 
-                # Find curriculum rows that have batch assignments for special entries in this section
-                batched_curriculum_rows = SpecialTimetableEntry.objects.filter(
-                    timetable__section=sec,
-                    is_active=True,
-                    subject_batch__isnull=False
-                ).values_list('curriculum_row_id', flat=True).distinct()
-                
-                # Apply strict filtering
-                return sec_q.filter(
-                    Q(curriculum_row_id__in=batched_curriculum_rows, subject_batch__students=student_profile) |
-                    Q(curriculum_row_id__isnull=True, subject_batch__isnull=True) |
-                    Q(~Q(curriculum_row_id__in=batched_curriculum_rows), subject_batch__isnull=True)
+                sec_q = sec_q.filter(
+                    Q(subject_batch__isnull=True) |
+                    Q(subject_batch__students=student_profile)
                 ).distinct()
+
+                # Shared-section (Year-1 S&H) entries may include per-department variants.
+                # Filter to the student's core/home department.
+                sec_q = _apply_shared_section_student_dept_filter(sec_q, sec, student_profile)
+                return sec_q
             except Exception:
                 return qs.filter(timetable__section=getattr(student_profile, 'section', None))
 

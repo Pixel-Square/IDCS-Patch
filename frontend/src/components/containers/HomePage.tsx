@@ -30,12 +30,18 @@ export default function HomePage({ user }: HomePageProps) {
               )}
             </div>
           ) : (
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+            <div className="flex flex-col gap-3 justify-center items-center">
               <a
                 href="/login"
                 className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105"
               >
                 Get Started
+              </a>
+              <a
+                href="/credits"
+                className="text-sm text-gray-600 hover:text-gray-900 underline underline-offset-4"
+              >
+                Team credits
               </a>
             </div>
           )}

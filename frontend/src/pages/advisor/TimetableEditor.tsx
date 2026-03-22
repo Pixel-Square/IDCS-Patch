@@ -1305,7 +1305,8 @@ export default function TimetableEditor(){
     setEditingAvailableBatches([])
     if(!curriculumId) return []
     try{
-      const bres = await fetchWithAuth(`/api/academics/subject-batches/?curriculum_row_id=${curriculumId}&page_size=0&include_all=1`)
+      const secParam = sectionId ? `&section_id=${sectionId}` : ''
+      const bres = await fetchWithAuth(`/api/academics/subject-batches/?curriculum_row_id=${curriculumId}&page_size=0&include_all=1${secParam}`)
       if(bres.ok){
         const bd = await bres.json()
         const list = bd.results || bd || []

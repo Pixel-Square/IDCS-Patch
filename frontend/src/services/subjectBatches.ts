@@ -4,6 +4,8 @@ export type SubjectBatch = {
   id: number
   name: string
   academic_year?: number
+  section?: { id: number; name?: string | null } | null
+  section_id?: number | null
   staff?: { id: number; user?: string; staff_id?: string; name?: string }
   created_by?: { id: number; user?: string; staff_id?: string; name?: string }
   curriculum_row?: { id: number; course_code?: string; course_name?: string }
@@ -25,6 +27,7 @@ export async function createSubjectBatch(payload: {
   student_ids?: number[]
   academic_year?: number
   curriculum_row_id?: number
+  section_id?: number
   staff_id?: number
 }){
   const res = await fetchWithAuth('/api/academics/subject-batches/', { method: 'POST', body: JSON.stringify(payload) })

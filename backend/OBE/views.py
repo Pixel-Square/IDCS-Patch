@@ -179,16 +179,36 @@ def _get_students_for_teaching_assignment(ta):
         if getattr(ta, 'section', None) is not None:
             s_qs = (
                 StudentSectionAssignment.objects.filter(section=ta.section, end_date__isnull=True)
+                .exclude(student__status__in=['INACTIVE', 'DEBAR'])
                 .select_related('student__user')
                 .order_by('student__reg_no')
             )
             for a in s_qs:
                 students.append(a.student)
 
-        # fallback: include legacy StudentProfile.section entries if none found
-        if not students and getattr(ta, 'section', None) is not None:
-            sp_qs = StudentProfile.objects.filter(section=ta.section).select_related('user').order_by('reg_no')
-            students = list(sp_qs)
+        # Also include legacy StudentProfile.section entries even when we already
+        # have students from StudentSectionAssignment, to avoid silently dropping
+        # students whose section assignment rows were never backfilled.
+        if getattr(ta, 'section', None) is not None:
+            try:
+                existing_ids = {int(getattr(s, 'id', None)) for s in students if getattr(s, 'id', None) is not None}
+            except Exception:
+                existing_ids = set()
+
+            sp_qs = (
+                StudentProfile.objects.filter(section=ta.section)
+                .exclude(status__in=['INACTIVE', 'DEBAR'])
+                .select_related('user')
+                .order_by('reg_no')
+            )
+            for sp in sp_qs:
+                try:
+                    sid = int(getattr(sp, 'id', None))
+                except Exception:
+                    continue
+                if sid in existing_ids:
+                    continue
+                students.append(sp)
     except Exception:
         students = []
 
@@ -4964,11 +4984,60 @@ def cia1_marks(request, subject_id):
             tas = tas.filter(id=selected_ta.id)
             section_ids = [selected_ta.section_id]
         else:
-            # For OBE Master/IQAC, an invalid TA id should be a hard error (since they explicitly picked it).
-            if is_obe_master:
-                return Response({'detail': 'Teaching assignment not found for this course.'}, status=status.HTTP_404_NOT_FOUND)
-            # Otherwise ignore invalid/unowned TA id and use the user's own assignments instead.
-            section_ids = list(tas.values_list('section_id', flat=True).distinct())
+            # If the selected TA isn't present in the subject-filtered queryset (data mismatch),
+            # try resolving the TA by id directly. This prevents returning an empty roster
+            # with 200 OK when the UI explicitly selected a section.
+            fallback_ta = TeachingAssignment.objects.select_related(
+                'section', 'academic_year', 'curriculum_row', 'subject', 'staff',
+            ).filter(is_active=True, id=ta_id).first()
+
+            def _ta_matches_subject(ta_obj) -> bool:
+                try:
+                    want = str(subject_id or '').strip().upper()
+                    have = None
+                    try:
+                        have = getattr(getattr(ta_obj, 'subject', None), 'code', None)
+                    except Exception:
+                        have = None
+                    if not have:
+                        try:
+                            have = getattr(getattr(ta_obj, 'curriculum_row', None), 'course_code', None)
+                        except Exception:
+                            have = None
+                    have = str(have or '').strip().upper()
+                    return bool(want and have and want == have)
+                except Exception:
+                    return False
+
+            def _can_use_fallback_ta(ta_obj) -> bool:
+                if is_obe_master:
+                    return True
+                # HOD/ADVISOR: allow within department
+                if ('HOD' in role_names or 'ADVISOR' in role_names) and staff_profile and getattr(staff_profile, 'department_id', None):
+                    try:
+                        dept_id = getattr(staff_profile, 'department_id', None)
+                        ta_dept_id = getattr(getattr(getattr(getattr(ta_obj, 'section', None), 'batch', None), 'course', None), 'department_id', None)
+                        return dept_id is not None and ta_dept_id == dept_id
+                    except Exception:
+                        return False
+                # Staff: only their own TA
+                if staff_profile:
+                    try:
+                        return getattr(ta_obj, 'staff_id', None) == getattr(staff_profile, 'id', None)
+                    except Exception:
+                        return False
+                return False
+
+            if fallback_ta and _ta_matches_subject(fallback_ta) and _can_use_fallback_ta(fallback_ta):
+                selected_ta = fallback_ta
+                tas = TeachingAssignment.objects.select_related('section', 'academic_year', 'curriculum_row').filter(id=selected_ta.id)
+                section_ids = [selected_ta.section_id]
+            else:
+                # For OBE Master/IQAC, an invalid TA id should be a hard error (since they explicitly picked it).
+                if is_obe_master:
+                    return Response({'detail': 'Teaching assignment not found for this course.'}, status=status.HTTP_404_NOT_FOUND)
+                # Otherwise ignore invalid/unowned TA id and use the user's own assignments instead.
+                section_ids = list(tas.values_list('section_id', flat=True).distinct())
     else:
         section_ids = list(tas.values_list('section_id', flat=True).distinct())
 
@@ -5256,9 +5325,53 @@ def cia2_marks(request, subject_id):
             tas = tas.filter(id=selected_ta.id)
             section_ids = [selected_ta.section_id]
         else:
-            if is_obe_master:
-                return Response({'detail': 'Teaching assignment not found for this course.'}, status=status.HTTP_404_NOT_FOUND)
-            section_ids = list(tas.values_list('section_id', flat=True).distinct())
+            fallback_ta = TeachingAssignment.objects.select_related(
+                'section', 'academic_year', 'curriculum_row', 'subject', 'staff',
+            ).filter(is_active=True, id=ta_id).first()
+
+            def _ta_matches_subject(ta_obj) -> bool:
+                try:
+                    want = str(subject_id or '').strip().upper()
+                    have = None
+                    try:
+                        have = getattr(getattr(ta_obj, 'subject', None), 'code', None)
+                    except Exception:
+                        have = None
+                    if not have:
+                        try:
+                            have = getattr(getattr(ta_obj, 'curriculum_row', None), 'course_code', None)
+                        except Exception:
+                            have = None
+                    have = str(have or '').strip().upper()
+                    return bool(want and have and want == have)
+                except Exception:
+                    return False
+
+            def _can_use_fallback_ta(ta_obj) -> bool:
+                if is_obe_master:
+                    return True
+                if ('HOD' in role_names or 'ADVISOR' in role_names) and staff_profile and getattr(staff_profile, 'department_id', None):
+                    try:
+                        dept_id = getattr(staff_profile, 'department_id', None)
+                        ta_dept_id = getattr(getattr(getattr(getattr(ta_obj, 'section', None), 'batch', None), 'course', None), 'department_id', None)
+                        return dept_id is not None and ta_dept_id == dept_id
+                    except Exception:
+                        return False
+                if staff_profile:
+                    try:
+                        return getattr(ta_obj, 'staff_id', None) == getattr(staff_profile, 'id', None)
+                    except Exception:
+                        return False
+                return False
+
+            if fallback_ta and _ta_matches_subject(fallback_ta) and _can_use_fallback_ta(fallback_ta):
+                selected_ta = fallback_ta
+                tas = TeachingAssignment.objects.select_related('section', 'academic_year', 'curriculum_row').filter(id=selected_ta.id)
+                section_ids = [selected_ta.section_id]
+            else:
+                if is_obe_master:
+                    return Response({'detail': 'Teaching assignment not found for this course.'}, status=status.HTTP_404_NOT_FOUND)
+                section_ids = list(tas.values_list('section_id', flat=True).distinct())
     else:
         section_ids = list(tas.values_list('section_id', flat=True).distinct())
 

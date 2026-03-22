@@ -89,6 +89,7 @@ import RequestsPage from './pages/requests/RequestsPage';
 import ProfileImageUpdateRequestsPage from './pages/requests/ProfileImageUpdateRequestsPage';
 import MyProposalsPage from './pages/events/MyProposalsPage';
 import ProposalApprovalPage from './pages/events/ProposalApprovalPage';
+import CreditsPage from './pages/CreditsPage';
 
 type RoleObj = { name: string };
 type Me = {
@@ -222,6 +223,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/credits" element={<CreditsPage />} />
                 <Route path="/profile" element={<ProfilePage user={user} />} />
                 <Route
                   path="/settings"
@@ -586,6 +588,7 @@ export default function App() {
         <div className="pt-16">
           <Routes>
             <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <HomePage user={user} />} />
+            <Route path="/credits" element={<CreditsPage />} />
             <Route path="*" element={user ? <Navigate to="/dashboard" replace /> : <HomePage user={user} />} />
           </Routes>
         </div>

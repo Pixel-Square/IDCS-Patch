@@ -7,6 +7,7 @@ export type AssignedSubject = {
   section_name?: string | null
   batch?: string | null
   semester?: number | null
+  subject_batches?: Array<{ id: number; name?: string | null }> | null
   department?: {
     id: number
     code?: string | null

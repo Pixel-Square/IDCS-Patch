@@ -4,7 +4,7 @@ import fetchWithAuth from '../../services/fetchAuth'
 import { getCachedMe } from '../../services/auth'
 
 type Section = { id: number; name: string; batch: string; batch_regulation?: { id: number; code: string; name?: string } | null; department_id?: number; department_short_name?: string; semester?: number; department?: { id: number; code?: string } }
-type Staff = { id: number; user: string | { username?: string; first_name?: string; last_name?: string }; staff_id: string; department?: { id?: number; code?: string; name?: string } }
+type Staff = { id: number; user: string | { username?: string; first_name?: string; last_name?: string }; staff_id: string; department?: number | { id?: number; code?: string; name?: string } }
 type CurriculumRow = { id: number; course_code?: string; course_name?: string; department?: { id: number; code?: string }; semester?: number; regulation?: string; home_dept_codes?: string[] }
 type TeachingAssignment = { 
   id: number
@@ -91,7 +91,8 @@ export default function TeachingAssignmentsPage(){
     }
     // Filter staff to only those from the selected department
     return (staff || []).filter(s => {
-      return s.department && s.department.id === selectedDept
+      const deptId = typeof s.department === 'number' ? s.department : (s.department?.id ?? null)
+      return deptId === selectedDept
     })
   }
 
@@ -242,7 +243,7 @@ export default function TeachingAssignmentsPage(){
       const sres = await fetchWithAuth(sectionsEndpoint)
       const staffEndpoint = (canViewElectives || canAssignElectives) ? '/api/academics/hod-staff/?page_size=0' : '/api/academics/advisor-staff/?page_size=0'
       // fetch staff list optionally filtered by selected department
-      let staffRes = await fetchWithAuth(selectedDept && staffEndpoint.includes('hod-staff') ? `${staffEndpoint}&department=${selectedDept}` : staffEndpoint)
+      let staffRes = await fetchWithAuth(selectedDept ? `${staffEndpoint}&department=${selectedDept}` : staffEndpoint)
       // If hod-staff is forbidden for this token, gracefully fall back to advisor-staff
       if (staffRes.status === 403 && staffEndpoint.includes('hod-staff')) {
         console.warn('hod-staff returned 403 — falling back to advisor-staff endpoint')
@@ -433,7 +434,7 @@ export default function TeachingAssignmentsPage(){
     async function loadStaff(){
       try{
         const staffEndpoint = (canViewElectives || canAssignElectives) ? '/api/academics/hod-staff/?page_size=0' : '/api/academics/advisor-staff/?page_size=0'
-        const url = selectedDept && staffEndpoint.includes('hod-staff') ? `${staffEndpoint}&department=${selectedDept}` : staffEndpoint
+        const url = selectedDept ? `${staffEndpoint}&department=${selectedDept}` : staffEndpoint
         const res = await fetchWithAuth(url)
         let finalRes = res
         if (res.status === 403 && staffEndpoint.includes('hod-staff')) {
@@ -495,7 +496,7 @@ export default function TeachingAssignmentsPage(){
         // ONLY use top-level dept filter for staff (ignore elective section's own filter)
         const deptFilter = selectedDept;
         const staffEndpoint = (canViewElectives || canAssignElectives) ? '/api/academics/hod-staff/?page_size=0' : '/api/academics/advisor-staff/?page_size=0'
-        const url = deptFilter && staffEndpoint.includes('hod-staff') ? `${staffEndpoint}&department=${deptFilter}` : staffEndpoint
+        const url = deptFilter ? `${staffEndpoint}&department=${deptFilter}` : staffEndpoint
         const res = await fetchWithAuth(url)
         let finalRes = res
         if (res.status === 403 && staffEndpoint.includes('hod-staff')) {

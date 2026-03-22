@@ -858,6 +858,20 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
             if (!data) throw err;
           }
         }
+
+        // If the marks API responded but did not include any roster students,
+        // fall back to the selected TA roster so the table can still be filled.
+        if (data && Array.isArray((data as any).students) && ((data as any).students || []).length === 0) {
+          const taToUse = teachingAssignmentId ?? matchedTa?.id;
+          if (taToUse) {
+            try {
+              const taResp = await fetchTeachingAssignmentRoster(Number(taToUse));
+              data = { ...(data as any), students: taResp.students || [] };
+            } catch (err) {
+              console.warn('CIA marks roster was empty and TA roster fallback failed:', err);
+            }
+          }
+        }
         if (!mounted) return;
         const roster = (data.students || []).slice().sort((a, b) => {
           const an = String(a?.name || '').trim().toLowerCase();
@@ -1058,7 +1072,60 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
     return () => {
       mounted = false;
     };
-  }, [subjectId, assessmentKey, questions]);
+  }, [subjectId, assessmentKey, questions, teachingAssignmentId]);
+
+  // Backfill missing sheet rows whenever the roster changes.
+  // This prevents older drafts/local sheets from implicitly hiding newly-added students.
+  useEffect(() => {
+    if (!subjectId) return;
+    if (!students.length) return;
+
+    setSheet((prev) => {
+      const current = (prev.rowsByStudentId || {}) as Record<string, Cia1RowState>;
+      const merged: Record<string, Cia1RowState> = { ...current };
+      let changed = false;
+
+      for (const s of students) {
+        const key = String(s.id);
+        const existing = merged[key];
+        if (!existing) {
+          merged[key] = {
+            studentId: s.id,
+            reg_no: String((s as any).reg_no || ''),
+            absent: false,
+            absentKind: undefined,
+            q: Object.fromEntries(questions.map((q) => [q.key, ''])),
+          };
+          changed = true;
+          continue;
+        }
+
+        let rowChanged = false;
+        const nextQ: Record<string, number | ''> = { ...(existing.q || {}) };
+        for (const q of questions) {
+          if (!(q.key in nextQ)) {
+            nextQ[q.key] = '';
+            rowChanged = true;
+          }
+        }
+
+        const nextRegNo = existing.reg_no || String((s as any).reg_no || '');
+        if (nextRegNo !== existing.reg_no) rowChanged = true;
+
+        if (rowChanged) {
+          merged[key] = {
+            ...existing,
+            studentId: s.id,
+            reg_no: nextRegNo,
+            q: nextQ,
+          };
+          changed = true;
+        }
+      }
+
+      return changed ? { ...prev, rowsByStudentId: merged } : prev;
+    });
+  }, [subjectId, students, questions]);
 
   const totalsMax = useMemo(() => questions.reduce((sum, q) => sum + q.max, 0), [questions]);
   const questionCoMax = useMemo(() => {

@@ -3,10 +3,15 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserCreationForm, UserChangeForm
 from django.utils.html import format_html
 from .models import User, Role, UserRole, Permission, RolePermission, UserQuery, ProfileImageUpdateRequest
+from django.contrib import messages
 from academics.models import StudentProfile, StaffProfile, Section, Department
 from django import forms
 from django.core.exceptions import ValidationError
 from .models import validate_roles_for_user
+from .models_impersonation import (
+    SuperuserImpersonationLog,
+    SuperuserImpersonationPermission,
+)
 
 
 class CustomUserCreationForm(UserCreationForm):
@@ -743,12 +748,105 @@ class UserQueryAdmin(admin.ModelAdmin):
         return False
 
 
+
 @admin.register(ProfileImageUpdateRequest)
 class ProfileImageUpdateRequestAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'status', 'requested_at', 'reviewed_at', 'reviewed_by')
     list_filter = ('status', 'requested_at', 'reviewed_at')
     search_fields = ('user__username', 'user__email', 'reason', 'review_note')
     readonly_fields = ('requested_at', 'reviewed_at')
+
+
+# === Superuser Impersonation Admin ===
+
+@admin.register(SuperuserImpersonationLog)
+class SuperuserImpersonationLogAdmin(admin.ModelAdmin):
+    """Audit log for superuser impersonations."""
+    
+    list_display = (
+        'id',
+        'superuser',
+        'target_user',
+        'status',
+        'ip_address',
+        'created_at',
+    )
+    list_filter = ('status', 'created_at', 'superuser')
+    search_fields = (
+        'superuser__username',
+        'superuser__email',
+        'target_user__username',
+        'target_user__email',
+        'ip_address',
+        'reason',
+    )
+    readonly_fields = (
+        'superuser',
+        'target_user',
+        'status',
+        'ip_address',
+        'user_agent',
+        'reason',
+        'metadata',
+        'created_at',
+    )
+    fieldsets = (
+        ('Impersonation Details', {
+            'fields': ('superuser', 'target_user', 'status')
+        }),
+        ('Request Information', {
+            'fields': ('ip_address', 'user_agent')
+        }),
+        ('Context', {
+            'fields': ('reason', 'metadata', 'accessed_until')
+        }),
+        ('Timeline', {
+            'fields': ('created_at',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(SuperuserImpersonationPermission)
+class SuperuserImpersonationPermissionAdmin(admin.ModelAdmin):
+    """Manage which superusers can impersonate which users."""
+    
+    list_display = (
+        'superuser',
+        'can_impersonate_any',
+        'is_active',
+        'expires_at',
+        'updated_at',
+    )
+    list_filter = ('is_active', 'can_impersonate_any', 'updated_at')
+    search_fields = ('superuser__username', 'superuser__email', 'allowed_departments')
+    filter_horizontal = ('allowed_target_roles',)
+    
+    fieldsets = (
+        ('Superuser', {'fields': ('superuser',)}),
+        ('Impersonation Scope', {
+            'fields': ('can_impersonate_any', 'allowed_target_roles', 'allowed_departments'),
+            'description': 'If "Can impersonate any user" is checked, other restrictions are ignored.'
+        }),
+        ('Validity', {'fields': ('is_active', 'expires_at')}),
+        ('Metadata', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
+    )
+    
+    readonly_fields = ('created_at', 'updated_at')
+    
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(self.readonly_fields)
+        if obj:
+            readonly.append('superuser')
+        return readonly
 
 
 # Register any remaining accounts models without explicit admin classes above.

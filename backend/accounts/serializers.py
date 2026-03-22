@@ -2,6 +2,10 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import Role, UserRole, Permission, RolePermission, NotificationTemplate, UserQuery
 from rest_framework_simplejwt.tokens import RefreshToken
+from .serializers_impersonation import (
+    SuperuserImpersonationSerializer,
+    SuperuserImpersonationHistorySerializer,
+)
 
 from typing import Optional
 

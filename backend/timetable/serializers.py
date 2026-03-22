@@ -173,6 +173,17 @@ class TimetableAssignmentSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError('Selected subject batch does not belong to the chosen curriculum row')
             except Exception:
                 pass
+
+        # if a subject_batch is provided, ensure it belongs to this section (when batch.section is set)
+        if subject_batch and section:
+            try:
+                sb_section_id = getattr(subject_batch, 'section_id', None)
+                if sb_section_id is not None and int(sb_section_id) != int(getattr(section, 'id', 0) or 0):
+                    raise serializers.ValidationError('Selected subject batch does not belong to the chosen section')
+            except serializers.ValidationError:
+                raise
+            except Exception:
+                pass
         return attrs
 
     def create(self, validated_data):
@@ -251,6 +262,34 @@ class SpecialTimetableEntrySerializer(serializers.ModelSerializer):
             return None
         except Exception:
             return None
+
+    def validate(self, attrs):
+        # Keep existing behavior from base, then apply subject-batch/section safety.
+        attrs = super().validate(attrs)
+        subject_batch = attrs.get('subject_batch')
+        # resolve subject_batch if provided as id in initial_data
+        if 'subject_batch_id' in self.initial_data and not subject_batch:
+            try:
+                from academics.models import StudentSubjectBatch
+                sb_id = int(self.initial_data.get('subject_batch_id'))
+                subject_batch = StudentSubjectBatch.objects.filter(pk=sb_id).first()
+                if subject_batch:
+                    attrs['subject_batch'] = subject_batch
+            except Exception:
+                pass
+
+        try:
+            timetable = attrs.get('timetable')
+            section = getattr(timetable, 'section', None) if timetable else None
+            if subject_batch and section:
+                sb_section_id = getattr(subject_batch, 'section_id', None)
+                if sb_section_id is not None and int(sb_section_id) != int(getattr(section, 'id', 0) or 0):
+                    raise serializers.ValidationError('Selected subject batch does not belong to this section')
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            pass
+        return attrs
     
     def get_effective_staff(self, obj):
         """Return the actual staff who should mark attendance.

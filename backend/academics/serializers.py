@@ -837,6 +837,8 @@ class StudentSimpleSerializer(serializers.Serializer):
 
 
 class StudentSubjectBatchSerializer(serializers.ModelSerializer):
+    section = serializers.SerializerMethodField(read_only=True)
+    section_id = serializers.PrimaryKeyRelatedField(queryset=Section.objects.all(), source='section', required=False, allow_null=True)
     staff = serializers.SerializerMethodField(read_only=True)
     staff_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     created_by = serializers.SerializerMethodField(read_only=True)
@@ -848,7 +850,7 @@ class StudentSubjectBatchSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = None  # set at import time to avoid circular import
-        fields = ('id', 'name', 'staff', 'staff_id', 'created_by', 'academic_year', 'curriculum_row_id', 'curriculum_row', 'student_ids', 'students', 'is_active', 'created_at', 'updated_at')
+        fields = ('id', 'name', 'section', 'section_id', 'staff', 'staff_id', 'created_by', 'academic_year', 'curriculum_row_id', 'curriculum_row', 'student_ids', 'students', 'is_active', 'created_at', 'updated_at')
         read_only_fields = ('created_at', 'updated_at', 'created_by')
 
     def __init__(self, *args, **kwargs):
@@ -856,6 +858,18 @@ class StudentSubjectBatchSerializer(serializers.ModelSerializer):
         from .models import StudentSubjectBatch
         self.Meta.model = StudentSubjectBatch
         super().__init__(*args, **kwargs)
+
+    def get_section(self, obj):
+        try:
+            sec = getattr(obj, 'section', None)
+            if not sec:
+                return None
+            return {
+                'id': getattr(sec, 'id', None),
+                'name': getattr(sec, 'name', None),
+            }
+        except Exception:
+            return None
 
     def get_staff(self, obj):
         try:
@@ -906,6 +920,7 @@ class StudentSubjectBatchSerializer(serializers.ModelSerializer):
         student_ids = validated_data.pop('student_ids', []) or []
         curriculum_row_id = validated_data.pop('curriculum_row_id', None) or self.initial_data.get('curriculum_row_id')
         staff_id = validated_data.pop('staff_id', None)
+        section_obj = validated_data.get('section')
         
         # default academic year
         if 'academic_year' not in validated_data or not validated_data.get('academic_year'):
@@ -935,6 +950,30 @@ class StudentSubjectBatchSerializer(serializers.ModelSerializer):
         batch = super().create(validated_data)
         if student_ids:
             sts = StudentProfile.objects.filter(pk__in=student_ids)
+            # If section explicitly provided, ensure all selected students belong to it.
+            try:
+                if section_obj is not None:
+                    mismatched = sts.exclude(section_id=section_obj.id).exists()
+                    if mismatched:
+                        raise serializers.ValidationError('Selected students do not all belong to the chosen section')
+                else:
+                    sec_ids = list(sts.exclude(section_id__isnull=True).values_list('section_id', flat=True).distinct())
+                    if len(sec_ids) == 1:
+                        try:
+                            inferred = Section.objects.filter(pk=int(sec_ids[0])).first()
+                            if inferred:
+                                batch.section = inferred
+                                batch.save(update_fields=['section'])
+                        except Exception:
+                            pass
+            except serializers.ValidationError:
+                # delete the created batch to avoid orphan rows
+                try:
+                    batch.delete()
+                except Exception:
+                    pass
+                raise
+
             batch.students.set(sts)
         return batch
 
@@ -961,6 +1000,13 @@ class StudentSubjectBatchSerializer(serializers.ModelSerializer):
         inst = super().update(instance, validated_data)
         if student_ids is not None:
             sts = StudentProfile.objects.filter(pk__in=student_ids)
+            try:
+                # enforce section consistency when section is set
+                sec = getattr(inst, 'section', None)
+                if sec is not None and sts.exclude(section_id=sec.id).exists():
+                    raise serializers.ValidationError('Selected students do not all belong to the batch section')
+            except serializers.ValidationError:
+                raise
             inst.students.set(sts)
         return inst
 

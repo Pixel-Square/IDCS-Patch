@@ -537,6 +537,10 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
           } catch {
             // ignore localStorage errors
           }
+
+          // Re-merge current roster after applying server draft so newly-appearing
+          // students (e.g. fixed roster) are not dropped by an older draft snapshot.
+          loadRoster().catch(() => {});
         }
         if (Array.isArray(draftBtls)) {
           setSelectedBtls(draftBtls.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)));
@@ -731,11 +735,21 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
       try {
         const myTAs = await fetchMyTeachingAssignments();
         console.log('[SSA1] My TAs:', myTAs?.length, 'for subject:', subjectId, 'teachingAssignmentId:', teachingAssignmentId);
-        matchedTa = (myTAs || []).find((t: any) => {
-          const codeMatch = String(t.subject_code || '').trim().toUpperCase() === String(subjectId || '').trim().toUpperCase();
-          const idMatch = teachingAssignmentId ? t.id === teachingAssignmentId : false;
-          return idMatch || codeMatch;
-        });
+        const desiredId = typeof teachingAssignmentId === 'number' ? teachingAssignmentId : null;
+        const desiredCode = String(subjectId || '').trim().toUpperCase();
+
+        // If a TA id is provided (IQAC viewer / pinned flows), prefer an exact id match.
+        if (desiredId != null) {
+          matchedTa = (myTAs || []).find((t: any) => Number(t?.id) === Number(desiredId)) || null;
+        }
+
+        // Otherwise (or if not found), fall back to subject-code match (faculty flow).
+        if (!matchedTa) {
+          matchedTa = (myTAs || []).find((t: any) => {
+            const codeMatch = String(t?.subject_code || '').trim().toUpperCase() === desiredCode;
+            return codeMatch;
+          });
+        }
 
         if (matchedTa) {
           console.log('[SSA1] Found TA match:', matchedTa.id, 'elective_subject_id:', matchedTa.elective_subject_id, 'section_id:', matchedTa.section_id);
@@ -870,6 +884,9 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
               setSelectedBtls(draftBtls.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)));
             }
             draftLoadedRef.current = true;
+
+            // Ensure roster merge runs after applying draft rows.
+            loadRoster().catch(() => {});
             return;
           }
         }

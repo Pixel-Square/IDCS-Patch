@@ -10,6 +10,11 @@ from django.utils import timezone
 from django.contrib.auth.hashers import make_password, check_password
 import secrets
 
+from .models_impersonation import (
+    SuperuserImpersonationLog,
+    SuperuserImpersonationPermission,
+)
+
 
 class UsernameValidator(RegexValidator):
     """Custom validator that allows spaces in usernames."""

@@ -747,11 +747,21 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
       try {
         const myTAs = await fetchMyTeachingAssignments();
         // myTAs fetched
-        matchedTa = (myTAs || []).find((t: any) => {
-          const codeMatch = String(t.subject_code || '').trim().toUpperCase() === String(subjectId || '').trim().toUpperCase();
-          const idMatch = teachingAssignmentId ? t.id === teachingAssignmentId : false;
-          return idMatch || codeMatch;
-        });
+        const desiredId = typeof teachingAssignmentId === 'number' ? teachingAssignmentId : null;
+        const desiredCode = String(subjectId || '').trim().toUpperCase();
+
+        // If a TA id is provided, prefer an exact id match (pinned flows).
+        if (desiredId != null) {
+          matchedTa = (myTAs || []).find((t: any) => Number(t?.id) === Number(desiredId)) || null;
+        }
+
+        // Otherwise (or if not found), fall back to subject-code match.
+        if (!matchedTa) {
+          matchedTa = (myTAs || []).find((t: any) => {
+            const codeMatch = String(t?.subject_code || '').trim().toUpperCase() === desiredCode;
+            return codeMatch;
+          });
+        }
 
         // matchedTa determined
       } catch (err) {

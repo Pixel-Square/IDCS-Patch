@@ -1,0 +1,108 @@
+import React from "react";
+
+type Member = {
+  name: string;
+  role: string;
+};
+
+type CreditsSectionProps = {
+  title: string;
+  members: Member[];
+  accent: "blue" | "emerald";
+};
+
+function CreditsSection({ title, members, accent }: CreditsSectionProps) {
+  const accentStyles =
+    accent === "blue"
+      ? {
+          badge: "bg-blue-100 text-blue-700 border-blue-200",
+          card: "hover:border-blue-300",
+          role: "text-blue-700",
+        }
+      : {
+          badge: "bg-emerald-100 text-emerald-700 border-emerald-200",
+          card: "hover:border-emerald-300",
+          role: "text-emerald-700",
+        };
+
+  return (
+    <section className="w-full">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h2 className="text-2xl sm:text-3xl font-semibold text-slate-900">{title}</h2>
+        <span className={`rounded-full border px-3 py-1 text-xs sm:text-sm font-medium ${accentStyles.badge}`}>
+          {members.length} Members
+        </span>
+      </div>
+      <ul className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {members.map((member, index) => (
+          <li
+            key={member.name}
+            className={`group rounded-2xl border border-slate-200 bg-white/80 backdrop-blur px-4 py-4 sm:px-5 sm:py-5 transition-all duration-200 shadow-sm hover:shadow-md ${accentStyles.card}`}
+          >
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white text-xs font-semibold">
+                {index + 1}
+              </span>
+              <div>
+                <p className="text-base sm:text-lg font-semibold text-slate-900">{member.name}</p>
+                <p className={`text-sm font-medium ${accentStyles.role}`}>{member.role}</p>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export default function CreditsPage() {
+  const teamBehindItMembers: Member[] = [
+    { name: "#Abi Varsan P", role: "Senior Core Architect" },
+    { name: "Lalith kishore N S", role: "App Forge Engineer" },
+    { name: "Hariprashath B", role: "System Stabilizer" },
+    { name: "Mohamed Firdous S", role: "Visual Systems Lead" },
+    { name: "Prasanna N", role: "UI Strategist" },
+    { name: "Hariswasthra S", role: "Senior Frontend Associate" },
+    { name: "Padmapriya S", role: "Interface Crafter" },
+    { name: "Nithyapriya S", role: "Doc Systems Curator" },
+    { name: "Rexcia A", role: "Module Architect" },
+    { name: "Rohit S K", role: "Junior Core Architect" },
+    { name: "Judson Asaph H", role: "Server Specialist" },
+    { name: "SharukK Hasthik M", role: "Infra Specialist" },
+    { name: "Harish K", role: "Frontend Associate" },
+    { name: "Amudeshwar H", role: "Interface Associate" },
+    { name: "Naveen Raj A", role: "Support Operator" },
+  ];
+
+  const guidanceAndSupportMembers: Member[] = [
+    { name: "Mr. K. Rajaguru", role: "Head of the system" },
+    { name: "Dr. N. Vasudevan", role: "Principal" },
+  ];
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-sky-100 via-white to-emerald-100 pt-24 pb-14 px-4 sm:px-6 lg:px-10">
+      <div className="pointer-events-none absolute -top-12 -left-10 h-56 w-56 rounded-full bg-blue-300/30 blur-3xl" />
+      <div className="pointer-events-none absolute top-1/3 -right-12 h-64 w-64 rounded-full bg-emerald-300/30 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-16 left-1/3 h-72 w-72 rounded-full bg-cyan-300/20 blur-3xl" />
+
+      <div className="relative max-w-6xl mx-auto">
+        <header className="mb-10 sm:mb-12 text-center">
+          <p className="inline-flex items-center rounded-full border border-slate-300 bg-white/70 px-4 py-1 text-xs sm:text-sm font-medium text-slate-700 mb-4">
+            IDCS Recognition
+          </p>
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900">
+            Team Credits
+          </h1>
+          <p className="mt-3 text-base sm:text-lg text-slate-600 max-w-2xl mx-auto">
+            Built through collaboration, commitment, and consistent support.
+          </p>
+        </header>
+
+        <div className="space-y-10 sm:space-y-12">
+          <CreditsSection title="Team Behind It" members={teamBehindItMembers} accent="blue" />
+          <CreditsSection title="Guidance and Support" members={guidanceAndSupportMembers} accent="emerald" />
+        </div>
+      </div>
+    </div>
+  );
+}

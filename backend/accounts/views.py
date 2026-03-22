@@ -28,6 +28,11 @@ from .models import ProfileImageUpdateRequest
 from .services.sms import send_sms, send_whatsapp, verify_otp
 from .permissions_api import HasPermissionCode
 from .utils import get_user_permissions
+from .views_impersonate import (
+    SuperuserImpersonateView,
+    SuperuserImpersonationHistoryView,
+    SuperuserImpersonationPermissionView,
+)
 
 log = logging.getLogger(__name__)
 

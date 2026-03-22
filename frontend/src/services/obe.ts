@@ -46,6 +46,21 @@ export async function fetchMyTeachingAssignments(): Promise<TeachingAssignmentIt
   }
 }
 
+export async function fetchTeachingAssignmentById(id: number): Promise<TeachingAssignmentItem | null> {
+  if (!id) return null;
+  const url = `${apiBase()}/api/academics/teaching-assignments/${encodeURIComponent(String(id))}/`;
+  const res = await apiClient.get(url);
+  const data = (res as any)?.data;
+  if (typeof data === 'string') {
+    const s = data.trim().toLowerCase();
+    if (s.startsWith('<!doctype html') || s.startsWith('<html') || s.includes('<head') || s.includes('<body')) {
+      throw new Error('API request returned HTML. Check VITE_API_BASE or /api reverse-proxy configuration.');
+    }
+  }
+  if (data && typeof data === 'object') return data as TeachingAssignmentItem;
+  return null;
+}
+
 
 export type Cia1MarksResponse = {
   subject: { code: string; name: string };

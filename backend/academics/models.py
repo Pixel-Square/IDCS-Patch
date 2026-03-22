@@ -475,9 +475,29 @@ class StudentProfile(models.Model):
         return f"Student {self.reg_no} ({self.user.username})"
 
     def get_current_section_assignment(self):
-        """Return the active StudentSectionAssignment or None."""
+        """Return the active PRIMARY StudentSectionAssignment or None.
+
+        IMPORTANT: Students can have an active SECONDARY section (dept-core) in
+        parallel with their PRIMARY section. For all "current section" usage in
+        the UI (timetable, dashboards, etc.) we must prefer PRIMARY.
+
+        If no PRIMARY assignment exists, we intentionally do NOT return SECONDARY
+        when the legacy StudentProfile.section is set — otherwise the student's
+        main section would appear to "switch" and student timetables vanish.
+        """
         try:
-            return self.section_assignments.filter(end_date__isnull=True).select_related('section').order_by('-start_date').first()
+            qs = self.section_assignments.filter(end_date__isnull=True).select_related('section').order_by('-start_date')
+            try:
+                primary = qs.filter(section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY).first()
+                if primary:
+                    return primary
+            except Exception:
+                pass
+            # No PRIMARY assignment. If the legacy `section` field is set, prefer it.
+            # Only use SECONDARY as a last-resort fallback when legacy section is missing.
+            if getattr(self, 'section_id', None):
+                return None
+            return qs.first()
         except Exception:
             return None
 
@@ -1204,6 +1224,16 @@ class StudentSubjectBatch(models.Model):
     staff = models.ForeignKey(StaffProfile, on_delete=models.CASCADE, related_name='subject_batches', help_text='Staff assigned to handle this batch')
     created_by = models.ForeignKey(StaffProfile, on_delete=models.CASCADE, related_name='created_batches', null=True, blank=True, help_text='Staff who created this batch')
     academic_year = models.ForeignKey(AcademicYear, on_delete=models.PROTECT, related_name='subject_batches')
+    # Important for multi-section staff: ties the batch to a specific section so advisors
+    # and timetable editors don't see batches from other sections.
+    section = models.ForeignKey(
+        'academics.Section',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='subject_batches',
+        help_text='Section this subject batch belongs to (used to prevent cross-section leakage).',
+    )
     # Link the batch to a specific curriculum row (subject) so batches are
     # subject-scoped. This is optional but recommended for subject-wise grouping.
     curriculum_row = models.ForeignKey('curriculum.CurriculumDepartment', on_delete=models.CASCADE, null=True, blank=True, related_name='subject_batches')

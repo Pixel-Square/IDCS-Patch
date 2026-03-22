@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import fetchWithAuth from '../../services/fetchAuth'
-import { getCachedMe } from '../../services/auth'
+import { getCachedMe, getMe } from '../../services/auth'
 import { Calendar, Clock, BookOpen, Users, AlertCircle, Loader2 } from 'lucide-react'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
@@ -65,21 +65,38 @@ export default function StudentTimetable(){
     return new Date(year, month - 1, day)
   }
 
-  useEffect(()=>{ fetchProfile() }, [])
+  useEffect(() => {
+    let canceled = false
 
-  async function fetchProfile(){
-    try{
-      // Use cached user data instead of making API call
-      const me = getCachedMe()
-      if (!me) {
-        console.warn('No cached user profile found')
-        return
+    async function loadProfile() {
+      try {
+        // Fast path: use cached user data immediately (avoids blank UI)
+        const cached = getCachedMe()
+        if (cached && !canceled) {
+          const prof = cached.profile || {}
+          if (cached.id) setStudentId(cached.id)
+          if (prof.section_id) setSectionId(prof.section_id)
+        }
+
+        // Always try to refresh `me/` so changes (like PRIMARY vs SECONDARY section)
+        // are reflected without requiring logout/login.
+        const fresh = await getMe()
+        if (canceled) return
+
+        const prof = fresh?.profile || {}
+        if (fresh?.id) setStudentId(fresh.id)
+        if (prof.section_id) setSectionId(prof.section_id)
+      } catch (e) {
+        // If refresh fails (network/auth), keep the cached values.
+        console.error(e)
       }
-      const prof = me.profile || {}
-      setStudentId(me.id)
-      if(prof.section_id) setSectionId(prof.section_id)
-    }catch(e){ console.error(e) }
-  }
+    }
+
+    loadProfile()
+    return () => {
+      canceled = true
+    }
+  }, [])
 
   useEffect(()=>{
     if(!sectionId) return
@@ -87,7 +104,7 @@ export default function StudentTimetable(){
     ;(async ()=>{
       try{
         // Pass selectedDate to backend to fetch special periods for that week
-        const dateParam = selectedDate ? `?date=${selectedDate}` : ''
+        const dateParam = selectedDate ? `?date=${dateToInputValue(selectedDate)}` : ''
         const res = await fetchWithAuth(`/api/timetable/section/${sectionId}/timetable/${dateParam}`)
         if(!res.ok) throw new Error(await res.text())
         const data = await res.json()

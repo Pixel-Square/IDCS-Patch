@@ -15,6 +15,7 @@ type AssignedSubject = {
   section_id?: number | null
   elective_subject_id?: number | null
   curriculum_row?: any
+  subject_batches?: Array<{ id: number; name?: string | null }> | null
   department?: {
     id: number
     code?: string | null
@@ -39,10 +40,12 @@ export default function AssignedSubjectsPage() {
   const [editingStaffId, setEditingStaffId] = useState<number | null>(null)
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerAllStudents, setPickerAllStudents] = useState<any[]>([])
   const [pickerStudents, setPickerStudents] = useState<any[]>([])
   const [pickerItem, setPickerItem] = useState<any | null>(null)
   const [pickerSelectedIds, setPickerSelectedIds] = useState<number[]>([])
   const [pickerStaffId, setPickerStaffId] = useState<number | null>(null)
+  const [pickerShowExistingBatchStudents, setPickerShowExistingBatchStudents] = useState(false)
   const [selectionFilter, setSelectionFilter] = useState<'all' | 'first-half' | 'second-half' | 'custom' | 'range'>('all')
   const [customNumbers, setCustomNumbers] = useState('')
   const [rangeStart, setRangeStart] = useState('')
@@ -190,6 +193,7 @@ export default function AssignedSubjectsPage() {
       const studIds = studsAll.map((s:any)=>s.id).filter((id:number)=> !excluded.has(id))
       const payload: any = { name, student_ids: studIds }
       if (item.curriculum_row_id) payload.curriculum_row_id = item.curriculum_row_id
+      if (item.section_id) payload.section_id = item.section_id
       await createSubjectBatch(payload)
       const bs = await fetchSubjectBatches()
       setBatches(bs)
@@ -208,6 +212,8 @@ export default function AssignedSubjectsPage() {
     setError(null)
     const name = batchNamesById[item.id] || `Batch for ${item.subject_code || item.subject_name || item.id}`
     setPickerItem(item)
+    setPickerAllStudents([])
+    setPickerShowExistingBatchStudents(false)
     setBatchNamesById(prev => ({ ...prev, [item.id]: name }))
     try{
       let sdata
@@ -251,21 +257,41 @@ export default function AssignedSubjectsPage() {
       
       // Exclude students already in existing batches for this curriculum_row / subject
       const crId = item.curriculum_row_id || item.curriculum_row?.id
+      const assignedBatchesByStudentId: Record<number, string[]> = {}
       const excluded = new Set<number>()
       if (crId) {
         for (const b of batches) {
           if (b.curriculum_row && b.curriculum_row.id === crId) {
-            for (const s of (b.students || [])) excluded.add(Number(s.id))
+            const batchName = String(b.name || '').trim() || 'Existing batch'
+            for (const s of (b.students || [])) {
+              const sid = Number((s as any).id)
+              if (!Number.isFinite(sid)) continue
+              excluded.add(sid)
+              if (!assignedBatchesByStudentId[sid]) assignedBatchesByStudentId[sid] = []
+              if (!assignedBatchesByStudentId[sid].includes(batchName)) assignedBatchesByStudentId[sid].push(batchName)
+            }
           }
         }
       }
+
+      const allStuds = studs.map((s: any) => {
+        const sid = Number(s.id)
+        const alreadyAssigned = excluded.has(sid)
+        const assigned_batches = assignedBatchesByStudentId[sid] || []
+        return { ...s, alreadyAssigned, assigned_batches }
+      })
+
+      const visible = excluded.size > 0
+        ? allStuds.filter((s: any) => !s.alreadyAssigned)
+        : allStuds
       if (excluded.size > 0) {
-        studs = studs.filter((s: any) => !excluded.has(s.id))
-        console.log(`Filtered out ${excluded.size} already-batched students. Remaining: ${studs.length}`)
+        console.log(`Filtered out ${excluded.size} already-batched students. Remaining: ${visible.length}`)
       }
-      
-      setPickerStudents(studs)
-      setPickerSelectedIds(studs.map((s:any)=>s.id))
+
+      setPickerAllStudents(allStuds)
+      setPickerStudents(visible)
+      // Default select: only students not already in other batches.
+      setPickerSelectedIds(allStuds.filter((s: any) => !s.alreadyAssigned).map((s: any) => s.id))
       setPickerStaffId(null)
       setSelectionFilter('all')
       setCustomNumbers('')
@@ -294,20 +320,30 @@ export default function AssignedSubjectsPage() {
       return nameA.localeCompare(nameB)
     })
 
+    // Apply the current search filter so bulk selection matches what the user sees.
+    const query = searchQuery.trim().toLowerCase()
+    const visibleStudents = query
+      ? sortedStudents.filter((s: any) => {
+          const name = String(s.username || s.full_name || '').toLowerCase()
+          const regNo = String(s.reg_no || '').toLowerCase()
+          return name.includes(query) || regNo.includes(query)
+        })
+      : sortedStudents
+
     let selectedIds: number[] = []
 
     switch (selectionFilter) {
       case 'all':
-        selectedIds = sortedStudents.map(s => s.id)
+        selectedIds = visibleStudents.map((s: any) => s.id)
         break
       case 'first-half': {
-        const firstHalf = Math.ceil(sortedStudents.length / 2)
-        selectedIds = sortedStudents.slice(0, firstHalf).map(s => s.id)
+        const firstHalf = Math.ceil(visibleStudents.length / 2)
+        selectedIds = visibleStudents.slice(0, firstHalf).map((s: any) => s.id)
         break
       }
       case 'second-half': {
-        const secondHalf = Math.floor(sortedStudents.length / 2)
-        selectedIds = sortedStudents.slice(secondHalf).map(s => s.id)
+        const secondHalf = Math.floor(visibleStudents.length / 2)
+        selectedIds = visibleStudents.slice(secondHalf).map((s: any) => s.id)
         break
       }
       case 'custom':
@@ -317,13 +353,13 @@ export default function AssignedSubjectsPage() {
             .filter(n => n.length > 0)
           
           // Match students by last digits of registration number
-          selectedIds = sortedStudents
-            .filter(s => {
+          selectedIds = visibleStudents
+            .filter((s: any) => {
               const regNo = String(s.reg_no || '')
               const lastDigits = regNo.slice(-2) // Get last 2 digits
               return numbers.includes(lastDigits)
             })
-            .map(s => s.id)
+            .map((s: any) => s.id)
         }
         break
       case 'range': {
@@ -331,14 +367,14 @@ export default function AssignedSubjectsPage() {
         const end = parseInt(rangeEnd)
         if (!isNaN(start) && !isNaN(end) && start <= end) {
           // Match students whose registration number last 2 digits fall in range
-          selectedIds = sortedStudents
-            .filter(s => {
+          selectedIds = visibleStudents
+            .filter((s: any) => {
               const regNo = String(s.reg_no || '')
               const lastDigits = regNo.slice(-2) // Get last 2 digits
               const numValue = parseInt(lastDigits)
               return !isNaN(numValue) && numValue >= start && numValue <= end
             })
-            .map(s => s.id)
+            .map((s: any) => s.id)
         }
         break
       }
@@ -352,7 +388,7 @@ export default function AssignedSubjectsPage() {
     if (pickerStudents.length > 0) {
       applySelectionFilter()
     }
-  }, [selectionFilter, customNumbers, rangeStart, rangeEnd, pickerStudents])
+  }, [selectionFilter, customNumbers, rangeStart, rangeEnd, pickerStudents, pickerShowExistingBatchStudents, searchQuery])
 
   function applyEditSelectionFilter() {
     // Sort students alphabetically by name for consistent ordering
@@ -433,17 +469,20 @@ export default function AssignedSubjectsPage() {
     const name = `Batch ${next}`
     const payload: any = { name, student_ids: pickerSelectedIds }
     if (pickerItem.curriculum_row_id) payload.curriculum_row_id = pickerItem.curriculum_row_id
+    if (pickerItem.section_id) payload.section_id = pickerItem.section_id
     if (pickerStaffId) payload.staff_id = pickerStaffId
     try{
       await createSubjectBatch(payload)
       const bs = await fetchSubjectBatches()
       setBatches(bs)
       setPickerOpen(false)
+      setPickerAllStudents([])
       setPickerStudents([])
       setPickerItem(null)
       setPickerSelectedIds([])
       setPickerStaffId(null)
       setPickerSelectedDept(null)
+      setPickerShowExistingBatchStudents(false)
       setSelectionFilter('all')
       setCustomNumbers('')
       setRangeStart('')
@@ -472,7 +511,8 @@ export default function AssignedSubjectsPage() {
     if (b.curriculum_row && b.curriculum_row.id) {
       try {
         // Find the subject/item that corresponds to this curriculum_row
-        const matchingItem = items.find(item => item.curriculum_row_id === b.curriculum_row.id)
+        const batchSectionId = (b.section_id || b.section?.id) ?? null
+        const matchingItem = items.find(item => item.curriculum_row_id === b.curriculum_row.id && (!batchSectionId || item.section_id === batchSectionId))
         if (matchingItem) {
           let sdata
           if (matchingItem.section_id) {
@@ -687,6 +727,8 @@ export default function AssignedSubjectsPage() {
                         if (item.section_name) parts.push(item.section_name)
                         if (item.batch) parts.push(item.batch)
                         if (item.semester != null) parts.push(`Sem ${item.semester}`)
+                        const sbNames = (item.subject_batches || []).map(b => (b?.name || '')).filter(Boolean)
+                        if (sbNames.length > 0) parts.push(`Subject Batch: ${sbNames.join(', ')}`)
                         
                         if (parts.length > 0) {
                           return (
@@ -730,6 +772,8 @@ export default function AssignedSubjectsPage() {
                       if (item.section_name) parts.push(item.section_name)
                       if (item.batch) parts.push(item.batch)
                       if (item.semester != null) parts.push(`Sem ${item.semester}`)
+                      const sbNames = (item.subject_batches || []).map(b => (b?.name || '')).filter(Boolean)
+                      if (sbNames.length > 0) parts.push(`Subject Batch: ${sbNames.join(', ')}`)
                       
                       if (parts.length > 0) {
                         return (
@@ -807,58 +851,70 @@ export default function AssignedSubjectsPage() {
               
               return (
                 <div className="space-y-4">
-                  {items.map(item => {
-                    const crId = item.curriculum_row_id ? String(item.curriculum_row_id) : null
-                    const group = crId ? (groupedCreated[crId] || []) : []
-                    if (!group || group.length === 0) return null
-                    return (
-                      <div key={`created-subject-${item.id}`} className="border-b border-gray-100 pb-4 last:border-b-0">
-                        <div className="font-bold text-gray-900 mb-3">{item.subject_name || item.subject_code || 'Unnamed Subject'}</div>
-                        <div className="space-y-3">
-                          {group.map((b:any) => (
-                            <div key={b.id} className="bg-gray-50 rounded-lg p-4">
-                              <div className="flex justify-between items-start">
-                                <div className="flex-1">
-                                  <div className="font-semibold text-gray-900 mb-2">{b.name}</div>
-                                  <div className="text-sm text-gray-600 space-y-1">
-                                    <div>
-                                      <span className="font-medium">{(b.students || []).length} students</span>
-                                    </div>
-                                    {b.staff && (
-                                      <div className="flex items-center gap-1">
-                                        <Users className="w-3 h-3" />
-                                        <span>Staff: {b.staff.name || b.staff.user || b.staff.staff_id}</span>
+                  {(() => {
+                    // De-dupe subject headers by curriculum_row_id.
+                    // Prevents duplicate rendering when `items` contains duplicate subject rows.
+                    const byCrId: Record<string, any> = {}
+                    for (const item of items) {
+                      const crId = item.curriculum_row_id ? String(item.curriculum_row_id) : null
+                      if (!crId) continue
+                      if (!byCrId[crId]) byCrId[crId] = item
+                    }
+                    const uniqueItems = Object.values(byCrId)
+
+                    return uniqueItems.map((item: any) => {
+                      const crId = item.curriculum_row_id ? String(item.curriculum_row_id) : null
+                      const group = crId ? (groupedCreated[crId] || []) : []
+                      if (!group || group.length === 0) return null
+                      return (
+                        <div key={`created-subject-${crId}`} className="border-b border-gray-100 pb-4 last:border-b-0">
+                          <div className="font-bold text-gray-900 mb-3">{item.subject_name || item.subject_code || 'Unnamed Subject'}</div>
+                          <div className="space-y-3">
+                            {group.map((b:any) => (
+                              <div key={b.id} className="bg-gray-50 rounded-lg p-4">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex-1">
+                                    <div className="font-semibold text-gray-900 mb-2">{b.name}</div>
+                                    <div className="text-sm text-gray-600 space-y-1">
+                                      <div>
+                                        <span className="font-medium">{(b.students || []).length} students</span>
                                       </div>
-                                    )}
+                                      {b.staff && (
+                                        <div className="flex items-center gap-1">
+                                          <Users className="w-3 h-3" />
+                                          <span>Staff: {b.staff.name || b.staff.user || b.staff.staff_id}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="ml-4 flex gap-2">
+                                    <button 
+                                      className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" 
+                                      onClick={()=>openViewBatch(b)}
+                                    >
+                                      View
+                                    </button>
+                                    <button 
+                                      className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" 
+                                      onClick={()=>startEditBatch(b)}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button 
+                                      className="bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" 
+                                      onClick={()=>deleteBatch(b.id)}
+                                    >
+                                      Delete
+                                    </button>
                                   </div>
                                 </div>
-                                <div className="ml-4 flex gap-2">
-                                  <button 
-                                    className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" 
-                                    onClick={()=>openViewBatch(b)}
-                                  >
-                                    View
-                                  </button>
-                                  <button 
-                                    className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" 
-                                    onClick={()=>startEditBatch(b)}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button 
-                                    className="bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" 
-                                    onClick={()=>deleteBatch(b.id)}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })
+                  })()}
                   
                   {/* Batches without curriculum_row */}
                   {groupedCreated['no_subject'] && groupedCreated['no_subject'].length > 0 && (
@@ -946,46 +1002,57 @@ export default function AssignedSubjectsPage() {
               
               return (
                 <div className="space-y-4">
-                  {items.map(item => {
-                    const crId = item.curriculum_row_id ? String(item.curriculum_row_id) : null
-                    const group = crId ? (groupedAssigned[crId] || []) : []
-                    if (!group || group.length === 0) return null
-                    return (
-                      <div key={`assigned-subject-${item.id}`} className="border-b border-gray-100 pb-4 last:border-b-0">
-                        <div className="font-bold text-gray-900 mb-3">{item.subject_name || item.subject_code || 'Unnamed Subject'}</div>
-                        <div className="space-y-3">
-                          {group.map((b:any) => (
-                            <div key={b.id} className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                              <div className="flex justify-between items-start">
-                                <div className="flex-1">
-                                  <div className="font-semibold text-gray-900 mb-2">{b.name}</div>
-                                  <div className="text-sm text-gray-600 space-y-1">
-                                    <div>
-                                      <span className="font-medium">{(b.students || []).length} students</span>
-                                    </div>
-                                    {b.created_by && (
-                                      <div className="flex items-center gap-1">
-                                        <Users className="w-3 h-3" />
-                                        <span>Assigned by: {b.created_by.name || b.created_by.user || b.created_by.staff_id}</span>
+                  {(() => {
+                    // De-dupe subject headers by curriculum_row_id.
+                    const byCrId: Record<string, any> = {}
+                    for (const item of items) {
+                      const crId = item.curriculum_row_id ? String(item.curriculum_row_id) : null
+                      if (!crId) continue
+                      if (!byCrId[crId]) byCrId[crId] = item
+                    }
+                    const uniqueItems = Object.values(byCrId)
+
+                    return uniqueItems.map((item: any) => {
+                      const crId = item.curriculum_row_id ? String(item.curriculum_row_id) : null
+                      const group = crId ? (groupedAssigned[crId] || []) : []
+                      if (!group || group.length === 0) return null
+                      return (
+                        <div key={`assigned-subject-${crId}`} className="border-b border-gray-100 pb-4 last:border-b-0">
+                          <div className="font-bold text-gray-900 mb-3">{item.subject_name || item.subject_code || 'Unnamed Subject'}</div>
+                          <div className="space-y-3">
+                            {group.map((b:any) => (
+                              <div key={b.id} className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex-1">
+                                    <div className="font-semibold text-gray-900 mb-2">{b.name}</div>
+                                    <div className="text-sm text-gray-600 space-y-1">
+                                      <div>
+                                        <span className="font-medium">{(b.students || []).length} students</span>
                                       </div>
-                                    )}
+                                      {b.created_by && (
+                                        <div className="flex items-center gap-1">
+                                          <Users className="w-3 h-3" />
+                                          <span>Assigned by: {b.created_by.name || b.created_by.user || b.created_by.staff_id}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="ml-4">
+                                    <button 
+                                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors" 
+                                      onClick={()=>openViewBatch(b)}
+                                    >
+                                      View
+                                    </button>
                                   </div>
                                 </div>
-                                <div className="ml-4">
-                                  <button 
-                                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors" 
-                                    onClick={()=>openViewBatch(b)}
-                                  >
-                                    View
-                                  </button>
-                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })
+                  })()}
                   
                   {/* Assigned batches without curriculum_row */}
                   {groupedAssigned['no_subject'] && groupedAssigned['no_subject'].length > 0 && (
@@ -1052,11 +1119,13 @@ export default function AssignedSubjectsPage() {
                     className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium transition-colors" 
                     onClick={() => { 
                       setPickerOpen(false); 
+                      setPickerAllStudents([]);
                       setPickerStudents([]); 
                       setPickerItem(null);
                       setPickerSelectedIds([]);
                       setPickerStaffId(null);
                       setPickerSelectedDept(null);
+                      setPickerShowExistingBatchStudents(false);
                       setSelectionFilter('all');
                       setCustomNumbers('');
                       setRangeStart('');
@@ -1122,6 +1191,30 @@ export default function AssignedSubjectsPage() {
               <div className="mb-4">
                 <h4 className="font-semibold text-gray-900 mb-2">Students ({pickerStudents.length})</h4>
                 <p className="text-sm text-gray-600 mb-4">Select students to include in this batch - all {pickerStudents.length} students shown</p>
+
+                <div className="mb-3 flex items-center gap-2">
+                  <input
+                    id="pickerShowExistingBatchStudents"
+                    type="checkbox"
+                    checked={pickerShowExistingBatchStudents}
+                    onChange={(e) => {
+                      const next = Boolean(e.target.checked)
+                      setPickerShowExistingBatchStudents(next)
+                      if (next) {
+                        setPickerStudents(pickerAllStudents)
+                        return
+                      }
+                      const filtered = (pickerAllStudents || []).filter((s: any) => !s.alreadyAssigned)
+                      setPickerStudents(filtered)
+                      const excludedIds = new Set<number>((pickerAllStudents || []).filter((s: any) => s.alreadyAssigned).map((s: any) => Number(s.id)))
+                      setPickerSelectedIds((prev) => (prev || []).filter((id) => !excludedIds.has(Number(id))))
+                    }}
+                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                  />
+                  <label htmlFor="pickerShowExistingBatchStudents" className="text-sm text-gray-700">
+                    Also list students already assigned in other batches
+                  </label>
+                </div>
                 
                 {/* Search Field */}
                 <div className="mb-3">
@@ -1320,6 +1413,11 @@ export default function AssignedSubjectsPage() {
                             </div>
                             {s.reg_no && (
                               <div className="text-xs text-gray-500 truncate">{s.reg_no}</div>
+                            )}
+                            {pickerShowExistingBatchStudents && s.alreadyAssigned && (
+                              <div className="text-xs text-gray-400 truncate">
+                                Already in: {(Array.isArray(s.assigned_batches) ? s.assigned_batches : []).join(', ') || 'another batch'}
+                              </div>
                             )}
                           </div>
                         </div>

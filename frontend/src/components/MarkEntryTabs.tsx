@@ -22,6 +22,7 @@ import {
   DraftAssessmentKey,
   DueAssessmentKey,
   MarkTableLockStatusResponse,
+  fetchTeachingAssignmentById,
   fetchMarkTableLockStatus,
   fetchMyTeachingAssignments,
   fetchPublishWindow,
@@ -819,7 +820,8 @@ export default function MarkEntryTabs({
       try {
         const all = await fetchMyTeachingAssignments();
         if (!mounted) return;
-        let filtered = (all || []).filter((a) => a.subject_code === subjectId);
+        const desiredCode = String(subjectId || '').trim().toUpperCase();
+        let filtered = (all || []).filter((a) => String((a as any)?.subject_code || '').trim().toUpperCase() === desiredCode);
         
         // If user doesn't have a TA for this subject, try to fetch from server
         if (filtered.length === 0) {
@@ -832,6 +834,22 @@ export default function MarkEntryTabs({
             }
           } catch (err) {
             console.warn('Server TA list fetch failed:', err);
+          }
+        }
+
+        // If this view is pinned to a specific TA id (IQAC flows), ensure that TA is present
+        // even if the list endpoint is paginated and doesn't include it.
+        if (typeof fixedTeachingAssignmentId === 'number' && fixedTeachingAssignmentId > 0) {
+          const hasFixed = (filtered || []).some((f: any) => Number(f?.id) === Number(fixedTeachingAssignmentId));
+          if (!hasFixed) {
+            try {
+              const ta = await fetchTeachingAssignmentById(fixedTeachingAssignmentId);
+              if (ta && String((ta as any)?.subject_code || '').trim().toUpperCase() === desiredCode) {
+                filtered = [ta as any, ...(filtered || [])];
+              }
+            } catch (err) {
+              console.warn('Fixed TA detail fetch failed:', err);
+            }
           }
         }
         
