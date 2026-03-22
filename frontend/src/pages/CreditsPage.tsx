@@ -71,12 +71,14 @@ export default function CreditsPage() {
     { name: "SharukK Hasthik M", role: "Infra Specialist" },
     { name: "Harish K", role: "Frontend Associate" },
     { name: "Amudeshwar H", role: "Interface Associate" },
-    { name: "Naveen Raj A", role: "Support Operator" },
+    { name: "Naveen Raj A", role: "Frontend Associate" },
   ];
 
   const guidanceAndSupportMembers: Member[] = [
-    { name: "Mr. K. Rajaguru", role: "Head of the system" },
     { name: "Dr. N. Vasudevan", role: "Principal" },
+    { name: "Mr. K. Rajaguru", role: "Head of the system" },
+    { name: "Dr. T. Avudaiappan", role: "Project Guide" },
+
   ];
 
   return (

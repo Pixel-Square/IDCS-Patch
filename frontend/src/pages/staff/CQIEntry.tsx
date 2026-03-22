@@ -18,6 +18,7 @@ import {
   fetchPublishedModelSheet,
   fetchDraft,
   fetchIqacCqiConfig,
+  fetchIqacQpPattern,
 } from '../../services/obe';
 import { fetchAssessmentMasterConfig } from '../../services/cdapDb';
 import { normalizeClassType } from '../../constants/classTypes';
@@ -26,6 +27,7 @@ interface CQIEntryProps {
   subjectId?: string;
   teachingAssignmentId?: number;
   classType?: string | null;
+  questionPaperType?: string | null;
   enabledAssessments?: string[] | null;
   assessmentType?: 'cia1' | 'cia2' | 'model';
   cos?: string[];
@@ -243,15 +245,21 @@ function parseCo34(raw: unknown): 3 | 4 | '3&4' {
 function effectiveCia1Weights(questions: any[], idx: number): { co1: number; co2: number } {
   const q = questions[idx];
   if (!q) return { co1: 0, co2: 0 };
-  const parsed = parseCo12(q.co);
+  const rawCo = (q as any)?.co;
+  const parsed = parseCo12(rawCo);
   if (parsed === '1&2') return { co1: 0.5, co2: 0.5 };
 
-  const hasAnySplit = questions.some((x) => parseCo12(x?.co) === '1&2');
-  const isLast = idx === questions.length - 1;
-  const key = String(q?.key || '').toLowerCase();
-  const label = String(q?.label || '').toLowerCase();
-  const looksLikeQ9 = key === 'q9' || label.includes('q9');
-  if (!hasAnySplit && isLast && looksLikeQ9) return { co1: 0.5, co2: 0.5 };
+  // Legacy fallback: if older payloads omitted CO mapping, assume the last question (typically Q9)
+  // is split equally. IMPORTANT: do not override an explicit CO mapping (QP2 often tags Q9 as CO1/CO2).
+  const hasExplicitCo = rawCo != null && String(rawCo).trim() !== '';
+  if (!hasExplicitCo) {
+    const hasAnySplit = questions.some((x) => parseCo12((x as any)?.co) === '1&2');
+    const isLast = idx === questions.length - 1;
+    const key = String((q as any)?.key || '').toLowerCase();
+    const label = String((q as any)?.label || '').toLowerCase();
+    const looksLikeQ9 = key === 'q9' || label.includes('q9');
+    if (!hasAnySplit && isLast && looksLikeQ9) return { co1: 0.5, co2: 0.5 };
+  }
 
   return parsed === 2 ? { co1: 0, co2: 1 } : { co1: 1, co2: 0 };
 }
@@ -259,15 +267,20 @@ function effectiveCia1Weights(questions: any[], idx: number): { co1: number; co2
 function effectiveCia2Weights(questions: any[], idx: number): { co3: number; co4: number } {
   const q = questions[idx];
   if (!q) return { co3: 0, co4: 0 };
-  const parsed = parseCo34(q.co);
+  const rawCo = (q as any)?.co;
+  const parsed = parseCo34(rawCo);
   if (parsed === '3&4') return { co3: 0.5, co4: 0.5 };
 
-  const hasAnySplit = questions.some((x) => parseCo34(x?.co) === '3&4');
-  const isLast = idx === questions.length - 1;
-  const key = String(q?.key || '').toLowerCase();
-  const label = String(q?.label || '').toLowerCase();
-  const looksLikeQ9 = key === 'q9' || label.includes('q9');
-  if (!hasAnySplit && isLast && looksLikeQ9) return { co3: 0.5, co4: 0.5 };
+  // Same legacy fallback as CIA1: only when CO mapping is missing.
+  const hasExplicitCo = rawCo != null && String(rawCo).trim() !== '';
+  if (!hasExplicitCo) {
+    const hasAnySplit = questions.some((x) => parseCo34((x as any)?.co) === '3&4');
+    const isLast = idx === questions.length - 1;
+    const key = String((q as any)?.key || '').toLowerCase();
+    const label = String((q as any)?.label || '').toLowerCase();
+    const looksLikeQ9 = key === 'q9' || label.includes('q9');
+    if (!hasAnySplit && isLast && looksLikeQ9) return { co3: 0.5, co4: 0.5 };
+  }
 
   return parsed === 4 ? { co3: 0, co4: 1 } : { co3: 1, co4: 0 };
 }
@@ -276,6 +289,7 @@ export default function CQIEntry({
   subjectId, 
   teachingAssignmentId, 
   classType,
+  questionPaperType,
   enabledAssessments,
   assessmentType,
   cos,
@@ -292,6 +306,20 @@ export default function CQIEntry({
   const [cqiErrors, setCqiErrors] = useState<Record<string, string>>({});
   const [masterCfg, setMasterCfg] = useState<any>(null);
   const [globalCfg, setGlobalCfg] = useState<{ divider: number; multiplier: number; options: any[] } | null>(null);
+
+  const classTypeKey = useMemo(() => {
+    const v = String(normalizeClassType(classType) || '').trim().toUpperCase();
+    if (!v) return '';
+    if (v === 'THEORY') return 'THEORY';
+    return v;
+  }, [classType]);
+
+  const qpTypeKey = useMemo(() => {
+    const s = String(questionPaperType ?? '').trim().toUpperCase();
+    if (s === 'QP2') return 'QP2';
+    if (s === 'QP1') return 'QP1';
+    return '';
+  }, [questionPaperType]);
 
   const THRESHOLD_PERCENT = 58;
   const effectiveDivider = useMemo(() => {
@@ -315,6 +343,7 @@ export default function CQIEntry({
   const [readOnly, setReadOnly] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
   const [dirty, setDirty] = useState(false);
+  const [resettingMarks, setResettingMarks] = useState(false);
 
   // Load published snapshot (if present) and lock editing.
   useEffect(() => {
@@ -605,6 +634,31 @@ export default function CQIEntry({
         const isTcpl = ct === 'TCPL';
         const isLabLike = ct === 'LAB' || ct === 'PRACTICAL';
 
+        // IQAC QP patterns: used to derive CIA CO mapping + max per CO.
+        // This prevents stale sheet/master config CO maps (e.g., CIA max 46) when IQAC updates to CO1=30.
+        const qpForApi = classTypeKey === 'THEORY' ? (qpTypeKey ? qpTypeKey : null) : null;
+        const loadIqacPattern = async (examForApi: 'CIA1' | 'CIA2') => {
+          if (!classTypeKey) return null as any;
+          let res: any = null;
+          let marks: any[] = [];
+          try {
+            res = await fetchIqacQpPattern({ class_type: classTypeKey, question_paper_type: qpForApi, exam: examForApi as any });
+            marks = Array.isArray(res?.pattern?.marks) ? res.pattern.marks : [];
+          } catch {
+            // ignore
+          }
+          if (!marks.length) {
+            try {
+              res = await fetchIqacQpPattern({ class_type: classTypeKey, question_paper_type: qpForApi, exam: 'CIA' as any });
+              marks = Array.isArray(res?.pattern?.marks) ? res.pattern.marks : [];
+            } catch {
+              // ignore
+            }
+          }
+          if (!marks.length) return null;
+          return res?.pattern || null;
+        };
+
         // Read MODEL (ME-COx) marks from the saved model sheet in localStorage (theory/tcpl/tcpr only).
         // SPECIAL courses do not include MODEL in Internal Marks.
         const canUseLocalModel = !isLabLike && ct !== 'SPECIAL';
@@ -695,6 +749,26 @@ export default function CQIEntry({
         const needs12 = coNumbers.some((co) => co === 1 || co === 2);
         const needs34 = coNumbers.some((co) => co === 3 || co === 4);
         const needs5 = coNumbers.some((co) => co === 5);
+
+        const [iqacCia1Pattern, iqacCia2Pattern] = await Promise.all([
+          needs12 && allow('cia1') && !isLabLike ? loadIqacPattern('CIA1') : Promise.resolve(null),
+          needs34 && allow('cia2') && !isLabLike ? loadIqacPattern('CIA2') : Promise.resolve(null),
+        ]);
+
+        const coOverrideByKey = (pattern: any | null): Record<string, any> => {
+          const marks = Array.isArray(pattern?.marks) ? pattern.marks : [];
+          const cosArr = Array.isArray(pattern?.cos) ? pattern.cos : [];
+          const n = Math.min(marks.length, cosArr.length);
+          if (!n) return {};
+          const out: Record<string, any> = {};
+          for (let i = 0; i < n; i++) {
+            out[`q${i + 1}`] = cosArr[i];
+          }
+          return out;
+        };
+
+        const cia1CoByKey = coOverrideByKey(iqacCia1Pattern);
+        const cia2CoByKey = coOverrideByKey(iqacCia2Pattern);
 
         const [ssa1Res, ssa2Res, f1Res, f2Res, cia1Res, cia2Res, review1Res, review2Res, labF1Res, labF2Res, labCia1Res, labCia2Res, labModelRes] =
           await Promise.all([
@@ -942,7 +1016,15 @@ export default function CQIEntry({
         const labModel = isLabLike ? readLabAssessmentByCo((labModelRes as any)?.data ?? null, { fallbackCiaEnabled: true, profile: 'strict-lab' }) : null;
 
         const cia1Data = (cia1Res as any).data;
-        const cia1Questions = Array.isArray(cia1Data?.questions) ? cia1Data.questions : [];
+        const cia1QuestionsRaw = Array.isArray(cia1Data?.questions) ? cia1Data.questions : [];
+        const cia1Questions = Array.isArray(cia1QuestionsRaw)
+          ? cia1QuestionsRaw.map((q: any) => {
+              const k = String(q?.key || '').trim();
+              const key = k.toLowerCase();
+              const override = key ? (cia1CoByKey[key] ?? cia1CoByKey[k] ?? null) : null;
+              return override != null ? { ...q, co: override } : q;
+            })
+          : [];
         const cia1HeaderMax = cia1Questions.reduce(
           (acc: { co1: number; co2: number }, q: any, idxQ: number) => {
             const qMax = Number(q?.max || 0);
@@ -957,7 +1039,15 @@ export default function CQIEntry({
         );
 
         const cia2Data = (cia2Res as any).data;
-        const cia2Questions = Array.isArray(cia2Data?.questions) ? cia2Data.questions : [];
+        const cia2QuestionsRaw = Array.isArray(cia2Data?.questions) ? cia2Data.questions : [];
+        const cia2Questions = Array.isArray(cia2QuestionsRaw)
+          ? cia2QuestionsRaw.map((q: any) => {
+              const k = String(q?.key || '').trim();
+              const key = k.toLowerCase();
+              const override = key ? (cia2CoByKey[key] ?? cia2CoByKey[k] ?? null) : null;
+              return override != null ? { ...q, co: override } : q;
+            })
+          : [];
         const cia2HeaderMax = cia2Questions.reduce(
           (acc: { co3: number; co4: number }, q: any, idxQ: number) => {
             const qMax = Number(q?.max || 0);
@@ -1415,6 +1505,51 @@ export default function CQIEntry({
           >
             Save Draft
           </button>
+
+          {!readOnly ? (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!subjectId || !teachingAssignmentId) return alert('Missing subject/teaching assignment');
+                if (readOnly) return;
+                const ok = confirm('Reset CQI marks for all students? This clears the saved draft.');
+                if (!ok) return;
+                setResettingMarks(true);
+                try {
+                  // Clear UI state immediately.
+                  setCqiEntries({});
+                  setCqiErrors({});
+                  setDirty(false);
+
+                  // Save empty draft to server.
+                  const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
+                  const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${qp}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ entries: {} }),
+                  }).catch(() => null);
+
+                  if (res && res.ok) {
+                    const j = await res.json().catch(() => null);
+                    setDraftLog(j || { updated_at: new Date().toISOString(), updated_by: null });
+                    alert('CQI draft reset');
+                  } else {
+                    const txt = res ? await res.text().catch(() => '') : '';
+                    alert(txt || 'Failed to reset draft');
+                  }
+                } catch (e: any) {
+                  alert('Failed to reset draft: ' + String(e?.message || e));
+                } finally {
+                  setResettingMarks(false);
+                }
+              }}
+              className="obe-btn obe-btn-danger"
+              style={{ minWidth: 120 }}
+              disabled={resettingMarks || readOnly}
+              title="Clears the saved draft marks"
+            >
+              {resettingMarks ? 'Resetting…' : 'Reset Marks'}
+            </button>
+          ) : null}
 
           <button
             type="button"

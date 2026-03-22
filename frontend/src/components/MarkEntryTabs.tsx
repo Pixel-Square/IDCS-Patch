@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { lsGet, lsRemove, lsSet } from '../utils/localStorage';
 import { normalizeClassType, normalizeObeClassType } from '../constants/classTypes';
-import Cia1Entry from './Cia1Entry';
-import Cia2Entry from './Cia2Entry';
 import Formative1List from './Formative1List';
 import Formative2List from './Formative2List';
 import LabEntry from './LabEntry';
@@ -16,6 +14,8 @@ import Review1SheetEntry from './Review1SheetEntry';
 import Review2SheetEntry from './Review2SheetEntry';
 import Ssa1Entry from './Ssa1Entry';
 import Ssa2Entry from './Ssa2Entry';
+import Cia1Entry from './Cia1Entry';
+import Cia2Entry from './Cia2Entry';
 import CQIEntry from '../pages/staff/CQIEntry';
 import DashboardWidgets from './layout/DashboardWidgets';
 import {
@@ -1410,6 +1410,7 @@ export default function MarkEntryTabs({
                       subjectId={subjectId}
                       teachingAssignmentId={selectedTaId ?? undefined}
                       classType={effectiveClassType ?? null}
+                      questionPaperType={questionPaperType ?? null}
                       enabledAssessments={effectiveEnabled ?? null}
                       assessmentType={activeCqi?.assessmentType || 'model'}
                       cos={activeCqi?.cos || ['CO1', 'CO2', 'CO3', 'CO4', 'CO5']}

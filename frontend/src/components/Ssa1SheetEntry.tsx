@@ -496,12 +496,14 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
         const draftSheet = (d as any)?.sheet;
         const draftBtls = (d as any)?.selectedBtls;
         if (draftSheet && typeof draftSheet === 'object' && Array.isArray((draftSheet as any).rows)) {
+          const draftRows = (draftSheet as any).rows as any[];
           const clearWorkflowState = markLock?.exists === false;
           setSheet((prev) => ({
             ...prev,
             termLabel: String((draftSheet as any).termLabel || masterTermLabel || 'KRCT AY25-26'),
             batchLabel: subjectId,
-            rows: (draftSheet as any).rows,
+            // IMPORTANT: don't overwrite an already-loaded roster with an empty draft.
+            rows: Array.isArray(draftRows) && draftRows.length ? (draftRows as any) : prev.rows,
             coSplitMax: (draftSheet as any)?.coSplitMax ?? prev.coSplitMax ?? (isReview ? { co1: [], co2: [] } : undefined),
             // mark manager metadata from server draft (if present)
             markManagerSnapshot: clearWorkflowState ? null : (draftSheet as any)?.markManagerSnapshot ?? prev.markManagerSnapshot ?? null,
@@ -512,6 +514,20 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
                 ? (draftSheet as any).markManagerLocked
                 : Boolean((draftSheet as any)?.markManagerSnapshot ?? prev.markManagerSnapshot),
           }));
+
+          // Ensure roster is merged AFTER draft load, so the name list is populated on first open.
+          // This preserves any draft marks while filling in missing students.
+          try {
+            setTimeout(() => {
+              try {
+                loadRoster();
+              } catch {
+                // ignore
+              }
+            }, 0);
+          } catch {
+            // ignore
+          }
           // set saved metadata if backend provided it
           const updatedAt = (res as any)?.updated_at ?? null;
           const updatedBy = (res as any)?.updated_by ?? null;

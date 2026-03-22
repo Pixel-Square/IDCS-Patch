@@ -75,9 +75,32 @@ export default function AcademicControllerQPPage(): JSX.Element {
         if (cancelled) return;
         const marks = Array.isArray((data as any)?.pattern?.marks) ? (data as any).pattern.marks : [];
         const cos = Array.isArray((data as any)?.pattern?.cos) ? (data as any).pattern.cos : [];
+
+        const storedCoToUi = (stored: any): string => {
+          // Backend commonly stores split as 12/34 or sometimes as 'both'.
+          // UI select expects '1&2' for CIA1 and '3&4' for CIA2.
+          const s = String(stored ?? '').trim();
+          if (!s) return '';
+
+          // Normalize numeric encodings.
+          const n = Number(s);
+          if (Number.isFinite(n)) {
+            if (n === 12) return '1&2';
+            if (n === 34) return '3&4';
+            return String(Math.trunc(n));
+          }
+
+          const upper = s.toUpperCase();
+          if (upper === 'BOTH') {
+            return backendKey.exam === 'CIA2' ? '3&4' : '1&2';
+          }
+          if (upper === '1&2' || upper === '3&4') return upper;
+          return s;
+        };
+
         const normalized: PatternRow[] = marks.map((m: any, idx: number) => ({
           marks: String(m),
-          co: cos[idx] == null ? '' : String(cos[idx]),
+          co: cos[idx] == null ? '' : storedCoToUi(cos[idx]),
         }));
         setPatternRows(normalized);
         setLastSavedAt(data?.updated_at ?? null);
@@ -216,8 +239,8 @@ export default function AcademicControllerQPPage(): JSX.Element {
 
       setIsSaving(true);
       const marks = cleaned.map((r) => Number(r.marks));
-      const cos = cleaned.map((r) => coToStored(r.co)).filter((v) => v !== '');
-      if (cos.length !== marks.length) {
+      const cos = cleaned.map((r) => coToStored(r.co));
+      if (cos.some((v) => v === '')) {
         setError('CO values must be valid for all rows.');
         return;
       }
@@ -229,6 +252,13 @@ export default function AcademicControllerQPPage(): JSX.Element {
       });
       setLastSavedAt(saved?.updated_at ?? null);
       setMessage('Saved.');
+
+      // Best-effort broadcast so already-open CIA pages can refresh patterns without a full reload.
+      try {
+        window.dispatchEvent(new CustomEvent('obe:qp-pattern-updated', { detail: { ...backendKey } }));
+      } catch {
+        // ignore
+      }
     } catch (e: any) {
       setError(e?.message || 'Save failed.');
     } finally {

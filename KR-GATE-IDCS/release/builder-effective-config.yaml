@@ -1,0 +1,28 @@
+directories:
+  output: release
+  buildResources: build
+appId: in.krgi.idcs.gate
+productName: IDCS GATE
+extraResources:
+  - from: build/drivers
+    to: drivers
+    filter:
+      - '**/*'
+files:
+  - filter:
+      - dist/**
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - ia32
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  include: build/installer.nsh
+electronVersion: 22.3.27
