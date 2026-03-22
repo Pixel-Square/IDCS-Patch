@@ -32,6 +32,7 @@ import { ModalPortal } from './ModalPortal';
 import { downloadTotalsWithPrompt } from '../utils/assessmentTotalsDownload';
 import { useMarkEntryEditRequestsEnabled } from '../utils/requestControl';
 import { normalizeRegisterNo, registerNoKeys } from '../utils/excelImport';
+import { clearLocalDraftCache } from '../utils/obeDraftCache';
 
 const DEFAULT_API_BASE = 'https://db.krgi.co.in';
 const API_BASE = import.meta.env.VITE_API_BASE || (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'http://localhost:8000' : DEFAULT_API_BASE);
@@ -98,6 +99,30 @@ function toNumOrEmpty(v: any): number | '' {
   if (v === '' || v == null) return '';
   const n = Number(v);
   return Number.isFinite(n) ? n : '';
+}
+
+function normalizePartMark(v: any, maxPart: number): number | '' {
+  const n = toNumOrEmpty(v);
+  if (n === '') return '';
+  return clamp(n, 0, maxPart);
+}
+
+function normalizeRowsByStudentId(rows: any, maxPart: number): Record<string, F1RowState> {
+  const out: Record<string, F1RowState> = {};
+  if (!rows || typeof rows !== 'object') return out;
+  for (const [k, raw] of Object.entries(rows)) {
+    const r: any = raw && typeof raw === 'object' ? raw : {};
+    const studentId = Number.isFinite(Number(r.studentId)) ? Number(r.studentId) : Number(k);
+    if (!Number.isFinite(studentId)) continue;
+    out[String(studentId)] = {
+      studentId,
+      skill1: normalizePartMark(r.skill1, maxPart),
+      skill2: normalizePartMark(r.skill2, maxPart),
+      att1: normalizePartMark(r.att1, maxPart),
+      att2: normalizePartMark(r.att2, maxPart),
+    };
+  }
+  return out;
 }
 
 function readFiniteNumber(value: any): number | null {
@@ -213,6 +238,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
 
   const [savingDraft, setSavingDraft] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [resettingMarks, setResettingMarks] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const draftLoadedRef = useRef(false);
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
@@ -422,7 +448,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
         const draftPartBtl = d?.partBtl;
 
         if (draftSheet && typeof draftSheet === 'object' && typeof draftSheet.rowsByStudentId === 'object') {
-          const rows = draftSheet.rowsByStudentId;
+          const rows = normalizeRowsByStudentId(draftSheet.rowsByStudentId, MAX_PART);
           const hasMarks = rows && Object.values(rows).some((row: any) => {
             if (!row || typeof row !== 'object') return false;
             return ['skill1', 'skill2', 'att1', 'att2'].some(k => (row as any)[k] !== '' && (row as any)[k] != null);
@@ -432,7 +458,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
               ...prevSheet,
               termLabel: String(draftSheet.termLabel || masterTermLabel || 'KRCT AY25-26'),
               batchLabel: String(subjectId),
-              rowsByStudentId: draftSheet.rowsByStudentId || {},
+              rowsByStudentId: rows || {},
               markManagerLocked:
                 typeof draftSheet.markManagerLocked === 'boolean'
                   ? draftSheet.markManagerLocked
@@ -466,7 +492,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     return () => {
       mounted = false;
     };
-  }, [entryOpen, isPublished, subjectId, assessmentKey, masterTermLabel]);
+  }, [entryOpen, isPublished, subjectId, assessmentKey, masterTermLabel, MAX_PART]);
 
   useEffect(() => {
     // While locked after publish, periodically check if IQAC updated the lock/edit-window rows.
@@ -828,17 +854,18 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
         const draftPartBtl = d?.partBtl;
         const draftBtls = d?.selectedBtls;
         if (draftSheet && typeof draftSheet === 'object' && typeof draftSheet.rowsByStudentId === 'object') {
+          const rows = normalizeRowsByStudentId(draftSheet.rowsByStudentId, MAX_PART);
           setSheet({
             termLabel: String(draftSheet.termLabel || masterTermLabel || 'KRCT AY25-26'),
             batchLabel: String(subjectId),
-              rowsByStudentId: draftSheet.rowsByStudentId || {},
-              markManagerLocked: typeof draftSheet.markManagerLocked === 'boolean' ? draftSheet.markManagerLocked : Boolean(draftSheet.markManagerSnapshot),
-              markManagerSnapshot: draftSheet.markManagerSnapshot ?? null,
-              markManagerApprovalUntil: draftSheet.markManagerApprovalUntil ?? null,
+            rowsByStudentId: rows || {},
+            markManagerLocked: typeof draftSheet.markManagerLocked === 'boolean' ? draftSheet.markManagerLocked : Boolean(draftSheet.markManagerSnapshot),
+            markManagerSnapshot: draftSheet.markManagerSnapshot ?? null,
+            markManagerApprovalUntil: draftSheet.markManagerApprovalUntil ?? null,
           });
           // Persist server draft into localStorage so later roster merges use it
           try {
-            if (key) lsSet(key, { termLabel: String(draftSheet.termLabel || masterTermLabel || 'KRCT AY25-26'), batchLabel: String(subjectId), rowsByStudentId: draftSheet.rowsByStudentId || {} });
+            if (key) lsSet(key, { termLabel: String(draftSheet.termLabel || masterTermLabel || 'KRCT AY25-26'), batchLabel: String(subjectId), rowsByStudentId: rows || {} });
           } catch {
             // ignore localStorage errors
           }
@@ -882,7 +909,7 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
     return () => {
       mounted = false;
     };
-  }, [subjectId, masterTermLabel, assessmentKey, key]);
+  }, [subjectId, masterTermLabel, assessmentKey, key, MAX_PART]);
 
   useEffect(() => {
     let mounted = true;
@@ -971,41 +998,79 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
           // ignore published fetch errors — we'll fall back to draft/local
         }
 
-        // Load local sheet and merge with roster (or use published marks if present)
+        // Merge roster with the best available marks source.
+        // IMPORTANT: Do not overwrite server drafts (loaded via fetchDraft) with an empty localStorage fallback.
         const stored = key ? lsGet<F1Sheet>(key) : null;
-        const base: F1Sheet = publishedMarks
-          ? {
-              termLabel: masterCfg?.termLabel ? String(masterCfg.termLabel) : masterTermLabel || 'KRCT AY25-26',
-              batchLabel: String(subjectId || ''),
-              rowsByStudentId: Object.fromEntries(
-                Object.entries(publishedMarks).map(([k, v]) => [k, { studentId: Number(k), skill1: toNumOrEmpty((v as any)?.skill1), skill2: toNumOrEmpty((v as any)?.skill2), att1: toNumOrEmpty((v as any)?.att1), att2: toNumOrEmpty((v as any)?.att2) }]),
-              ) as any,
-            }
-          : stored && typeof stored === 'object'
-          ? {
-              termLabel: masterCfg?.termLabel ? String(masterCfg.termLabel) : String((stored as any).termLabel || 'KRCT AY25-26'),
-              batchLabel: String(subjectId || (stored as any).batchLabel || ''),
-              rowsByStudentId:
-                (stored as any).rowsByStudentId && typeof (stored as any).rowsByStudentId === 'object'
-                  ? (stored as any).rowsByStudentId
-                  : {},
-            }
-          : { termLabel: masterTermLabel || 'KRCT AY25-26', batchLabel: String(subjectId || ''), rowsByStudentId: {} };
+        const storedRowsByStudentId =
+          stored && typeof stored === 'object' && (stored as any).rowsByStudentId && typeof (stored as any).rowsByStudentId === 'object'
+            ? ((stored as any).rowsByStudentId as Record<string, F1RowState>)
+            : {};
 
-        const merged: Record<string, F1RowState> = { ...base.rowsByStudentId };
-        for (const s of roster) {
-          const sid = String(s.id);
-          const existing = merged[sid];
-          merged[sid] = {
-            studentId: s.id,
-            skill1: typeof existing?.skill1 === 'number' ? clamp(Number(existing?.skill1), 0, MAX_PART) : '',
-            skill2: typeof existing?.skill2 === 'number' ? clamp(Number(existing?.skill2), 0, MAX_PART) : '',
-            att1: typeof existing?.att1 === 'number' ? clamp(Number(existing?.att1), 0, MAX_PART) : '',
-            att2: typeof existing?.att2 === 'number' ? clamp(Number(existing?.att2), 0, MAX_PART) : '',
+        const publishedRowsByStudentId = publishedMarks
+          ? (Object.fromEntries(
+              Object.entries(publishedMarks).map(([k, v]) => [
+                k,
+                {
+                  studentId: Number(k),
+                  skill1: toNumOrEmpty((v as any)?.skill1),
+                  skill2: toNumOrEmpty((v as any)?.skill2),
+                  att1: toNumOrEmpty((v as any)?.att1),
+                  att2: toNumOrEmpty((v as any)?.att2),
+                },
+              ]),
+            ) as Record<string, F1RowState>)
+          : null;
+
+        const rowHasAnyMark = (row: any) => {
+          if (!row || typeof row !== 'object') return false;
+          return ['skill1', 'skill2', 'att1', 'att2'].some((k) => {
+            const v = (row as any)[k];
+            return v !== '' && v != null;
+          });
+        };
+
+        const hasAnyMarks = (rows: Record<string, any>) => {
+          try {
+            return Object.values(rows || {}).some(rowHasAnyMark);
+          } catch {
+            return false;
+          }
+        };
+
+        setSheet((prev) => {
+          const prevRows = prev?.rowsByStudentId && typeof prev.rowsByStudentId === 'object' ? (prev.rowsByStudentId as any) : {};
+
+          const baseRows: Record<string, F1RowState> = publishedRowsByStudentId
+            ? publishedRowsByStudentId
+            : hasAnyMarks(prevRows)
+              ? (prevRows as Record<string, F1RowState>)
+              : hasAnyMarks(storedRowsByStudentId)
+                ? storedRowsByStudentId
+                : (prevRows as Record<string, F1RowState>);
+
+          const merged: Record<string, F1RowState> = { ...baseRows };
+          for (const s of roster) {
+            const sid = String(s.id);
+            const existing = merged[sid];
+            merged[sid] = {
+              studentId: s.id,
+              skill1: normalizePartMark((existing as any)?.skill1, MAX_PART),
+              skill2: normalizePartMark((existing as any)?.skill2, MAX_PART),
+              att1: normalizePartMark((existing as any)?.att1, MAX_PART),
+              att2: normalizePartMark((existing as any)?.att2, MAX_PART),
+            };
+          }
+
+          const nextTermLabel =
+            masterCfg?.termLabel ? String(masterCfg.termLabel) : String(prev?.termLabel || (stored as any)?.termLabel || masterTermLabel || 'KRCT AY25-26');
+
+          return {
+            ...prev,
+            termLabel: nextTermLabel,
+            batchLabel: String(subjectId || ''),
+            rowsByStudentId: merged,
           };
-        }
-
-        setSheet({ ...base, termLabel: base.termLabel || masterTermLabel, batchLabel: String(subjectId || base.batchLabel || ''), rowsByStudentId: merged });
+        });
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message || `Failed to load ${assessmentLabel} roster`);
@@ -1075,6 +1140,43 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
   sheetRef.current = sheet;
   const partBtlRef = useRef(partBtl);
   partBtlRef.current = partBtl;
+
+  const resetAllMarks = async () => {
+    if (!subjectId) return;
+    // Only show this action while publish window is open (per requirement).
+    if (!publishAllowed || globalLocked) return;
+    if (tableBlocked || publishedEditLocked) return;
+    const ok = window.confirm(`Reset ${assessmentLabel} marks for all students? This clears the saved draft.`);
+    if (!ok) return;
+
+    setResettingMarks(true);
+    setError(null);
+    try {
+      // Clear local caches first so we don't rehydrate old values.
+      clearLocalDraftCache(String(subjectId), String(assessmentKey), teachingAssignmentId ?? null);
+
+      const clearedRows: Record<string, F1RowState> = {};
+      for (const s of students) {
+        clearedRows[String(s.id)] = { studentId: s.id, skill1: '', skill2: '', att1: '', att2: '' };
+      }
+
+      const nextSheet: F1Sheet = {
+        ...sheetRef.current,
+        termLabel: String(sheetRef.current?.termLabel || masterTermLabel || 'KRCT AY25-26'),
+        batchLabel: String(subjectId),
+        rowsByStudentId: clearedRows,
+      };
+      setSheet(nextSheet);
+
+      const payload: F1DraftPayload = { sheet: nextSheet, partBtl: partBtlRef.current } as any;
+      await saveDraft(assessmentKey, String(subjectId), payload, teachingAssignmentId);
+      setSavedAt(new Date().toLocaleString());
+    } catch (e: any) {
+      setError(e?.message || 'Failed to reset marks');
+    } finally {
+      setResettingMarks(false);
+    }
+  };
   useEffect(() => {
     const handler = () => {
       if (!subjectId || students.length === 0) return;
@@ -1499,6 +1601,16 @@ export default function Formative1List({ subjectId, teachingAssignmentId, assess
           {!publishedEditLocked ? (
             <button onClick={saveDraftToDb} className="obe-btn obe-btn-success" disabled={savingDraft || students.length === 0}>
               {savingDraft ? 'Saving…' : 'Save Draft'}
+            </button>
+          ) : null}
+          {!isPublished && publishAllowed && !globalLocked ? (
+            <button
+              onClick={resetAllMarks}
+              className="obe-btn obe-btn-danger"
+              disabled={resettingMarks || students.length === 0 || tableBlocked || publishedEditLocked}
+              title="Clears the saved draft marks"
+            >
+              {resettingMarks ? 'Resetting…' : 'Reset Marks'}
             </button>
           ) : null}
           <button

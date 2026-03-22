@@ -512,12 +512,14 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
         const draftSheet = (d as any)?.sheet;
         const draftBtls = (d as any)?.selectedBtls;
         if (draftSheet && typeof draftSheet === 'object' && Array.isArray((draftSheet as any).rows)) {
+          const draftRows = (draftSheet as any).rows as any[];
           const clearWorkflowState = markLock?.exists === false;
           setSheet((prevSheet) => ({
             ...prevSheet,
             termLabel: String((draftSheet as any).termLabel || masterTermLabel || 'KRCT AY25-26'),
             batchLabel: subjectId,
-            rows: (draftSheet as any).rows,
+            // IMPORTANT: don't overwrite an already-loaded roster with an empty draft.
+            rows: Array.isArray(draftRows) && draftRows.length ? (draftRows as any) : prevSheet.rows,
             coSplitMax: (draftSheet as any)?.coSplitMax ?? prevSheet.coSplitMax ?? (isReview ? { co3: [], co4: [] } : undefined),
             markManagerSnapshot: clearWorkflowState ? null : (draftSheet as any)?.markManagerSnapshot ?? prevSheet.markManagerSnapshot ?? null,
             markManagerApprovalUntil: clearWorkflowState ? null : (draftSheet as any)?.markManagerApprovalUntil ?? prevSheet.markManagerApprovalUntil ?? null,
@@ -528,6 +530,19 @@ export default function Ssa2SheetEntry({ subjectId, teachingAssignmentId, label,
                   ? (draftSheet as any).markManagerLocked
                   : Boolean((draftSheet as any)?.markManagerSnapshot ?? prevSheet.markManagerSnapshot),
           }));
+
+          // Ensure roster is merged AFTER draft load so the student list is visible immediately.
+          try {
+            setTimeout(() => {
+              try {
+                loadRoster();
+              } catch {
+                // ignore
+              }
+            }, 0);
+          } catch {
+            // ignore
+          }
 
           const updatedAt = (res as any)?.updated_at ?? null;
           const updatedBy = (res as any)?.updated_by ?? null;

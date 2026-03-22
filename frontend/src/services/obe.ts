@@ -601,7 +601,9 @@ function normalizeQpPattern(raw: any): QpPatternConfig {
       : undefined;
 
     const out: QpPatternConfig = { marks };
-    if (cos) out.cos = cos.filter((v: any) => v !== '');
+    // IMPORTANT: preserve positional alignment (cos[i] corresponds to marks[i]).
+    // Filtering entries can shift indices and apply the wrong CO mapping.
+    if (cos) out.cos = cos;
     return out;
   }
 

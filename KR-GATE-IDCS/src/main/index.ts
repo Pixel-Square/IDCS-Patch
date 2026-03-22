@@ -1,5 +1,66 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
+import fs from 'fs'
 import path from 'path'
+
+function safeStringify(value: unknown): string {
+  try {
+    if (value instanceof Error) {
+      return JSON.stringify(
+        {
+          name: value.name,
+          message: value.message,
+          stack: value.stack,
+        },
+        null,
+        2,
+      )
+    }
+    return JSON.stringify(value, null, 2)
+  } catch {
+    try {
+      return String(value)
+    } catch {
+      return '[unprintable]'
+    }
+  }
+}
+
+function appendLog(line: string): void {
+  try {
+    const userData = app.getPath('userData')
+    const logDir = path.join(userData, 'logs')
+    const logFile = path.join(logDir, 'main.log')
+    fs.mkdirSync(logDir, { recursive: true })
+    fs.appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`, { encoding: 'utf8' })
+  } catch {
+    // ignore logging failures
+  }
+}
+
+function showFatalError(title: string, err: unknown): void {
+  const detail = safeStringify(err)
+  appendLog(`[fatal] ${title} ${detail}`)
+  try {
+    dialog.showMessageBoxSync({
+      type: 'error',
+      title,
+      message: title,
+      detail:
+        detail +
+        '\n\nLog file: %APPDATA%\\IDCS GATE\\logs\\main.log (or similar userData logs folder)',
+    })
+  } catch {
+    // ignore
+  }
+}
+
+process.on('uncaughtException', (err) => {
+  showFatalError('IDCS GATE crashed (uncaught exception)', err)
+})
+
+process.on('unhandledRejection', (reason) => {
+  showFatalError('IDCS GATE crashed (unhandled promise rejection)', reason)
+})
 
 // Register a secure, standard scheme so Web Serial works in production builds
 // (file:// is not considered a secure context by Chromium).
@@ -152,6 +213,7 @@ ipcMain.handle('nativeFetch', async (_event, req: NativeFetchRequest): Promise<N
 })
 
 function createWindow() {
+  appendLog('[startup] createWindow()')
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -265,14 +327,17 @@ function createWindow() {
     mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
       // eslint-disable-next-line no-console
       console.log(`[renderer console:${level}] ${message} (${sourceId}:${line})`)
+      appendLog(`[renderer console:${level}] ${message} (${sourceId}:${line})`)
     })
     mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
       // eslint-disable-next-line no-console
       console.error(`[renderer load failed] ${errorCode} ${errorDescription} ${validatedURL}`)
+      appendLog(`[renderer load failed] ${errorCode} ${errorDescription} ${validatedURL}`)
     })
     mainWindow.webContents.on('render-process-gone', (_e, details) => {
       // eslint-disable-next-line no-console
       console.error('[renderer process gone]', details)
+      appendLog(`[renderer process gone] ${safeStringify(details)}`)
     })
   } catch {}
 

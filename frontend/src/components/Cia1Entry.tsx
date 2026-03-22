@@ -63,6 +63,64 @@ type QuestionDef = {
   btl: 1 | 2 | 3 | 4 | 5 | 6;
 };
 
+function normalizeQuestionsForQp2(questions: QuestionDef[]): QuestionDef[] {
+  // QP2 Excel template sometimes has Q9 (8) and Q10 (8), while UI/CO-attainment treats it as a single
+  // split question worth 16 (like QP1's split Q9). Keep it deterministic and only apply when both exist.
+  const q9Idx = questions.findIndex((q) => String(q.key).toLowerCase() === 'q9' || String(q.label).trim().toUpperCase() === 'Q9');
+  const q10Idx = questions.findIndex((q) => String(q.key).toLowerCase() === 'q10' || String(q.label).trim().toUpperCase() === 'Q10');
+  if (q9Idx === -1 || q10Idx === -1) return questions;
+
+  const q9 = questions[q9Idx];
+  const q10 = questions[q10Idx];
+  const mergedMax = Math.max(0, Number(q9?.max || 0)) + Math.max(0, Number(q10?.max || 0));
+  const merged: QuestionDef = {
+    ...q9,
+    key: 'q9',
+    label: 'Q9',
+    max: mergedMax,
+    co: 'both',
+  };
+
+  return questions
+    .filter((q) => String(q.key).toLowerCase() !== 'q10')
+    .map((q) => {
+      const isQ9 = String(q.key).toLowerCase() === 'q9' || String(q.label).trim().toUpperCase() === 'Q9';
+      return isQ9 ? merged : q;
+    });
+}
+
+function normalizeSheetRowsForQp2(rowsByStudentId: Record<string, Cia1RowState> | unknown, q9Max: number) {
+  const rows = rowsByStudentId && typeof rowsByStudentId === 'object' ? (rowsByStudentId as Record<string, Cia1RowState>) : {};
+  let touched = false;
+  const out: Record<string, Cia1RowState> = { ...rows };
+
+  for (const [sid, row] of Object.entries(out)) {
+    if (!row || typeof row !== 'object') continue;
+    const qObj = (row as any).q;
+    if (!qObj || typeof qObj !== 'object') continue;
+    if (!('q10' in qObj)) continue;
+
+    const v9 = Number((qObj as any).q9);
+    const v10 = Number((qObj as any).q10);
+    const has9 = Number.isFinite(v9);
+    const has10 = Number.isFinite(v10);
+    if (!has10) {
+      if ((qObj as any).q10 !== '') {
+        touched = true;
+      }
+      delete (qObj as any).q10;
+      continue;
+    }
+
+    const merged = clamp((has9 ? v9 : 0) + v10, 0, q9Max);
+    (qObj as any).q9 = merged;
+    delete (qObj as any).q10;
+    touched = true;
+  }
+
+  return { rowsByStudentId: touched ? out : rows, touched };
+}
+
 // Defaults (overridden by OBE Master -> Assessment Headers)
 const DEFAULT_QUESTIONS: QuestionDef[] = [
   { key: 'q1', label: 'Q1', max: 2, co: 1, btl: 1 },
@@ -320,7 +378,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
     const marks = Array.isArray((iqacPattern as any)?.marks) ? (iqacPattern as any).marks : null;
     const cos = Array.isArray((iqacPattern as any)?.cos) ? (iqacPattern as any).cos : null;
     if (Array.isArray(marks) && marks.length) {
-      return marks
+      const derived = marks
         .map((max, idx) => {
           const fallback = baseFromMaster[idx];
           const coRaw = cos ? cos[idx] : undefined;
@@ -333,10 +391,12 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
           };
         })
         .filter((q) => Boolean(q.key));
+
+      return qpTypeKey === 'QP2' ? normalizeQuestionsForQp2(derived) : derived;
     }
 
-    return baseFromMaster;
-  }, [masterCfg, assessmentKey, iqacPattern, coPair.a]);
+    return qpTypeKey === 'QP2' ? normalizeQuestionsForQp2(baseFromMaster) : baseFromMaster;
+  }, [masterCfg, assessmentKey, iqacPattern, coPair.a, qpTypeKey]);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -634,6 +694,18 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
             return Object.keys(row).some(k => k.startsWith('q') && row[k] !== '' && row[k] != null);
           });
           if (hasMarks) {
+            if (qpTypeKey === 'QP2') {
+              const q9Max = Number(questions.find((q) => String(q.key).toLowerCase() === 'q9')?.max ?? 0) || 0;
+              const norm = normalizeSheetRowsForQp2(d.rowsByStudentId, q9Max);
+              d.rowsByStudentId = norm.rowsByStudentId;
+              if (d.questionBtl && typeof d.questionBtl === 'object') {
+                try {
+                  delete (d.questionBtl as any).q10;
+                } catch {
+                  // ignore
+                }
+              }
+            }
             setSheet((prevSheet) => ({
               ...prevSheet,
               termLabel: String(d.termLabel || prevSheet.termLabel),
@@ -663,7 +735,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
     return () => {
       mounted = false;
     };
-  }, [entryOpen, isPublished, subjectId, assessmentKey]);
+  }, [entryOpen, isPublished, subjectId, assessmentKey, qpTypeKey, questions]);
 
   const refreshPublishedSheet = async (silent?: boolean) => {
     if (!subjectId) return;
@@ -922,6 +994,17 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
               }),
             );
 
+            if (qpTypeKey === 'QP2') {
+              const q9Max = Number(questions.find((q) => String(q.key).toLowerCase() === 'q9')?.max ?? 0) || 0;
+              const norm = normalizeSheetRowsForQp2(rowsByStudentId, q9Max);
+              (Object.assign(rowsByStudentId, norm.rowsByStudentId) as any);
+              try {
+                delete (questionBtl as any).q10;
+              } catch {
+                // ignore
+              }
+            }
+
             setSheet({ termLabel: String(pd.termLabel || masterCfg?.termLabel || 'KRCT AY25-26'), batchLabel: subjectId, questionBtl, rowsByStudentId });
             setPublishedAt(new Date().toLocaleString());
             try {
@@ -935,7 +1018,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
 
         // Load local sheet and merge with roster.
         const stored = lsGet<Cia1Sheet>(sheetKey(assessmentKey, subjectId, teachingAssignmentId));
-        const base: Cia1Sheet =
+        let base: Cia1Sheet =
           stored && typeof stored === 'object'
             ? {
                 termLabel: masterCfg?.termLabel ? String(masterCfg.termLabel) : String((stored as any).termLabel || 'KRCT AY25-26'),
@@ -947,6 +1030,24 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
                 rowsByStudentId: (stored as any).rowsByStudentId && typeof (stored as any).rowsByStudentId === 'object' ? (stored as any).rowsByStudentId : {},
               }
             : { termLabel: String(masterCfg?.termLabel || 'KRCT AY25-26'), batchLabel: subjectId, questionBtl: defaultQuestionBtl(questions), rowsByStudentId: {} };
+
+        if (qpTypeKey === 'QP2') {
+          const q9Max = Number(questions.find((q) => String(q.key).toLowerCase() === 'q9')?.max ?? 0) || 0;
+          const norm = normalizeSheetRowsForQp2(base.rowsByStudentId, q9Max);
+          base = {
+            ...base,
+            rowsByStudentId: norm.rowsByStudentId,
+            questionBtl: (() => {
+              const qb = { ...(base.questionBtl || {}) } as any;
+              try {
+                delete qb.q10;
+              } catch {
+                // ignore
+              }
+              return qb;
+            })(),
+          };
+        }
 
         // Backfill missing questionBtl keys.
         const nextQuestionBtl: Record<string, 1 | 2 | 3 | 4 | 5 | 6 | ''> = { ...defaultQuestionBtl(questions), ...(base.questionBtl || {}) };
@@ -1016,6 +1117,18 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
         if (!mounted) return;
         const d = res?.draft;
         if (d && typeof d === 'object') {
+          if (qpTypeKey === 'QP2') {
+            const q9Max = Number(questions.find((q) => String(q.key).toLowerCase() === 'q9')?.max ?? 0) || 0;
+            const norm = normalizeSheetRowsForQp2((d as any).rowsByStudentId, q9Max);
+            (d as any).rowsByStudentId = norm.rowsByStudentId;
+            if ((d as any).questionBtl && typeof (d as any).questionBtl === 'object') {
+              try {
+                delete ((d as any).questionBtl as any).q10;
+              } catch {
+                // ignore
+              }
+            }
+          }
           setSheet((prev) => ({
             ...prev,
             termLabel: String((d as any).termLabel || prev.termLabel),
@@ -1050,7 +1163,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
     return () => {
       mounted = false;
     };
-  }, [subjectId, assessmentKey, questions]);
+  }, [subjectId, assessmentKey, questions, qpTypeKey]);
 
   const totalsMax = useMemo(() => questions.reduce((sum, q) => sum + q.max, 0), [questions]);
   const questionCoMax = useMemo(() => {
@@ -1066,6 +1179,18 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
   }, [questions, coPair]);
 
   const effectiveCoMax = useMemo(() => {
+    const hasIqacCoMapping = (() => {
+      const marks = Array.isArray((iqacPattern as any)?.marks) ? (iqacPattern as any).marks : [];
+      const cos = Array.isArray((iqacPattern as any)?.cos) ? (iqacPattern as any).cos : [];
+      return marks.length > 0 && cos.length === marks.length;
+    })();
+
+    // If IQAC provided an explicit CO map for the current QP pattern, prefer the derived max
+    // so global IQAC changes reflect immediately without wiping any entered marks.
+    if (hasIqacCoMapping) {
+      return { a: questionCoMax.a, b: questionCoMax.b };
+    }
+
     const cfg = ((masterCfg as any)?.assessments?.[assessmentKey]?.coMax ?? (masterCfg as any)?.assessments?.cia1?.coMax) as any;
     const rawA = Number(cfg?.[`co${coPair.a}`] ?? cfg?.co1);
     const rawB = Number(cfg?.[`co${coPair.b}`] ?? cfg?.co2);
@@ -1073,7 +1198,7 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
       a: Number.isFinite(rawA) ? Math.max(0, rawA) : questionCoMax.a,
       b: Number.isFinite(rawB) ? Math.max(0, rawB) : questionCoMax.b,
     };
-  }, [masterCfg, questionCoMax, assessmentKey, coPair]);
+  }, [masterCfg, questionCoMax, assessmentKey, coPair, iqacPattern]);
 
   const visibleBtls = useMemo(() => {
     const set = new Set<number>();
