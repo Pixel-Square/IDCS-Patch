@@ -407,7 +407,7 @@ Expected: All > 0 (verify marks exist for extraction)
 Once you run the verification queries and provide results, I will:
 1. Show exact JSON extraction code for CO marks
 2. Provide complete FORMAT 1 query
-3. Give step-by-step Power Query instructions for Power BI
+3. Give step-by-step query-to-report transformation instructions
 4. Verify row counts and data quality
 
 **Ready to proceed? Run the queries in Step 3 and share the output!**
