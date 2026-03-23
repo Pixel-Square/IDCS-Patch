@@ -20,7 +20,10 @@ from .views import (
     IQACExportOptionsView,
     IQACExportYearsView,
     IQACCommonExportView,
-    FormExportExcelView
+    FormExportExcelView,
+    PrincipalCreateFeedbackView,
+    PrincipalAnalyticsDashboardView,
+    PrincipalFormAnalyticsView,
 )
 
 urlpatterns = [
@@ -82,4 +85,9 @@ urlpatterns = [
     path('common-export/options/', IQACExportOptionsView.as_view(), name='common-export-options'),
     path('export-years/', IQACExportYearsView.as_view(), name='export-years'),
     path('common-export/', IQACCommonExportView.as_view(), name='common-export'),
+
+    # Principal integrated dashboard/analytics APIs
+    path('principal/create/', PrincipalCreateFeedbackView.as_view(), name='principal-create'),
+    path('principal/analytics-dashboard/', PrincipalAnalyticsDashboardView.as_view(), name='principal-analytics-dashboard'),
+    path('principal/<int:form_id>/analytics/', PrincipalFormAnalyticsView.as_view(), name='principal-form-analytics'),
 ]

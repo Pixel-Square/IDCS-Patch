@@ -16,6 +16,13 @@ from accounts.models import Role, Permission, RolePermission
 class Command(BaseCommand):
     help = 'Create or update feedback module permissions and role mappings'
 
+    def _get_role_by_name(self, role_name: str):
+        # Prefer exact match, then fallback to case-insensitive role names.
+        role = Role.objects.filter(name=role_name).first()
+        if role:
+            return role
+        return Role.objects.filter(name__iexact=role_name).first()
+
     def handle(self, *args, **options):
         self.stdout.write(self.style.WARNING('Creating/updating feedback permissions...'))
         
@@ -24,11 +31,25 @@ class Command(BaseCommand):
             'feedback.feedback_page': 'View feedback page',
             'feedback.create': 'Create feedback forms (HOD)',
             'feedback.reply': 'Reply to feedback (Staff & Students)',
+            'feedback.all_departments_access': 'Create/manage feedback for all departments',
+            'feedback.own_department_access': 'Create/manage feedback for own department only',
+            'feedback.principal_feedback_page': 'Principal feedback page access',
+            'feedback.principal_all_departments_access': 'Principal access to all departments for institutional feedback',
+            'feedback.principal_create': 'Principal can create institutional feedback',
+            'feedback.principal_analytics': 'Principal can view feedback analytics',
         }
         
         # Define role-permission mappings
         role_permission_mapping = {
-            'HOD': ['feedback.feedback_page', 'feedback.create'],
+            'IQAC': ['feedback.feedback_page', 'feedback.create', 'feedback.all_departments_access'],
+            'HOD': ['feedback.feedback_page', 'feedback.create', 'feedback.own_department_access'],
+            'PRINCIPAL': [
+                'feedback.feedback_page',
+                'feedback.principal_feedback_page',
+                'feedback.principal_all_departments_access',
+                'feedback.principal_create',
+                'feedback.principal_analytics',
+            ],
             'STAFF': ['feedback.feedback_page', 'feedback.reply'],
             'STUDENT': ['feedback.feedback_page', 'feedback.reply'],
         }
@@ -71,7 +92,25 @@ class Command(BaseCommand):
             
             for role_name, perm_codes in role_permission_mapping.items():
                 try:
-                    role = Role.objects.get(name=role_name)
+                    role = self._get_role_by_name(role_name)
+                    if not role:
+                        raise Role.DoesNotExist()
+
+                    # Remove deprecated principal mappings so PRINCIPAL no longer uses IQAC/HOD scope permissions.
+                    if role_name == 'PRINCIPAL':
+                        deprecated_codes = ['feedback.create', 'feedback.all_departments_access', 'feedback.own_department_access']
+                        deprecated_perms = Permission.objects.filter(code__in=deprecated_codes)
+                        if deprecated_perms.exists():
+                            removed_count, _ = RolePermission.objects.filter(
+                                role=role,
+                                permission__in=deprecated_perms,
+                            ).delete()
+                            if removed_count:
+                                self.stdout.write(
+                                    self.style.WARNING(
+                                        f'  ↻ Removed deprecated principal mappings: {removed_count}'
+                                    )
+                                )
                     
                     for perm_code in perm_codes:
                         try:

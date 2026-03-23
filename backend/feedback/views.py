@@ -6,11 +6,11 @@ from rest_framework.permissions import IsAuthenticated
 
 logger = logging.getLogger(__name__)
 from django.db import transaction
-from django.db.models import Q, Case, When, Value, IntegerField
+from django.db.models import Q, Case, When, Value, IntegerField, Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from .models import FeedbackForm, FeedbackQuestion, FeedbackResponse, FeedbackFormSubmission
+from .models import FeedbackForm, FeedbackQuestion, FeedbackQuestionOption, FeedbackResponse, FeedbackFormSubmission
 from .serializers import (
     FeedbackFormCreateSerializer,
     FeedbackFormSerializer,
@@ -21,53 +21,175 @@ from accounts.utils import get_user_permissions
 from academics.models import StaffProfile
 
 
-def is_user_iqac(user) -> bool:
-    """Check if user has IQAC role."""
+def get_normalized_permissions(user):
     if not user or not getattr(user, 'is_authenticated', False):
-        return False
-    
-    # Check roles relationship
+        return set()
     try:
-        role_names = set(
-            user.roles.values_list('name', flat=True)
-        ) if hasattr(user, 'roles') else set()
-        role_names_upper = {str(name).upper() for name in role_names}
-        if 'IQAC' in role_names_upper:
-            return True
-    except:
-        pass
-    
-    # Check RoleAssignment
-    try:
-        from academics.models import RoleAssignment
-        return RoleAssignment.objects.filter(user=user, role__name__iexact='IQAC').exists()
-    except:
-        return False
-
-
-def is_user_admin(user) -> bool:
-    """Check if user has Admin role or superuser privileges."""
-    if not user or not getattr(user, 'is_authenticated', False):
-        return False
-
-    if getattr(user, 'is_superuser', False):
-        return True
-
-    try:
-        role_names = set(
-            user.roles.values_list('name', flat=True)
-        ) if hasattr(user, 'roles') else set()
-        role_names_upper = {str(name).upper() for name in role_names}
-        if 'ADMIN' in role_names_upper:
-            return True
+        return {str(p).lower() for p in get_user_permissions(user)}
     except Exception:
-        pass
+        return set()
 
+
+def user_has_permission(user, permission_code: str) -> bool:
+    return permission_code.lower() in get_normalized_permissions(user)
+
+
+def user_has_any_permission(user, permission_codes) -> bool:
+    user_perms = get_normalized_permissions(user)
+    return any(str(code).lower() in user_perms for code in permission_codes)
+
+
+def get_feedback_department_scope(user):
+    """Resolve department scope for feedback create users.
+
+    Returns dict with keys:
+    - allowed: bool
+    - all_departments: bool
+    - department_ids: list[int]
+    """
+    permissions = get_normalized_permissions(user)
+    can_create = 'feedback.create' in permissions
+    can_all = 'feedback.all_departments_access' in permissions
+    can_own = 'feedback.own_department_access' in permissions
+
+    if not can_create or not (can_all or can_own):
+        return {
+            'allowed': False,
+            'all_departments': False,
+            'department_ids': [],
+        }
+
+    if can_all:
+        return {
+            'allowed': True,
+            'all_departments': True,
+            'department_ids': [],
+        }
+
+    department_ids = []
     try:
-        from academics.models import RoleAssignment
-        return RoleAssignment.objects.filter(user=user, role__name__iexact='ADMIN').exists()
+        from academics.models import AcademicYear, DepartmentRole
+
+        staff_profile = StaffProfile.objects.get(user=user)
+        active_ay = AcademicYear.objects.filter(is_active=True).first()
+
+        if active_ay:
+            department_ids = list(
+                DepartmentRole.objects.filter(
+                    staff=staff_profile,
+                    role='HOD',
+                    is_active=True,
+                    academic_year=active_ay,
+                ).values_list('department_id', flat=True)
+            )
+
+        if not department_ids and getattr(staff_profile, 'department_id', None):
+            department_ids = [staff_profile.department_id]
     except Exception:
-        return False
+        department_ids = []
+
+    return {
+        'allowed': True,
+        'all_departments': False,
+        'department_ids': [int(d) for d in department_ids if d],
+    }
+
+
+def apply_department_scope_filter(queryset, scope, field_name='department_id'):
+    if scope.get('all_departments'):
+        return queryset
+
+    department_ids = scope.get('department_ids') or []
+    if not department_ids:
+        return queryset.none()
+
+    return queryset.filter(**{f'{field_name}__in': department_ids})
+
+
+def calculate_feedback_response_metrics(feedback_form):
+    """Return response_count, expected_count, and percentage for a feedback form."""
+    from academics.models import StudentProfile, Section, AcademicYear, DepartmentRole
+
+    response_count = FeedbackResponse.objects.filter(
+        feedback_form=feedback_form
+    ).values('user_id').distinct().count()
+
+    expected_count = 0
+
+    if feedback_form.target_type in {'STAFF', 'HOD'}:
+        if feedback_form.target_type == 'HOD':
+            active_ay = AcademicYear.objects.filter(is_active=True).first()
+            if active_ay:
+                expected_count = DepartmentRole.objects.filter(
+                    role='HOD',
+                    is_active=True,
+                    academic_year=active_ay,
+                    department_id=feedback_form.department_id,
+                ).values('staff_id').distinct().count()
+        else:
+            expected_count = StaffProfile.objects.filter(
+                department_id=feedback_form.department_id
+            ).count()
+    elif feedback_form.target_type == 'STUDENT':
+        if feedback_form.all_classes:
+            expected_count = StudentProfile.objects.filter(
+                section__batch__course__department_id=feedback_form.department_id
+            ).count()
+        else:
+            sections_to_query = []
+
+            current_ay = AcademicYear.objects.filter(is_active=True).first()
+            current_acad_year = None
+            if current_ay:
+                try:
+                    current_acad_year = int(str(current_ay.name).split('-')[0])
+                except Exception:
+                    current_acad_year = None
+
+            if feedback_form.sections:
+                sections_to_query = list(feedback_form.sections)
+            elif feedback_form.section_id:
+                sections_to_query = [feedback_form.section_id]
+            else:
+                sections_filter = Q(batch__course__department_id=feedback_form.department_id)
+
+                if feedback_form.years:
+                    year_filters = Q()
+                    for year in feedback_form.years:
+                        if current_acad_year:
+                            batch_start_year = current_acad_year - year + 1
+                            year_filters |= Q(batch__start_year=str(batch_start_year))
+                    sections_filter &= year_filters
+                elif feedback_form.year:
+                    if current_acad_year:
+                        batch_start_year = current_acad_year - feedback_form.year + 1
+                        sections_filter &= Q(batch__start_year=str(batch_start_year))
+
+                if feedback_form.semesters:
+                    sections_filter &= Q(semester_id__in=feedback_form.semesters)
+                elif feedback_form.semester_id:
+                    sections_filter &= Q(semester_id=feedback_form.semester_id)
+
+                sections_to_query = list(
+                    Section.objects.filter(sections_filter).values_list('id', flat=True)
+                )
+
+            if sections_to_query:
+                expected_count = StudentProfile.objects.filter(
+                    section_id__in=sections_to_query
+                ).count()
+
+    percentage = round((response_count / expected_count * 100) if expected_count > 0 else 0, 1)
+    return response_count, expected_count, percentage
+
+
+def has_principal_scope_permissions(user):
+    perms = get_normalized_permissions(user)
+    required = {
+        'feedback.principal_feedback_page',
+        'feedback.principal_all_departments_access',
+    }
+    return required.issubset(perms)
 
 
 class CreateFeedbackFormView(APIView):
@@ -83,14 +205,19 @@ class CreateFeedbackFormView(APIView):
     def post(self, request):
         try:
             # Check if user has permission to create feedback forms
-            user_permissions = get_user_permissions(request.user)
+            user_permissions = get_normalized_permissions(request.user)
             if 'feedback.create' not in user_permissions:
                 return Response({
                     'detail': 'You do not have permission to create feedback forms.'
                 }, status=status.HTTP_403_FORBIDDEN)
-            
-            # Check if user is IQAC
-            is_iqac = is_user_iqac(request.user)
+
+            can_all_departments_access = 'feedback.all_departments_access' in user_permissions
+            can_own_department_access = 'feedback.own_department_access' in user_permissions
+
+            if not (can_all_departments_access or can_own_department_access):
+                return Response({
+                    'detail': 'You do not have department access permission.'
+                }, status=status.HTTP_403_FORBIDDEN)
             
             from academics.models import AcademicYear, Semester, DepartmentRole, Department
             
@@ -104,10 +231,9 @@ class CreateFeedbackFormView(APIView):
             departments_payload = request.data.get('departments', []) or request.data.get('department_ids', [])
             all_departments_flag = request.data.get('all_departments', False)
             
-            if is_iqac:
-                # IQAC: Allow selection from all active departments
+            if can_all_departments_access:
+                # Users with all department permission can choose any department.
                 if all_departments_flag:
-                    # Select all departments
                     selected_department_ids = list(
                         Department.objects.values_list('id', flat=True)
                     )
@@ -121,12 +247,11 @@ class CreateFeedbackFormView(APIView):
                             }, status=status.HTTP_400_BAD_REQUEST)
                     selected_department_ids = [int(d) for d in departments_payload]
                 else:
-                    # IQAC must select at least one department or select all
                     return Response({
                         'detail': 'Please select at least one department or select all departments.'
                     }, status=status.HTTP_400_BAD_REQUEST)
             else:
-                # HOD: Auto-assign their department(s)
+                # Users with own department permission are restricted to assigned departments.
                 try:
                     staff_profile = StaffProfile.objects.get(user=request.user)
                 except StaffProfile.DoesNotExist:
@@ -539,20 +664,26 @@ class GetUserDepartmentView(APIView):
     
     def get(self, request):
         user = request.user
-        
-        # Check if user has HOD create permission
-        user_permissions = get_user_permissions(user)
-        is_hod = 'feedback.create' in user_permissions
-        
-        # Check if user is IQAC
-        from accounts.models import UserRole
-        is_iqac = UserRole.objects.filter(user=user, role__name__iexact='IQAC').exists()
-        
-        # Check if user is Principal
-        is_principal = UserRole.objects.filter(user=user, role__name__iexact='PRINCIPAL').exists()
-        
-        # If IQAC or Principal, return all active departments
-        if is_iqac or is_principal:
+
+        user_permissions = get_normalized_permissions(user)
+        can_create_feedback = 'feedback.create' in user_permissions
+        can_all_departments_access = 'feedback.all_departments_access' in user_permissions
+        can_own_department_access = 'feedback.own_department_access' in user_permissions
+
+        if not can_create_feedback:
+            return Response({
+                'detail': 'You do not have permission to create feedback forms.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if not (can_all_departments_access or can_own_department_access):
+            return Response({
+                'success': False,
+                'department': None,
+                'detail': 'Department access permission is required.'
+            }, status=status.HTTP_200_OK)
+
+        # Users with all department access can view/switch all departments.
+        if can_all_departments_access:
             try:
                 from academics.models import Department
                 
@@ -571,7 +702,7 @@ class GetUserDepartmentView(APIView):
                     }, status=status.HTTP_200_OK)
                 
                 # Handle active department selection
-                session_key = 'active_principal_department_id' if is_principal else 'active_iqac_department_id'
+                session_key = 'active_feedback_department_id'
                 active_department_id = request.GET.get('active_department_id')
                 if active_department_id:
                     try:
@@ -600,14 +731,13 @@ class GetUserDepartmentView(APIView):
                         active_department = departments_list[0]
                         request.session[session_key] = departments_list[0]['id']
                 
-                user_type = 'principal' if is_principal else 'iqac'
                 response_data = {
                     'success': True,
                     'has_multiple_departments': len(departments_list) > 1,
                     'departments': departments_list,
                     'active_department': active_department,
                 }
-                response_data[f'is_{user_type}'] = True
+                response_data['is_all_departments_access'] = True
                 return Response(response_data, status=status.HTTP_200_OK)
             except Exception as e:
                 import traceback
@@ -616,7 +746,7 @@ class GetUserDepartmentView(APIView):
                     'detail': f'Error retrieving departments: {str(e)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        if not is_hod:
+        if not can_own_department_access:
             # For non-HOD users, return single department from staff profile
             try:
                 staff_profile = StaffProfile.objects.get(user=user)
@@ -762,6 +892,23 @@ class GetClassOptionsView(APIView):
     def get(self, request):
         try:
             from academics.models import Semester, Section, AcademicYear
+
+            user_permissions = get_normalized_permissions(request.user)
+            can_create_feedback = 'feedback.create' in user_permissions
+            can_all_departments_access = 'feedback.all_departments_access' in user_permissions
+            can_own_department_access = 'feedback.own_department_access' in user_permissions
+
+            if not can_create_feedback:
+                return Response({
+                    'error': 'You do not have permission to create feedback forms.',
+                    'success': False
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            if not (can_all_departments_access or can_own_department_access):
+                return Response({
+                    'error': 'You do not have department access permission.',
+                    'success': False
+                }, status=status.HTTP_403_FORBIDDEN)
             
             # Get all academic years (1-4)
             years = [
@@ -787,56 +934,52 @@ class GetClassOptionsView(APIView):
             if not departments_param:
                 departments_param = request.GET.get('departments', '').split(',') if request.GET.get('departments') else []
             
-            try:
-                staff_profile = StaffProfile.objects.get(user=request.user)
-                
-                # For HODs with multiple departments, use provided departments or session
-                from academics.models import DepartmentRole
-                
-                active_ay = AcademicYear.objects.filter(is_active=True).first()
-                if active_ay:
-                    department_roles = DepartmentRole.objects.select_related('department').filter(
-                        staff=staff_profile,
-                        role='HOD',
-                        is_active=True,
-                        academic_year=active_ay
-                    )
-                    
-                    departments_count = department_roles.count()
-                    
-                    if departments_count > 1 and departments_param:
-                        # Multiple departments and departments specified - validate and use them
-                        available_dept_ids = [dr.department.id for dr in department_roles]
-                        for dept_id_str in departments_param:
-                            if dept_id_str:  # Skip empty strings
-                                dept_id = int(dept_id_str)
-                                if dept_id in available_dept_ids:
-                                    from academics.models import Department
-                                    try:
-                                        dept = Department.objects.get(id=dept_id)
-                                        user_departments.append(dept)
-                                    except Department.DoesNotExist:
-                                        pass
-                    elif departments_count > 1:
-                        # Multiple departments but no param - use all departments
-                        user_departments = [dr.department for dr in department_roles]
-                    elif departments_count == 1:
-                        # Single department
-                        user_departments = [department_roles.first().department]
+            if can_all_departments_access:
+                if departments_param:
+                    sections_filter['batch__course__department_id__in'] = [int(d) for d in departments_param if str(d).strip()]
+            else:
+                try:
+                    staff_profile = StaffProfile.objects.get(user=request.user)
+                    from academics.models import DepartmentRole
+
+                    active_ay = AcademicYear.objects.filter(is_active=True).first()
+                    if active_ay:
+                        department_roles = DepartmentRole.objects.select_related('department').filter(
+                            staff=staff_profile,
+                            role='HOD',
+                            is_active=True,
+                            academic_year=active_ay
+                        )
+
+                        departments_count = department_roles.count()
+
+                        if departments_count > 1 and departments_param:
+                            available_dept_ids = [dr.department.id for dr in department_roles]
+                            for dept_id_str in departments_param:
+                                if dept_id_str:
+                                    dept_id = int(dept_id_str)
+                                    if dept_id in available_dept_ids:
+                                        from academics.models import Department
+                                        try:
+                                            dept = Department.objects.get(id=dept_id)
+                                            user_departments.append(dept)
+                                        except Department.DoesNotExist:
+                                            pass
+                        elif departments_count > 1:
+                            user_departments = [dr.department for dr in department_roles]
+                        elif departments_count == 1:
+                            user_departments = [department_roles.first().department]
+                        else:
+                            if staff_profile.department:
+                                user_departments = [staff_profile.department]
                     else:
-                        # No department roles, fall back to staff profile
                         if staff_profile.department:
                             user_departments = [staff_profile.department]
-                else:
-                    # No active AY, fall back to staff profile
-                    if staff_profile.department:
-                        user_departments = [staff_profile.department]
-                
-                if user_departments:
-                    # Filter sections by selected departments (now supports multiple)
-                    sections_filter['batch__course__department__in'] = user_departments
-            except StaffProfile.DoesNotExist:
-                pass
+
+                    if user_departments:
+                        sections_filter['batch__course__department__in'] = user_departments
+                except StaffProfile.DoesNotExist:
+                    pass
             
             # Get current academic year to calculate student years
             current_ay = AcademicYear.objects.filter(is_active=True).first()
@@ -945,13 +1088,16 @@ class DeactivateAllFeedbackFormsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if not (is_user_iqac(request.user) or is_user_admin(request.user)):
+        scope = get_feedback_department_scope(request.user)
+        if not scope.get('allowed'):
             return Response({
                 'detail': 'You do not have permission to deactivate all feedback forms.'
             }, status=status.HTTP_403_FORBIDDEN)
 
         with transaction.atomic():
-            updated = FeedbackForm.objects.filter(status='ACTIVE', active=True).update(active=False)
+            qs = FeedbackForm.objects.filter(status='ACTIVE', active=True)
+            qs = apply_department_scope_filter(qs, scope, field_name='department_id')
+            updated = qs.update(active=False)
 
         return Response({
             'message': 'All active feedback forms deactivated',
@@ -970,7 +1116,8 @@ class DeactivateFilteredFeedbackFormsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if not (is_user_iqac(request.user) or is_user_admin(request.user)):
+        scope = get_feedback_department_scope(request.user)
+        if not scope.get('allowed'):
             return Response({
                 'detail': 'You do not have permission to deactivate feedback forms.'
             }, status=status.HTTP_403_FORBIDDEN)
@@ -981,6 +1128,11 @@ class DeactivateFilteredFeedbackFormsView(APIView):
         years = request.data.get('years', []) or []
 
         qs = FeedbackForm.objects.filter(status='ACTIVE', active=True)
+        qs = apply_department_scope_filter(qs, scope, field_name='department_id')
+
+        if not scope.get('all_departments'):
+            # Own-department users are always scoped by server-side department filter.
+            all_departments = True
 
         if not all_departments and department_ids:
             try:
@@ -1023,13 +1175,16 @@ class ActivateAllFeedbackFormsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if not (is_user_iqac(request.user) or is_user_admin(request.user)):
+        scope = get_feedback_department_scope(request.user)
+        if not scope.get('allowed'):
             return Response({
                 'detail': 'You do not have permission to activate all feedback forms.'
             }, status=status.HTTP_403_FORBIDDEN)
 
         with transaction.atomic():
-            updated = FeedbackForm.objects.filter(status='ACTIVE', active=False).update(active=True)
+            qs = FeedbackForm.objects.filter(status='ACTIVE', active=False)
+            qs = apply_department_scope_filter(qs, scope, field_name='department_id')
+            updated = qs.update(active=True)
 
         return Response({
             'message': 'All forms activated',
@@ -1048,7 +1203,8 @@ class ActivateFilteredFeedbackFormsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if not (is_user_iqac(request.user) or is_user_admin(request.user)):
+        scope = get_feedback_department_scope(request.user)
+        if not scope.get('allowed'):
             return Response({
                 'detail': 'You do not have permission to activate feedback forms.'
             }, status=status.HTTP_403_FORBIDDEN)
@@ -1059,6 +1215,11 @@ class ActivateFilteredFeedbackFormsView(APIView):
         years = request.data.get('years', []) or []
 
         qs = FeedbackForm.objects.filter(status='ACTIVE', active=False)
+        qs = apply_department_scope_filter(qs, scope, field_name='department_id')
+
+        if not scope.get('all_departments'):
+            # Own-department users are always scoped by server-side department filter.
+            all_departments = True
 
         if not all_departments and department_ids:
             try:
@@ -1238,6 +1399,259 @@ class GetResponseStatisticsView(APIView):
             'response_count': response_count,
             'expected_count': expected_count,
             'percentage': round((response_count / expected_count * 100) if expected_count > 0 else 0, 1)
+        }, status=status.HTTP_200_OK)
+
+
+class PrincipalCreateFeedbackView(APIView):
+    """Create principal feedback forms from unified page payload."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user_permissions = get_normalized_permissions(request.user)
+        required = {
+            'feedback.principal_feedback_page',
+            'feedback.principal_create',
+            'feedback.principal_all_departments_access',
+        }
+        if not required.issubset(user_permissions):
+            return Response({
+                'detail': 'You do not have permission to create principal feedback.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        target_audience = request.data.get('target_audience', [])
+        if isinstance(target_audience, str):
+            target_audience = [target_audience]
+        if not isinstance(target_audience, list) or not target_audience:
+            return Response({
+                'detail': 'Please select at least one target audience.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        supported_targets = {'STUDENT', 'STAFF'}
+        invalid_targets = [str(t) for t in target_audience if str(t).upper() not in supported_targets]
+        if invalid_targets:
+            return Response({
+                'detail': 'Unsupported target audience selected.',
+                'invalid_targets': invalid_targets,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        questions_payload = request.data.get('questions', [])
+        if not isinstance(questions_payload, list) or not questions_payload:
+            return Response({
+                'detail': 'At least one question is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from academics.models import Department
+
+        department_ids = list(Department.objects.values_list('id', flat=True))
+        if not department_ids:
+            return Response({
+                'detail': 'No departments found to create principal feedback.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        normalized_questions = []
+        for idx, question in enumerate(questions_payload):
+            question_text = str(question.get('question_text', '')).strip()
+            if not question_text:
+                return Response({
+                    'detail': f'Question {idx + 1}: question text is required.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            allow_rating = bool(question.get('allow_rating', True))
+            allow_comment = bool(question.get('allow_comment', True))
+            question_type = str(question.get('question_type', '')).strip().lower()
+            if not question_type:
+                if bool(question.get('allow_own_type', False)):
+                    question_type = 'radio'
+                elif allow_comment and not allow_rating:
+                    question_type = 'text'
+                else:
+                    question_type = 'rating'
+
+            options_payload = question.get('options', []) or []
+            options = []
+            if question_type in {'radio', 'rating_radio_comment'}:
+                for opt in options_payload:
+                    if isinstance(opt, dict):
+                        text = str(opt.get('option_text', '')).strip()
+                    else:
+                        text = str(opt).strip()
+                    if text:
+                        options.append({'option_text': text})
+
+            normalized_questions.append({
+                'question': question_text,
+                'question_type': question_type,
+                'allow_rating': allow_rating,
+                'allow_comment': allow_comment,
+                'is_mandatory': bool(question.get('is_mandatory', True)),
+                'order': idx + 1,
+                'options': options,
+            })
+
+        created_forms = []
+        errors = []
+        is_anonymous = bool(request.data.get('is_anonymous', False))
+
+        with transaction.atomic():
+            for target in [str(t).upper() for t in target_audience]:
+                for department_id in department_ids:
+                    payload = {
+                        'target_type': target,
+                        'type': 'OPEN_FEEDBACK',
+                        'is_subject_based': False,
+                        'department': department_id,
+                        'status': 'DRAFT',
+                        # Preserve legacy behavior: anonymous flag maps to common comment capture setting.
+                        'common_comment_enabled': bool(is_anonymous and target == 'STUDENT'),
+                        'questions': normalized_questions,
+                    }
+
+                    serializer = FeedbackFormCreateSerializer(data=payload, context={'request': request})
+                    if serializer.is_valid():
+                        created_forms.append(serializer.save(created_by=request.user))
+                    else:
+                        errors.append({
+                            'target_type': target,
+                            'department_id': department_id,
+                            'errors': serializer.errors,
+                        })
+
+        if not created_forms:
+            return Response({
+                'detail': 'Failed to create principal feedback forms.',
+                'errors': errors,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        response_status = status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS
+        return Response({
+            'detail': (
+                f'Created {len(created_forms)} principal feedback form(s).'
+                if not errors else
+                f'Created {len(created_forms)} form(s), {len(errors)} failed.'
+            ),
+            'created_count': len(created_forms),
+            'feedback_form_id': created_forms[0].id,
+            'created_forms': [
+                {
+                    'id': form.id,
+                    'target_type': form.target_type,
+                    'department_id': form.department_id,
+                    'status': form.status,
+                }
+                for form in created_forms
+            ],
+            'errors': errors,
+        }, status=response_status)
+
+
+class PrincipalAnalyticsDashboardView(APIView):
+    """List principal-created feedback forms with summary analytics."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user_permissions = get_normalized_permissions(request.user)
+        required = {
+            'feedback.principal_feedback_page',
+            'feedback.principal_analytics',
+            'feedback.principal_all_departments_access',
+        }
+        if not required.issubset(user_permissions):
+            return Response({
+                'detail': 'You do not have permission to view principal analytics dashboard.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        forms = FeedbackForm.objects.filter(
+            created_by=request.user,
+            is_subject_based=False,
+        ).prefetch_related('questions')
+
+        items = []
+        for form in forms.order_by('-created_at'):
+            response_count, expected_count, percentage = calculate_feedback_response_metrics(form)
+            items.append({
+                'id': form.id,
+                'feedback_type': 'PRINCIPAL',
+                'target_audience': form.target_type,
+                'is_anonymous': False,
+                'status': form.status,
+                'created_at': form.created_at,
+                'response_count': response_count,
+                'expected_count': expected_count,
+                'percentage': percentage,
+                'questions_count': form.questions.count(),
+            })
+
+        return Response({'items': items}, status=status.HTTP_200_OK)
+
+
+class PrincipalFormAnalyticsView(APIView):
+    """Get principal analytics details for one feedback form."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, form_id):
+        user_permissions = get_normalized_permissions(request.user)
+        required = {
+            'feedback.principal_feedback_page',
+            'feedback.principal_analytics',
+            'feedback.principal_all_departments_access',
+        }
+        if not required.issubset(user_permissions):
+            return Response({
+                'detail': 'You do not have permission to view principal analytics.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        form = get_object_or_404(
+            FeedbackForm,
+            id=form_id,
+            created_by=request.user,
+            is_subject_based=False,
+        )
+
+        response_count, expected_count, percentage = calculate_feedback_response_metrics(form)
+
+        questions = []
+        question_qs = FeedbackQuestion.objects.filter(feedback_form=form).order_by('order', 'id')
+        option_map = {}
+        question_ids = list(question_qs.values_list('id', flat=True))
+        if question_ids:
+            for opt in FeedbackQuestionOption.objects.filter(question_id__in=question_ids).values('id', 'question_id', 'option_text'):
+                option_map.setdefault(opt['question_id'], []).append({
+                    'id': opt['id'],
+                    'option_text': opt['option_text'],
+                })
+
+        response_counts_by_question = {
+            row['question_id']: row['count']
+            for row in FeedbackResponse.objects.filter(
+                feedback_form=form,
+                question_id__in=question_ids,
+            ).values('question_id').annotate(count=Count('id'))
+        }
+
+        for q in question_qs:
+            questions.append({
+                'id': q.id,
+                'question_text': q.question,
+                'question_type': q.question_type,
+                'is_mandatory': bool(getattr(q, 'is_mandatory', False)),
+                'responses_count': int(response_counts_by_question.get(q.id, 0)),
+                'options': option_map.get(q.id, []),
+            })
+
+        return Response({
+            'feedback_form_id': form.id,
+            'feedback_type': 'PRINCIPAL',
+            'target_audience': form.target_type,
+            'is_anonymous': False,
+            'status': form.status,
+            'created_at': form.created_at,
+            'response_count': response_count,
+            'expected_count': expected_count,
+            'percentage': percentage,
+            'questions': questions,
         }, status=status.HTTP_200_OK)
 
 
@@ -3205,13 +3619,24 @@ class IQACExportOptionsView(APIView):
     
     def get(self, request):
         try:
+            scope = get_feedback_department_scope(request.user)
+            if not scope.get('allowed'):
+                return Response({
+                    'detail': 'You do not have permission to view all departments.'
+                }, status=status.HTTP_403_FORBIDDEN)
+
             from academics.models import Department
-            
-            # Get all departments (IQAC sees all departments, no filter on is_active)
-            departments = Department.objects.all().values('id', 'name', 'code', 'short_name').order_by('name')
+
+            departments_qs = Department.objects.all().order_by('name')
+            if not scope.get('all_departments'):
+                department_ids = scope.get('department_ids') or []
+                departments_qs = departments_qs.filter(id__in=department_ids)
+
+            departments = departments_qs.values('id', 'name', 'code', 'short_name')
             
             return Response({
                 'departments': list(departments),
+                'all_departments_access': bool(scope.get('all_departments')),
                 'success': True
             }, status=status.HTTP_200_OK)
             
@@ -3237,12 +3662,21 @@ class IQACExportYearsView(APIView):
     
     def get(self, request):
         try:
+            scope = get_feedback_department_scope(request.user)
+            if not scope.get('allowed'):
+                return Response({
+                    'detail': 'You do not have permission to view export years.'
+                }, status=status.HTTP_403_FORBIDDEN)
+
             from academics.models import Section
             
             # Try to get distinct years from active sections
-            years = Section.objects.filter(
-                batch__start_year__isnull=False
-            ).values_list('batch__start_year', flat=True).distinct()
+            section_qs = Section.objects.filter(batch__start_year__isnull=False)
+            if not scope.get('all_departments'):
+                department_ids = scope.get('department_ids') or []
+                section_qs = section_qs.filter(batch__course__department_id__in=department_ids)
+
+            years = section_qs.values_list('batch__start_year', flat=True).distinct()
             
             # Calculate academic years from batch start years
             from academics.models import AcademicYear
@@ -3292,8 +3726,8 @@ class IQACCommonExportView(APIView):
     
     def post(self, request):
         try:
-            # Check if user is IQAC
-            if not is_user_iqac(request.user):
+            scope = get_feedback_department_scope(request.user)
+            if not scope.get('allowed'):
                 return Response({
                     'detail': 'You do not have permission to export feedback.'
                 }, status=status.HTTP_403_FORBIDDEN)
@@ -3323,6 +3757,12 @@ class IQACCommonExportView(APIView):
             ).prefetch_related(
                 'user__student_profile'
             ).all()
+
+            qs = apply_department_scope_filter(qs, scope, field_name='feedback_form__department_id')
+
+            if not scope.get('all_departments'):
+                # Own-department users are already scoped by server-side filter.
+                all_departments = True
             
             # Filter by department if specified
             if not all_departments and department_ids:

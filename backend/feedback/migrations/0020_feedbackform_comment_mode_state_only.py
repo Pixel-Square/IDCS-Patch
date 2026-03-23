@@ -9,8 +9,11 @@ def ensure_comment_mode_column(apps, schema_editor):
     and conditionally adds the DB column if missing.
     """
 
-    table_name = 'feedback_forms'
+    FeedbackForm = apps.get_model('feedback', 'FeedbackForm')
+    table_name = FeedbackForm._meta.db_table
     column_name = 'comment_mode'
+    table_name_quoted = schema_editor.quote_name(table_name)
+    column_name_quoted = schema_editor.quote_name(column_name)
 
     with schema_editor.connection.cursor() as cursor:
         existing_cols = {
@@ -18,16 +21,33 @@ def ensure_comment_mode_column(apps, schema_editor):
         }
 
     if column_name not in existing_cols:
-        FeedbackForm = apps.get_model('feedback', 'FeedbackForm')
-        field = FeedbackForm._meta.get_field('comment_mode')
-        schema_editor.add_field(FeedbackForm, field)
+        vendor = schema_editor.connection.vendor
+        if vendor == 'postgresql':
+            schema_editor.execute(
+                f"ALTER TABLE {table_name_quoted} ADD COLUMN {column_name_quoted} varchar(20) NOT NULL DEFAULT 'question_wise'"
+            )
+        elif vendor == 'sqlite':
+            schema_editor.execute(
+                f"ALTER TABLE {table_name_quoted} ADD COLUMN {column_name_quoted} varchar(20) NOT NULL DEFAULT 'question_wise'"
+            )
+        else:
+            schema_editor.execute(
+                f"ALTER TABLE {table_name_quoted} ADD COLUMN {column_name_quoted} varchar(20) NOT NULL DEFAULT 'question_wise'"
+            )
 
     # Backfill any NULLs defensively.
     with schema_editor.connection.cursor() as cursor:
         cursor.execute(
-            f"UPDATE {table_name} SET {column_name} = %s WHERE {column_name} IS NULL",
+            f"UPDATE {table_name_quoted} SET {column_name_quoted} = %s WHERE {column_name_quoted} IS NULL",
             ['question_wise'],
         )
+
+    # Keep a DB-level default on Postgres for compatibility with older code paths.
+    if schema_editor.connection.vendor == 'postgresql':
+        with schema_editor.connection.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE {table_name_quoted} ALTER COLUMN {column_name_quoted} SET DEFAULT 'question_wise'"
+            )
 
 
 class Migration(migrations.Migration):

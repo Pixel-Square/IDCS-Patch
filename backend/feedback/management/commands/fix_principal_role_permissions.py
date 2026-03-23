@@ -45,6 +45,7 @@ class Command(BaseCommand):
 
         target_permissions = {
             'feedback.principal_feedback_page': 'Principal feedback page access',
+            'feedback.principal_all_departments_access': 'Principal access to all departments for institutional feedback',
             'feedback.principal_create': 'Principal can create institutional feedback',
             'feedback.principal_analytics': 'Principal can view feedback analytics',
             # Existing menu visibility permission.
@@ -87,6 +88,7 @@ class Command(BaseCommand):
 
             for code in (
                 'feedback.principal_feedback_page',
+                'feedback.principal_all_departments_access',
                 'feedback.principal_create',
                 'feedback.principal_analytics',
                 'feedback.feedback_page',
@@ -117,6 +119,7 @@ class Command(BaseCommand):
                 role=legacy_role,
                 permission__code__in=[
                     'feedback.principal_feedback_page',
+                    'feedback.principal_all_departments_access',
                     'feedback.principal_create',
                     'feedback.principal_analytics',
                     'feedback.feedback_page',
@@ -125,11 +128,23 @@ class Command(BaseCommand):
             if deleted:
                 self.stdout.write(self.style.SUCCESS(f'  ✓ Removed duplicate legacy mappings: {deleted}'))
 
+        removed_legacy_main, _ = RolePermission.objects.filter(
+            role__name__iexact='PRINCIPAL',
+            permission__code__in=[
+                'feedback.create',
+                'feedback.all_departments_access',
+                'feedback.own_department_access',
+            ],
+        ).delete()
+        if removed_legacy_main:
+            self.stdout.write(self.style.SUCCESS(f'  ✓ Removed legacy PRINCIPAL mappings: {removed_legacy_main}'))
+
         final = list(
             RolePermission.objects.filter(
                 role__name__iexact='PRINCIPAL',
                 permission__code__in=[
                     'feedback.principal_feedback_page',
+                    'feedback.principal_all_departments_access',
                     'feedback.principal_create',
                     'feedback.principal_analytics',
                     'feedback.feedback_page',

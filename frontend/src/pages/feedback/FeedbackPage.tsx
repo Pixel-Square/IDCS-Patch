@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, PlusCircle, FileText, Users, Loader2, AlertCircle, X, Trash2, Star, Send, CheckCircle, ChevronDown, ChevronLeft, Pencil, Download, CircleDot } from 'lucide-react';
+import { MessageSquare, PlusCircle, FileText, Users, Loader2, AlertCircle, X, Trash2, Star, Send, CheckCircle, ChevronDown, ChevronLeft, Pencil, Download, CircleDot, BarChart3 } from 'lucide-react';
 import { getCachedMe } from '../../services/auth';
 import fetchWithAuth from '../../services/fetchAuth';
 
@@ -270,6 +270,66 @@ type ClassOptions = {
   year_sections?: Record<number, ClassOption[]>;
 };
 
+type PrincipalDashboardItem = {
+  id: number;
+  feedback_type: 'PRINCIPAL';
+  target_audience: 'STUDENT' | 'STAFF' | 'HOD';
+  is_anonymous: boolean;
+  status: 'DRAFT' | 'ACTIVE' | 'CLOSED';
+  created_at: string;
+  response_count: number;
+  expected_count: number;
+  percentage: number;
+  questions_count: number;
+};
+
+type PrincipalAnalyticsQuestion = {
+  id: number;
+  question_text: string;
+  question_type: 'rating' | 'text' | 'radio' | 'rating_radio_comment';
+  is_mandatory: boolean;
+  responses_count: number;
+  options: Array<{ id: number; option_text: string }>;
+};
+
+type PrincipalAnalyticsData = {
+  feedback_form_id: number;
+  feedback_type: string;
+  target_audience: 'STUDENT' | 'STAFF' | 'HOD';
+  is_anonymous: boolean;
+  status: 'DRAFT' | 'ACTIVE' | 'CLOSED';
+  created_at: string;
+  response_count: number;
+  expected_count: number;
+  percentage: number;
+  questions: PrincipalAnalyticsQuestion[];
+};
+
+type PrincipalCreateQuestion = {
+  id: string;
+  question_text: string;
+  allow_rating: boolean;
+  allow_comment: boolean;
+  allow_own_type: boolean;
+  is_mandatory: boolean;
+  options: string[];
+};
+
+const buildPrincipalCreateDefaultQuestions = (): PrincipalCreateQuestion[] => {
+  const seed = Date.now();
+  return [
+    {
+      id: `principal-q-${seed}-1`,
+      question_text: 'Share your overall feedback about institutional facilities and support.',
+      allow_rating: true,
+      allow_comment: true,
+      allow_own_type: false,
+      is_mandatory: true,
+      options: ['Option 1', 'Option 2'],
+    },
+  ];
+};
+
 const extractApiErrorMessage = (data: any): string => {
   if (!data) return 'An unexpected error occurred.';
   if (typeof data === 'string') return data;
@@ -494,12 +554,34 @@ export default function FeedbackPage() {
 
   // Check permissions
   const permissions = (user?.permissions || []).map(p => p.toLowerCase());
-  const roleNamesUpper = (user?.roles || []).map(r => String(r).toUpperCase());
-  const isIQACUser = roleNamesUpper.includes('IQAC');
-  const isAdminUser = roleNamesUpper.includes('ADMIN');
-  const isStudentUser = String(user?.profile_type || '').toUpperCase() === 'STUDENT' || roleNamesUpper.includes('STUDENT');
   const canCreateFeedback = permissions.includes('feedback.create');
   const canReplyFeedback = permissions.includes('feedback.reply');
+  const canAllDepartmentsAccess = permissions.includes('feedback.all_departments_access');
+  const canOwnDepartmentAccess = permissions.includes('feedback.own_department_access');
+  const canPrincipalAllDepartmentsAccess = permissions.includes('feedback.principal_all_departments_access');
+  const canPrincipalFeedbackPage = permissions.includes('feedback.principal_feedback_page');
+  const canDepartmentScopedCreate = canCreateFeedback && (canAllDepartmentsAccess || canOwnDepartmentAccess) && !canPrincipalFeedbackPage;
+  const canPrincipalCreate = permissions.includes('feedback.principal_create');
+  const canPrincipalAnalytics = permissions.includes('feedback.principal_analytics');
+  const showPrincipalSection = canPrincipalFeedbackPage && canPrincipalAllDepartmentsAccess && (canPrincipalCreate || canPrincipalAnalytics);
+  const isIQACUser = canAllDepartmentsAccess && !canPrincipalFeedbackPage;
+  const isStudentUser = String(user?.profile_type || '').toUpperCase() === 'STUDENT';
+
+  const [principalDashboardLoading, setPrincipalDashboardLoading] = useState(false);
+  const [principalDashboardError, setPrincipalDashboardError] = useState<string | null>(null);
+  const [principalDashboardItems, setPrincipalDashboardItems] = useState<PrincipalDashboardItem[]>([]);
+  const [principalDashboardReloadKey, setPrincipalDashboardReloadKey] = useState(0);
+  const [selectedPrincipalFormId, setSelectedPrincipalFormId] = useState<number | null>(null);
+  const [principalAnalyticsLoading, setPrincipalAnalyticsLoading] = useState(false);
+  const [principalAnalyticsError, setPrincipalAnalyticsError] = useState<string | null>(null);
+  const [principalAnalyticsData, setPrincipalAnalyticsData] = useState<PrincipalAnalyticsData | null>(null);
+  const [principalCreateOpen, setPrincipalCreateOpen] = useState(false);
+  const [principalSubmitError, setPrincipalSubmitError] = useState<string | null>(null);
+  const [principalSubmitSuccess, setPrincipalSubmitSuccess] = useState<string | null>(null);
+  const [principalSubmitting, setPrincipalSubmitting] = useState(false);
+  const [principalTargetAudience, setPrincipalTargetAudience] = useState<Array<'STUDENT' | 'STAFF'>>(['STUDENT', 'STAFF']);
+  const [principalIsAnonymous, setPrincipalIsAnonymous] = useState(false);
+  const [principalQuestions, setPrincipalQuestions] = useState<PrincipalCreateQuestion[]>(buildPrincipalCreateDefaultQuestions());
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -637,10 +719,194 @@ export default function FeedbackPage() {
     setLoading(false);
   }, []);
 
+  useEffect(() => {
+    const loadPrincipalDashboard = async () => {
+      if (!showPrincipalSection || !canPrincipalAnalytics) {
+        setPrincipalDashboardItems([]);
+        setPrincipalDashboardError(null);
+        setSelectedPrincipalFormId(null);
+        setPrincipalAnalyticsData(null);
+        return;
+      }
+
+      try {
+        setPrincipalDashboardLoading(true);
+        setPrincipalDashboardError(null);
+        const response = await fetchWithAuth('/api/feedback/principal/analytics-dashboard/');
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.detail || 'Failed to load principal feedback dashboard.');
+        }
+
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        setPrincipalDashboardItems(items);
+      } catch (error: any) {
+        setPrincipalDashboardError(error?.message || 'Failed to load principal feedback dashboard.');
+      } finally {
+        setPrincipalDashboardLoading(false);
+      }
+    };
+
+    loadPrincipalDashboard();
+  }, [showPrincipalSection, canPrincipalAnalytics, principalDashboardReloadKey]);
+
+  useEffect(() => {
+    const loadPrincipalAnalytics = async () => {
+      if (!showPrincipalSection || !canPrincipalAnalytics || !selectedPrincipalFormId) {
+        setPrincipalAnalyticsData(null);
+        setPrincipalAnalyticsError(null);
+        return;
+      }
+
+      try {
+        setPrincipalAnalyticsLoading(true);
+        setPrincipalAnalyticsError(null);
+        const response = await fetchWithAuth(`/api/feedback/principal/${selectedPrincipalFormId}/analytics/`);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.detail || 'Failed to load principal feedback analytics.');
+        }
+        setPrincipalAnalyticsData(payload as PrincipalAnalyticsData);
+      } catch (error: any) {
+        setPrincipalAnalyticsError(error?.message || 'Failed to load principal feedback analytics.');
+      } finally {
+        setPrincipalAnalyticsLoading(false);
+      }
+    };
+
+    loadPrincipalAnalytics();
+  }, [showPrincipalSection, canPrincipalAnalytics, selectedPrincipalFormId]);
+
+  const addPrincipalQuestion = () => {
+    const seed = Date.now();
+    setPrincipalQuestions(prev => ([
+      ...prev,
+      {
+        id: `principal-q-${seed}-${prev.length + 1}`,
+        question_text: '',
+        allow_rating: true,
+        allow_comment: true,
+        allow_own_type: false,
+        is_mandatory: true,
+        options: ['Option 1', 'Option 2'],
+      },
+    ]));
+  };
+
+  const removePrincipalQuestion = (id: string) => {
+    setPrincipalQuestions(prev => prev.filter(q => q.id !== id));
+  };
+
+  const updatePrincipalQuestion = (id: string, updater: (q: PrincipalCreateQuestion) => PrincipalCreateQuestion) => {
+    setPrincipalQuestions(prev => prev.map(q => (q.id === id ? updater(q) : q)));
+  };
+
+  const handleTogglePrincipalAudience = (audience: 'STUDENT' | 'STAFF') => {
+    setPrincipalTargetAudience(prev => {
+      const exists = prev.includes(audience);
+      if (exists) {
+        const next = prev.filter(v => v !== audience);
+        if (!next.includes('STUDENT')) {
+          setPrincipalIsAnonymous(false);
+        }
+        return next;
+      }
+      return [...prev, audience];
+    });
+  };
+
+  const validatePrincipalCreateForm = (): string | null => {
+    if (principalTargetAudience.length === 0) {
+      return 'Please select at least one target audience.';
+    }
+    if (principalQuestions.length === 0) {
+      return 'Please add at least one question.';
+    }
+
+    for (let i = 0; i < principalQuestions.length; i += 1) {
+      const q = principalQuestions[i];
+      if (!q.question_text.trim()) {
+        return `Question ${i + 1}: question text is required.`;
+      }
+      if (!q.allow_rating && !q.allow_comment && !q.allow_own_type) {
+        return `Question ${i + 1}: enable at least one answer method.`;
+      }
+      if (q.allow_own_type) {
+        const optionsCount = q.options.map(opt => opt.trim()).filter(Boolean).length;
+        if (optionsCount < 2) {
+          return `Question ${i + 1}: own type needs at least 2 options.`;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const handlePrincipalCreateSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setPrincipalSubmitError(null);
+    setPrincipalSubmitSuccess(null);
+
+    const validationError = validatePrincipalCreateForm();
+    if (validationError) {
+      setPrincipalSubmitError(validationError);
+      return;
+    }
+
+    try {
+      setPrincipalSubmitting(true);
+      const payload = {
+        target_audience: principalTargetAudience,
+        is_anonymous: principalTargetAudience.includes('STUDENT') ? principalIsAnonymous : false,
+        questions: principalQuestions.map(q => {
+          let questionType: 'rating' | 'text' | 'radio' = 'rating';
+          if (q.allow_own_type) {
+            questionType = 'radio';
+          } else if (q.allow_comment && !q.allow_rating) {
+            questionType = 'text';
+          }
+
+          return {
+            question_text: q.question_text.trim(),
+            question_type: questionType,
+            allow_rating: q.allow_rating,
+            allow_comment: q.allow_comment,
+            is_mandatory: q.is_mandatory,
+            options: q.allow_own_type ? q.options.map(opt => opt.trim()).filter(Boolean) : [],
+          };
+        }),
+      };
+
+      const response = await fetchWithAuth('/api/feedback/principal/create/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Failed to create principal feedback forms.');
+      }
+
+      const createdId = Number(data?.feedback_form_id || data?.created_forms?.[0]?.id || 0);
+      setPrincipalSubmitSuccess(data?.detail || 'Principal feedback created successfully.');
+      setPrincipalDashboardReloadKey(prev => prev + 1);
+      if (createdId > 0) {
+        setSelectedPrincipalFormId(createdId);
+      }
+      setPrincipalCreateOpen(false);
+      setPrincipalQuestions(buildPrincipalCreateDefaultQuestions());
+    } catch (error: any) {
+      setPrincipalSubmitError(error?.message || 'Failed to create principal feedback forms.');
+    } finally {
+      setPrincipalSubmitting(false);
+    }
+  };
+
   // Fetch HOD department(s) on mount
   useEffect(() => {
     const fetchHODDepartments = async () => {
-      if (canCreateFeedback) {
+      if (canDepartmentScopedCreate) {
         try {
           setDepartmentLoading(true);
           const response = await fetchWithAuth('/api/feedback/department/');
@@ -696,12 +962,12 @@ export default function FeedbackPage() {
     if (user) {
       fetchHODDepartments();
     }
-  }, [user, canCreateFeedback]);
+  }, [user, canDepartmentScopedCreate]);
 
   // Fetch IQAC departments on mount
   useEffect(() => {
     const fetchIQACDepartments = async () => {
-      if (isIQACUser && canCreateFeedback) {
+      if (canAllDepartmentsAccess && canCreateFeedback) {
         try {
           const response = await fetchWithAuth('/api/feedback/common-export/options/');
           if (response.ok) {
@@ -728,7 +994,7 @@ export default function FeedbackPage() {
     if (user) {
       fetchIQACDepartments();
     }
-  }, [user, isIQACUser, canCreateFeedback]);
+  }, [user, canAllDepartmentsAccess, canCreateFeedback]);
 
   // Initialize selectedDepartments when form is opened
   useEffect(() => {
@@ -1174,12 +1440,12 @@ export default function FeedbackPage() {
   };
 
   const handleActivateAllForms = async () => {
-    if (!(isIQACUser || isAdminUser)) return;
+    if (!canDepartmentScopedCreate) return;
     await openBulkFilterModal('ACTIVATE');
   };
 
   const openCommonExport = async () => {
-    if (!isIQACUser) return;
+    if (!canDepartmentScopedCreate) return;
     await openBulkFilterModal('EXPORT');
   };
 
@@ -1195,7 +1461,7 @@ export default function FeedbackPage() {
 
   useEffect(() => {
     if (!commonExportOpen) return;
-    if (!isIQACUser && !isAdminUser && !(permissions || []).includes('feedback.analytics_view')) return;
+    if (!canDepartmentScopedCreate && !(permissions || []).includes('feedback.analytics_view')) return;
     if (commonExportYearsLoaded || commonExportYearsLoading) return;
 
     // Always load years institution-wide (year filtering must work even for All Departments).
@@ -1291,7 +1557,7 @@ export default function FeedbackPage() {
   };
 
   const handleDownloadCommonExport = async () => {
-    if (!isIQACUser) return;
+    if (!canDepartmentScopedCreate) return;
     setCommonExportError(null);
 
     if (!commonExportAllDepartments && commonExportSelectedDepartmentIds.length === 0) {
@@ -1352,7 +1618,7 @@ export default function FeedbackPage() {
   };
 
   const handleDeactivateFilteredForms = async () => {
-    if (!(isIQACUser || isAdminUser)) return;
+    if (!canDepartmentScopedCreate) return;
     setCommonExportError(null);
 
     if (!commonExportAllDepartments && commonExportSelectedDepartmentIds.length === 0) {
@@ -1410,7 +1676,7 @@ export default function FeedbackPage() {
   };
 
   const handleActivateFilteredForms = async () => {
-    if (!(isIQACUser || isAdminUser)) return;
+    if (!canDepartmentScopedCreate) return;
     setCommonExportError(null);
 
     if (!commonExportAllDepartments && commonExportSelectedDepartmentIds.length === 0) {
@@ -2292,16 +2558,313 @@ export default function FeedbackPage() {
           </div>
         )}
 
+        {showPrincipalSection && (
+          <div className="mb-6 bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-indigo-600 rounded-lg">
+                <BarChart3 className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-slate-800">Principal Feedback</h2>
+                <p className="text-sm text-slate-600">Single-page principal create, dashboard, and analytics by principal permissions.</p>
+              </div>
+            </div>
+
+            {principalSubmitSuccess && (
+              <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                <span className="text-green-800">{principalSubmitSuccess}</span>
+              </div>
+            )}
+
+            {principalSubmitError && (
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <span className="text-red-800">{principalSubmitError}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
+              <div className="p-4 rounded-lg border border-slate-200 bg-slate-50">
+                <h3 className="text-sm font-semibold text-slate-800 mb-2">Principal Create</h3>
+                {canPrincipalCreate ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-slate-600">Create permission enabled. Use the builder here to publish institutional feedback drafts.</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPrincipalCreateOpen(prev => !prev);
+                        setPrincipalSubmitError(null);
+                        setPrincipalSubmitSuccess(null);
+                      }}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      {principalCreateOpen ? 'Hide Create Builder' : 'Open Create Builder'}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">No permission: feedback.principal_create</p>
+                )}
+              </div>
+              <div className="p-4 rounded-lg border border-slate-200 bg-slate-50">
+                <h3 className="text-sm font-semibold text-slate-800 mb-2">Principal Analytics</h3>
+                {canPrincipalAnalytics ? (
+                  <p className="text-sm text-slate-600">Analytics permission is enabled. Select a form below to preview analytics data.</p>
+                ) : (
+                  <p className="text-sm text-slate-500">No permission: feedback.principal_analytics</p>
+                )}
+              </div>
+              <div className="p-4 rounded-lg border border-slate-200 bg-slate-50">
+                <h3 className="text-sm font-semibold text-slate-800 mb-2">Principal Department Scope</h3>
+                <p className="text-sm text-slate-600">
+                  {canPrincipalAllDepartmentsAccess
+                    ? 'Principal all-departments access is enabled for institutional feedback.'
+                    : 'No permission: feedback.principal_all_departments_access'}
+                </p>
+              </div>
+            </div>
+
+            {canPrincipalCreate && principalCreateOpen && (
+              <form onSubmit={handlePrincipalCreateSubmit} className="mb-6 rounded-lg border border-slate-200 p-4 bg-slate-50 space-y-4">
+                <h3 className="text-sm font-semibold text-slate-800">Create Principal Feedback</h3>
+
+                <div>
+                  <p className="text-sm font-medium text-slate-700 mb-2">Target Audience</p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {(['STUDENT', 'STAFF'] as const).map(target => (
+                      <label key={target} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={principalTargetAudience.includes(target)}
+                          onChange={() => handleTogglePrincipalAudience(target)}
+                          className="w-4 h-4 text-indigo-600 border-slate-300 rounded"
+                        />
+                        {target}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {principalTargetAudience.includes('STUDENT') && (
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={principalIsAnonymous}
+                      onChange={(e) => setPrincipalIsAnonymous(e.target.checked)}
+                      className="w-4 h-4 text-indigo-600 border-slate-300 rounded"
+                    />
+                    Anonymous feedback for students
+                  </label>
+                )}
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-slate-700">Questions</p>
+                    <button
+                      type="button"
+                      onClick={addPrincipalQuestion}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-sm"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      Add Question
+                    </button>
+                  </div>
+
+                  {principalQuestions.map((q, index) => (
+                    <div key={q.id} className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-700">Question {index + 1}</p>
+                        <button
+                          type="button"
+                          onClick={() => removePrincipalQuestion(q.id)}
+                          className="p-1.5 rounded-md text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <textarea
+                        value={q.question_text}
+                        onChange={(e) => updatePrincipalQuestion(q.id, prev => ({ ...prev, question_text: e.target.value }))}
+                        rows={2}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                        placeholder="Enter question text"
+                      />
+
+                      <div className="flex flex-wrap items-center gap-4 text-sm text-slate-700">
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={q.allow_rating}
+                            onChange={(e) => updatePrincipalQuestion(q.id, prev => ({ ...prev, allow_rating: e.target.checked }))}
+                            className="w-4 h-4 text-indigo-600 border-slate-300 rounded"
+                          />
+                          Rating
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={q.allow_comment}
+                            onChange={(e) => updatePrincipalQuestion(q.id, prev => ({ ...prev, allow_comment: e.target.checked }))}
+                            className="w-4 h-4 text-indigo-600 border-slate-300 rounded"
+                          />
+                          Comment
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={q.allow_own_type}
+                            onChange={(e) => updatePrincipalQuestion(q.id, prev => ({ ...prev, allow_own_type: e.target.checked }))}
+                            className="w-4 h-4 text-indigo-600 border-slate-300 rounded"
+                          />
+                          Own Type
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={q.is_mandatory}
+                            onChange={(e) => updatePrincipalQuestion(q.id, prev => ({ ...prev, is_mandatory: e.target.checked }))}
+                            className="w-4 h-4 text-indigo-600 border-slate-300 rounded"
+                          />
+                          Mandatory
+                        </label>
+                      </div>
+
+                      {q.allow_own_type && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-slate-600">Options</p>
+                          {q.options.map((opt, optIndex) => (
+                            <div key={`${q.id}-opt-${optIndex}`} className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={opt}
+                                onChange={(e) => updatePrincipalQuestion(q.id, prev => {
+                                  const nextOptions = [...prev.options];
+                                  nextOptions[optIndex] = e.target.value;
+                                  return { ...prev, options: nextOptions };
+                                })}
+                                className="flex-1 px-2 py-1.5 border border-slate-300 rounded"
+                                placeholder={`Option ${optIndex + 1}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => updatePrincipalQuestion(q.id, prev => {
+                                  const nextOptions = prev.options.filter((_, idx) => idx !== optIndex);
+                                  return { ...prev, options: nextOptions.length > 0 ? nextOptions : ['Option 1'] };
+                                })}
+                                className="p-1.5 rounded text-red-600 hover:bg-red-50"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => updatePrincipalQuestion(q.id, prev => ({ ...prev, options: [...prev.options, `Option ${prev.options.length + 1}`] }))}
+                            className="text-xs text-indigo-600 hover:text-indigo-700"
+                          >
+                            + Add Option
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={principalSubmitting}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {principalSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {principalSubmitting ? 'Creating...' : 'Create Principal Feedback'}
+                </button>
+              </form>
+            )}
+
+            {canPrincipalAnalytics && (
+              <>
+                {principalDashboardError && (
+                  <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-red-800">{principalDashboardError}</span>
+                  </div>
+                )}
+
+                {principalDashboardLoading ? (
+                  <div className="flex items-center gap-2 text-slate-600 mb-4">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading principal forms...
+                  </div>
+                ) : (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-2">Principal Forms</h3>
+                    {principalDashboardItems.length === 0 ? (
+                      <p className="text-sm text-slate-500">No principal feedback forms found.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {principalDashboardItems.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setSelectedPrincipalFormId(item.id)}
+                            className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedPrincipalFormId === item.id ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-slate-800">PRINCIPAL Form #{item.id}</span>
+                              <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700">{item.status}</span>
+                            </div>
+                            <p className="text-xs text-slate-600 mt-1">{item.target_audience} • Responses {item.response_count}/{item.expected_count} • {item.percentage}% • {item.questions_count} Questions</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selectedPrincipalFormId && (
+                  <div className="rounded-lg border border-slate-200 p-4 bg-white">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-3">Analytics Preview (Form #{selectedPrincipalFormId})</h3>
+
+                    {principalAnalyticsError && (
+                      <div className="mb-3 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">{principalAnalyticsError}</div>
+                    )}
+
+                    {principalAnalyticsLoading ? (
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading analytics...
+                      </div>
+                    ) : principalAnalyticsData ? (
+                      <div className="space-y-2 text-sm text-slate-700">
+                        <p>Target Audience: <span className="font-semibold">{principalAnalyticsData.target_audience}</span></p>
+                        <p>Status: <span className="font-semibold">{principalAnalyticsData.status}</span></p>
+                        <p>Responses: <span className="font-semibold">{principalAnalyticsData.response_count}</span> / {principalAnalyticsData.expected_count}</p>
+                        <p>Completion: <span className="font-semibold">{principalAnalyticsData.percentage}%</span></p>
+                        <p>Questions: <span className="font-semibold">{principalAnalyticsData.questions.length}</span></p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">Select a principal form to load analytics.</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* HOD Create Feedback Form Section */}
-        {canCreateFeedback && (
+        {canDepartmentScopedCreate && (
           <div className="mb-6 bg-white rounded-lg shadow-sm border border-slate-200 p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-slate-800">
                 {editingFormId ? 'Edit Draft Feedback Form' : 'Create Feedback Form'}
               </h2>
-              {!showCreateForm && !departmentLoading && (
+              {!showCreateForm && (
                 <div className="relative group">
                   <button
+                    type="button"
                     onClick={() => {
                       setEditingFormId(null);
                       setFormData(getInitialFormData());
@@ -2309,17 +2872,17 @@ export default function FeedbackPage() {
                       setSubmitError(null);
                       setShowCreateForm(true);
                     }}
-                    disabled={!activeDepartment}
+                    disabled={departmentLoading || !activeDepartment}
                     className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors shadow-md ${
-                      activeDepartment
+                      !departmentLoading && activeDepartment
                         ? 'bg-indigo-600 text-white hover:bg-indigo-700'
                         : 'bg-slate-300 text-slate-500 cursor-not-allowed'
                     }`}
                   >
                     <PlusCircle className="w-5 h-5" />
-                    New Form
+                    {departmentLoading ? 'Loading...' : 'New Form'}
                   </button>
-                  {!activeDepartment && (
+                  {!departmentLoading && !activeDepartment && (
                     <div className="absolute bottom-full mb-2 right-0 hidden group-hover:block bg-slate-800 text-white text-xs rounded px-3 py-2 whitespace-nowrap shadow-lg">
                       Department information required. Please contact administrator.
                     </div>
@@ -3275,13 +3838,13 @@ export default function FeedbackPage() {
         )}
 
         {/* HOD: View Created Forms */}
-        {canCreateFeedback && !showCreateForm && (
+        {canDepartmentScopedCreate && !showCreateForm && (
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6 mb-6">
             <div className="flex items-center justify-between gap-3 mb-4">
               <h2 className="text-xl font-semibold text-slate-800">Your Feedback Forms</h2>
-              {(isIQACUser || isAdminUser) && (
+              {canDepartmentScopedCreate && (
                 <div className="flex items-center gap-2">
-                  {isIQACUser && (
+                  {canDepartmentScopedCreate && (
                     <button
                       type="button"
                       onClick={openCommonExport}
@@ -3537,7 +4100,7 @@ export default function FeedbackPage() {
                               </span>
                             </div>
                             <div className="flex items-center gap-2">
-                              {(isIQACUser || isAdminUser) && (
+                              {canDepartmentScopedCreate && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -4262,7 +4825,7 @@ export default function FeedbackPage() {
         )}
 
         {/* Permission-based info card */}
-        {!canCreateFeedback && (
+        {!canDepartmentScopedCreate && (
           <div className="mb-6 bg-white rounded-lg shadow-sm border border-slate-200 p-6">
             <div className="flex items-start gap-4">
               <AlertCircle className="w-6 h-6 text-blue-500 flex-shrink-0 mt-1" />
@@ -4296,7 +4859,7 @@ export default function FeedbackPage() {
         )}
 
         {/* Staff/Student: View and Respond to Forms */}
-        {canReplyFeedback && !canCreateFeedback && !selectedForm && (
+        {canReplyFeedback && !canDepartmentScopedCreate && !selectedForm && (
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
             <h2 className="text-xl font-semibold text-slate-800 mb-4">Available Feedback Forms</h2>
 
@@ -4848,7 +5411,15 @@ export default function FeedbackPage() {
               <Users className="w-5 h-5 text-orange-500" />
             </div>
             <p className="text-3xl font-bold text-slate-800">
-              {(user as any)?.role || (isIQACUser ? 'IQAC' : canCreateFeedback ? 'HOD' : canReplyFeedback ? (user?.profile_type || 'User') : 'Viewer')}
+              {canPrincipalAllDepartmentsAccess
+                ? 'Principal All Departments Access'
+                : canAllDepartmentsAccess
+                  ? 'All Departments Access'
+                  : canOwnDepartmentAccess
+                    ? 'Own Department Access'
+                    : canReplyFeedback
+                      ? (user?.profile_type || 'User')
+                      : 'Viewer'}
             </p>
             <p className="text-sm text-slate-500 mt-1">Current access level</p>
           </div>
