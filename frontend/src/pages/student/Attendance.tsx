@@ -13,6 +13,7 @@ type RecordItem = {
   status: string;
   marked_at?: string;
   marked_by?: string | null;
+  subject_code?: string | null;
   subject_display?: string;
 };
 
@@ -25,6 +26,7 @@ type Summary = {
   };
   by_subject: {
     subject_key: string;
+    subject_code?: string | null;
     subject_display: string | null;
     counts: Record<string, number>;
     total: number;
@@ -82,6 +84,25 @@ export default function StudentAttendancePage() {
   const od = sc['OD'] ?? 0;
   const leave = sc['LEAVE'] ?? 0;
   const pct = summary?.overall?.percentage ?? null;
+  const assignedSubjects = (summary?.by_subject ?? []).filter((s) => {
+    const subjectCode = String(s.subject_code ?? '').trim();
+    const subjectDisplay = String(s.subject_display ?? '').trim();
+    const normalizedKey = String(s.subject_key ?? '').trim().toLowerCase();
+
+    // Exclude synthetic buckets such as Unassigned/No subject.
+    if (subjectDisplay) {
+      const normalizedDisplay = subjectDisplay.toLowerCase();
+      if (normalizedDisplay === 'unassigned' || normalizedDisplay === 'no subject' || normalizedDisplay === 'unknown') {
+        return false;
+      }
+    }
+
+    if (!subjectCode && !subjectDisplay) {
+      return !['', '-', 'none', 'null', 'unassigned', 'no subject', 'unknown'].includes(normalizedKey);
+    }
+
+    return true;
+  });
 
   const badRecords = records.filter(r => r.status === 'A' || r.status === 'LEAVE');
 
@@ -230,22 +251,25 @@ export default function StudentAttendancePage() {
                   <BookOpen className="h-5 w-5 text-indigo-500" />
                   <h2 className="text-base font-semibold text-gray-900">Subject-wise Attendance</h2>
                 </div>
-                {(!summary?.by_subject || summary.by_subject.length === 0) ? (
-                  <p className="text-sm text-gray-400 text-center py-8">No subject data available.</p>
+                {assignedSubjects.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-8">No assigned subject data available.</p>
                 ) : (
                   <div className="space-y-6">
-                    {[...summary.by_subject]
+                    {[...assignedSubjects]
                       .sort((a, b) => (a.percentage ?? 0) - (b.percentage ?? 0))
                       .map(s => {
                         const p = s.percentage ?? 0;
                         const barColor   = p >= 75 ? 'bg-green-500'  : p >= 50 ? 'bg-amber-500'  : 'bg-red-500';
                         const textColor  = p >= 75 ? 'text-green-700': p >= 50 ? 'text-amber-700': 'text-red-700';
                         const cnt = s.counts;
+                        const subjectTitle = s.subject_code
+                          ? `${s.subject_code}${s.subject_display ? ` - ${s.subject_display}` : ''}`
+                          : (s.subject_display || s.subject_key);
                         return (
                           <div key={s.subject_key}>
                             <div className="flex items-center justify-between mb-1.5">
                               <span className="text-sm font-semibold text-gray-800 truncate max-w-[65%]">
-                                {s.subject_display || s.subject_key}
+                                {subjectTitle}
                               </span>
                               <span className={`text-sm font-bold ${textColor}`}>
                                 {s.percentage != null ? `${s.percentage.toFixed(1)}%` : '—'}
@@ -293,6 +317,9 @@ export default function StudentAttendancePage() {
                   <div className="divide-y divide-gray-50">
                     {badRecords.map(r => {
                       const isLeave = r.status === 'LEAVE';
+                      const recordSubjectTitle = r.subject_code
+                        ? `${r.subject_code}${r.subject_display ? ` - ${r.subject_display}` : ''}`
+                        : (r.subject_display || '—');
                       return (
                         <div
                           key={r.id}
@@ -313,7 +340,7 @@ export default function StudentAttendancePage() {
                             )}
                           </div>
                           <div className="flex-1 min-w-0 text-sm font-medium text-gray-700 truncate">
-                            {r.subject_display || '—'}
+                            {recordSubjectTitle}
                           </div>
                           {r.section?.name && (
                             <span className="flex-shrink-0 text-xs text-gray-400 hidden sm:block">
