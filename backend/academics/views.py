@@ -5620,7 +5620,15 @@ class StudentAttendanceView(APIView):
             import datetime
             start_param = request.query_params.get('start_date')
             end_param = request.query_params.get('end_date')
-            qs = PeriodAttendanceRecord.objects.filter(student=sp).select_related('session__period', 'session__section', 'marked_by', 'session')
+            qs = PeriodAttendanceRecord.objects.filter(student=sp).select_related(
+                'session__period',
+                'session__section',
+                'session__timetable_assignment',
+                'session__timetable_assignment__curriculum_row',
+                'session__timetable_assignment__curriculum_row__master',
+                'marked_by',
+                'session',
+            )
             try:
                 if start_param:
                     sd = datetime.date.fromisoformat(start_param)
@@ -5655,17 +5663,34 @@ class StudentAttendanceView(APIView):
                 # determine subject identifier
                 subj_key = None
                 subj_disp = None
+                subj_code = None
                 try:
                     if ta is not None:
                         if getattr(ta, 'curriculum_row', None):
+                            cr = ta.curriculum_row
+                            master = getattr(cr, 'master', None)
                             subj_key = f"CR:{ta.curriculum_row_id}"
-                            subj_disp = getattr(getattr(ta, 'curriculum_row', None), 'course_code', None) or getattr(ta, 'subject_text', None)
+                            subj_code = (
+                                getattr(cr, 'course_code', None)
+                                or getattr(master, 'course_code', None)
+                                or getattr(cr, 'mnemonic', None)
+                            )
+                            subj_disp = (
+                                getattr(cr, 'course_name', None)
+                                or getattr(master, 'course_name', None)
+                                or getattr(ta, 'subject_text', None)
+                                or 'Unassigned'
+                            )
                         else:
                             subj_key = f"TXT:{(ta.subject_text or 'Unassigned') }"
                             subj_disp = ta.subject_text or 'Unassigned'
+                    else:
+                        subj_key = 'Unassigned'
+                        subj_disp = 'Unassigned'
                 except Exception:
                     subj_key = 'Unassigned'
                     subj_disp = 'Unassigned'
+                    subj_code = None
 
                 # update status counters
                 status_counts[r.status] = status_counts.get(r.status, 0) + 1
@@ -5674,7 +5699,7 @@ class StudentAttendanceView(APIView):
 
                 # subject-wise totals and status counts
                 if subj_key not in subj_map:
-                    subj_map[subj_key] = {'counts': {}, 'total': 0, 'display': subj_disp}
+                    subj_map[subj_key] = {'counts': {}, 'total': 0, 'display': subj_disp, 'code': subj_code}
                 subj_map[subj_key]['total'] += 1
                 subj_map[subj_key]['counts'][r.status] = subj_map[subj_key]['counts'].get(r.status, 0) + 1
 
@@ -5687,6 +5712,7 @@ class StudentAttendanceView(APIView):
                     'marked_at': r.marked_at,
                     'marked_by': getattr(getattr(r, 'marked_by', None), 'staff_id', None),
                     'subject_key': subj_key,
+                    'subject_code': subj_code,
                     'subject_display': subj_disp,
                 })
 
@@ -5694,9 +5720,15 @@ class StudentAttendanceView(APIView):
 
             by_subject = []
             for k, v in subj_map.items():
-                perc = ( (v['counts'].get('P',0) + v['counts'].get('OD',0) + v['counts'].get('LATE',0) + v['counts'].get('LEAVE',0)) / v['total'] * 100) if v['total'] > 0 else None
+                subject_present = (
+                    v['counts'].get('P', 0)
+                    + v['counts'].get('OD', 0)
+                    + v['counts'].get('LATE', 0)
+                )
+                perc = (subject_present / v['total'] * 100) if v['total'] > 0 else None
                 by_subject.append({
                     'subject_key': k,
+                    'subject_code': v.get('code'),
                     'subject_display': v.get('display'),
                     'counts': v.get('counts', {}),
                     'total': v.get('total', 0),
