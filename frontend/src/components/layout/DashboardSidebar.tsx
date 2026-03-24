@@ -325,7 +325,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   }
 
   // Staffs page: require explicit view permission
-  if (permsLower.includes('academics.view_staffs_page')) {
+  if (permsLower.includes('academics.view_staffs_page') || rolesUpper.includes('PS')) {
     items.push({ key: 'staffs', label: 'Staff Directory', to: '/staffs' });
   }
 

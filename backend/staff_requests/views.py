@@ -6,8 +6,10 @@ from django.db import transaction
 from django.db.models import Q, Prefetch
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+from datetime import date as date_type
 
 from .models import RequestTemplate, ApprovalStep, StaffRequest, ApprovalLog, StaffLeaveBalance
+from staff_salary.models import SalaryMonthPublish
 from .serializers import (
     RequestTemplateSerializer,
     RequestTemplateDetailSerializer,
@@ -145,6 +147,11 @@ def can_user_apply_with_template(user, template):
     return False
 
 
+def is_salary_month_locked(target_date):
+    month_start = date_type(target_date.year, target_date.month, 1)
+    return SalaryMonthPublish.objects.filter(month=month_start, is_active=True).exists()
+
+
 class RequestTemplateViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing Request Templates.
@@ -266,6 +273,15 @@ class RequestTemplateViewSet(viewsets.ModelViewSet):
             check_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         except:
             return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if is_salary_month_locked(check_date):
+            return Response({
+                'templates': [],
+                'is_holiday': False,
+                'is_absent': False,
+                'total_available': 0,
+                'message': f'Forms are locked for {check_date.strftime("%Y-%m")} because salary is published for this month.'
+            })
         
         # Check if date is holiday (department-aware)
         from staff_attendance.models import Holiday, AttendanceRecord
@@ -431,6 +447,10 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
         template = serializer.validated_data.get('template')
         form_data = serializer.validated_data.get('form_data', {})
 
+        locked_month_message = self._validate_month_publish_lock(form_data)
+        if locked_month_message:
+            return Response({'error': locked_month_message}, status=status.HTTP_400_BAD_REQUEST)
+
         # Special rules for Late Entry Permission (normal + SPL):
         # - 10 mins is allowed only for FN, never for AN.
         # - 10 mins can be auto-approved only when actual morning_in is within
@@ -546,6 +566,22 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
         # Return detailed response
         response_serializer = StaffRequestDetailSerializer(staff_request)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def _month_start(self, target_date):
+        return date_type(target_date.year, target_date.month, 1)
+
+    def _is_month_published_and_locked(self, target_date):
+        return SalaryMonthPublish.objects.filter(
+            month=self._month_start(target_date),
+            is_active=True,
+        ).exists()
+
+    def _validate_month_publish_lock(self, form_data):
+        target_dates = {d for d, _ in self._extract_attendance_targets_from_form_data(form_data)}
+        for dt in sorted(target_dates):
+            if self._is_month_published_and_locked(dt):
+                return f'Cannot apply forms for {dt.strftime("%Y-%m")}. Salary is published and locked for that month.'
+        return None
 
     def _is_late_entry_template(self, template):
         name = (getattr(template, 'name', '') or '').strip().lower()
@@ -3276,6 +3312,220 @@ class StaffRequestViewSet(viewsets.ModelViewSet):
             'message': 'Request applied and auto-approved successfully',
             'request': response_serializer.data
         }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'])
+    def hr_apply_cl_for_lop(self, request):
+        """
+        HR/Admin bulk apply CL for selected staff against absent sessions in a month.
+        POST /api/staff-requests/requests/hr_apply_cl_for_lop/
+
+        Body: {
+          "month": "YYYY-MM",
+          "staff_user_ids": [1,2,3]
+        }
+        """
+        from datetime import date
+        import calendar
+        from .permissions import IsAdminOrHR
+        from staff_attendance.models import AttendanceRecord
+
+        if not IsAdminOrHR().has_permission(request, self):
+            return Response({'error': 'Only HR/Admin can access this endpoint'}, status=status.HTTP_403_FORBIDDEN)
+
+        month_str = str(request.data.get('month') or '').strip()
+        staff_user_ids = request.data.get('staff_user_ids') or []
+
+        if not month_str:
+            return Response({'error': 'month is required (YYYY-MM)'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(staff_user_ids, list) or len(staff_user_ids) == 0:
+            return Response({'error': 'staff_user_ids must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year, month = map(int, month_str.split('-'))
+            month_start = date(year, month, 1)
+            month_end = date(year, month, calendar.monthrange(year, month)[1])
+        except Exception:
+            return Response({'error': 'Invalid month format, use YYYY-MM'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if is_salary_month_locked(month_start):
+            return Response({'error': f'Cannot apply CL. Salary is published and locked for {month_str}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        User = get_user_model()
+        users = list(User.objects.filter(id__in=staff_user_ids, is_active=True).select_related('staff_profile', 'staff_profile__department'))
+        user_map = {u.id: u for u in users}
+
+        # Templates
+        cl_tpl = RequestTemplate.objects.filter(is_active=True, name__iexact='Casual Leave').first()
+        cl_spl_tpl = RequestTemplate.objects.filter(is_active=True, name__iexact='Casual Leave - SPL').first()
+
+        if not cl_tpl and not cl_spl_tpl:
+            return Response({'error': 'Casual Leave template(s) not configured'}, status=status.HTTP_400_BAD_REQUEST)
+
+        split_roles = {'HOD', 'IQAC', 'HR', 'PS', 'CFSW', 'EDC', 'COE', 'HAA'}
+        per_staff = []
+        total_applied_units = 0.0
+        total_created_requests = 0
+
+        with transaction.atomic():
+            for user_id in staff_user_ids:
+                target_user = user_map.get(int(user_id))
+                if not target_user:
+                    per_staff.append({'staff_user_id': user_id, 'status': 'skipped', 'reason': 'User not found'})
+                    continue
+
+                role = self._get_primary_role(target_user)
+                use_spl = role in split_roles
+                template = cl_spl_tpl if use_spl and cl_spl_tpl else cl_tpl
+                if not template:
+                    per_staff.append({
+                        'staff_user_id': target_user.id,
+                        'staff_id': getattr(getattr(target_user, 'staff_profile', None), 'staff_id', None) or target_user.username,
+                        'status': 'skipped',
+                        'reason': 'Matching CL template not available',
+                    })
+                    continue
+
+                if not can_user_apply_with_template(target_user, template):
+                    per_staff.append({
+                        'staff_user_id': target_user.id,
+                        'staff_id': getattr(getattr(target_user, 'staff_profile', None), 'staff_id', None) or target_user.username,
+                        'status': 'skipped',
+                        'reason': 'Template not allowed for target user role',
+                    })
+                    continue
+
+                cl_leave_keys = ['Casual Leave - SPL', 'Casual Leave', 'CL'] if use_spl else ['Casual Leave', 'CL', 'Casual Leave - SPL']
+                cl_balance = 0.0
+                for key in cl_leave_keys:
+                    bal = StaffLeaveBalance.objects.filter(staff=target_user, leave_type=key).first()
+                    if bal:
+                        cl_balance = float(bal.balance or 0.0)
+                        break
+
+                if cl_balance <= 0:
+                    per_staff.append({
+                        'staff_user_id': target_user.id,
+                        'staff_id': getattr(getattr(target_user, 'staff_profile', None), 'staff_id', None) or target_user.username,
+                        'status': 'skipped',
+                        'reason': 'No CL balance available',
+                    })
+                    continue
+
+                records = AttendanceRecord.objects.filter(
+                    user=target_user,
+                    date__gte=month_start,
+                    date__lte=month_end,
+                ).order_by('date')
+
+                targets = []
+                for rec in records:
+                    fn_absent = str(rec.fn_status or '').strip().lower() == 'absent'
+                    an_absent = str(rec.an_status or '').strip().lower() == 'absent'
+                    if fn_absent and an_absent:
+                        targets.append((rec.date, 'FULL', 1.0))
+                    elif fn_absent:
+                        targets.append((rec.date, 'FN', 0.5))
+                    elif an_absent:
+                        targets.append((rec.date, 'AN', 0.5))
+
+                if not targets:
+                    per_staff.append({
+                        'staff_user_id': target_user.id,
+                        'staff_id': getattr(getattr(target_user, 'staff_profile', None), 'staff_id', None) or target_user.username,
+                        'status': 'skipped',
+                        'reason': 'No absent sessions in selected month',
+                    })
+                    continue
+
+                applied_units = 0.0
+                applied_count = 0
+
+                for target_date, shift, units in targets:
+                    if cl_balance + 1e-9 < units:
+                        continue
+
+                    form_data = {
+                        'date': target_date.isoformat(),
+                        'shift': shift,
+                    }
+
+                    # Fill one required text/number field with a safe default when present.
+                    for field in template.form_schema or []:
+                        if not field.get('required'):
+                            continue
+                        fname = str(field.get('name') or '').strip()
+                        ftype = str(field.get('type') or '').strip().lower()
+                        if not fname or fname in form_data:
+                            continue
+                        if ftype in ['text', 'textarea']:
+                            form_data[fname] = '-'
+                            break
+                        if ftype in ['number']:
+                            form_data[fname] = 0
+                            break
+
+                    staff_request = StaffRequest.objects.create(
+                        applicant=target_user,
+                        template=template,
+                        form_data=form_data,
+                        status='approved',
+                        current_step=1,
+                    )
+
+                    ApprovalLog.objects.create(
+                        request=staff_request,
+                        approver=request.user,
+                        step_order=1,
+                        action='approved',
+                        comments='Auto-approved by HR bulk Apply CL for LOP.'
+                    )
+
+                    try:
+                        self._process_leave_balance(staff_request)
+                    except Exception:
+                        pass
+
+                    try:
+                        self._process_attendance_action(staff_request)
+                    except Exception:
+                        pass
+
+                    applied_units += units
+                    applied_count += 1
+                    cl_balance = max(0.0, cl_balance - units)
+
+                # Ensure LOP reflects latest absence coverage after bulk run.
+                lop_after = self._recalculate_lop_for_user(target_user)
+
+                if applied_count == 0:
+                    per_staff.append({
+                        'staff_user_id': target_user.id,
+                        'staff_id': getattr(getattr(target_user, 'staff_profile', None), 'staff_id', None) or target_user.username,
+                        'status': 'skipped',
+                        'reason': 'Insufficient CL balance for available absent sessions',
+                        'lop_after': lop_after,
+                    })
+                else:
+                    per_staff.append({
+                        'staff_user_id': target_user.id,
+                        'staff_id': getattr(getattr(target_user, 'staff_profile', None), 'staff_id', None) or target_user.username,
+                        'status': 'applied',
+                        'template': template.name,
+                        'applied_requests': applied_count,
+                        'applied_units': round(applied_units, 2),
+                        'lop_after': lop_after,
+                    })
+                    total_applied_units += applied_units
+                    total_created_requests += applied_count
+
+        return Response({
+            'message': 'Bulk CL apply completed',
+            'month': month_str,
+            'total_staff_selected': len(staff_user_ids),
+            'total_created_requests': total_created_requests,
+            'total_applied_units': round(total_applied_units, 2),
+            'results': per_staff,
+        })
 
     @action(detail=False, methods=['get'], url_path='balances/by_user')
     def balances_by_user(self, request):

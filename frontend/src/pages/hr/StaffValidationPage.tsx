@@ -7,6 +7,7 @@ import {
   getStaffValidationCalendar,
   getHrTemplatesForStaff,
   hrApplyRequest,
+  hrApplyClForLop,
 } from '../../services/staffRequests';
 import type { RequestTemplate } from '../../types/staffRequests';
 import DynamicFormRenderer from '../staff-requests/DynamicFormRenderer';
@@ -279,25 +280,41 @@ function HrApplyModal({
 }
 
 export default function StaffValidationPage() {
+  const [month, setMonth] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [search, setSearch] = useState('');
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
   const [rows, setRows] = useState<StaffValidationRow[]>([]);
+  const [selectedStaffIds, setSelectedStaffIds] = useState<number[]>([]);
+  const [bulkApplying, setBulkApplying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [selectedRow, setSelectedRow] = useState<StaffValidationRow | null>(null);
 
   const effectiveToDate = useMemo(() => toDate || fromDate, [toDate, fromDate]);
 
   useEffect(() => {
     const now = new Date();
+    const monthValue = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    const today = new Date().toISOString().slice(0, 10);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    setMonth(monthValue);
     setFromDate(monthStart);
-    setToDate(today);
+    setToDate(monthEnd);
   }, []);
+
+  useEffect(() => {
+    if (!month) return;
+    const [year, mon] = month.split('-').map((v) => Number(v));
+    if (!year || !mon) return;
+    const start = new Date(year, mon - 1, 1).toISOString().slice(0, 10);
+    const end = new Date(year, mon, 0).toISOString().slice(0, 10);
+    setFromDate(start);
+    setToDate(end);
+  }, [month]);
 
   useEffect(() => {
     const loadDepartments = async () => {
@@ -337,12 +354,15 @@ export default function StaffValidationPage() {
     try {
       setLoading(true);
       setError(null);
+      setInfo(null);
       const data = await getStaffValidationOverview({
         from_date: fromDate,
         to_date: effectiveToDate,
         department_id: departmentId || undefined,
       });
-      setRows(data.results || []);
+      const nextRows = data.results || [];
+      setRows(nextRows);
+      setSelectedStaffIds((prev) => prev.filter((id) => nextRows.some((r: StaffValidationRow) => r.staff_user_id === id)));
     } catch (err: any) {
       setError(err?.response?.data?.error || 'Failed to load staff validation data');
     } finally {
@@ -354,6 +374,72 @@ export default function StaffValidationPage() {
     if (!fromDate) return;
     loadData();
   }, [fromDate, toDate, departmentId]);
+
+  const toggleStaffSelection = (staffUserId: number, checked: boolean) => {
+    setSelectedStaffIds((prev) => {
+      if (checked) {
+        if (prev.includes(staffUserId)) return prev;
+        return [...prev, staffUserId];
+      }
+      return prev.filter((id) => id !== staffUserId);
+    });
+  };
+
+  const filteredIds = useMemo(() => filteredRows.map((r) => r.staff_user_id), [filteredRows]);
+  const allFilteredSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedStaffIds.includes(id));
+
+  const toggleSelectAllFiltered = (checked: boolean) => {
+    setSelectedStaffIds((prev) => {
+      if (checked) {
+        return Array.from(new Set([...prev, ...filteredIds]));
+      }
+      return prev.filter((id) => !filteredIds.includes(id));
+    });
+  };
+
+  const autoSelectLopAvailable = () => {
+    const lopIds = filteredRows
+      .filter((r) => Number(r.balances?.lop || 0) > 0)
+      .map((r) => r.staff_user_id);
+
+    if (lopIds.length === 0) {
+      setInfo('No LOP available staffs found in current filter');
+      return;
+    }
+
+    setSelectedStaffIds(Array.from(new Set([...selectedStaffIds, ...lopIds])));
+    setInfo(`Selected ${lopIds.length} LOP available staff(s)`);
+  };
+
+  const handleBulkApplyCl = async () => {
+    if (!month) {
+      setError('Month is required');
+      return;
+    }
+    if (selectedStaffIds.length === 0) {
+      setError('Select at least one staff to apply CL');
+      return;
+    }
+
+    try {
+      setBulkApplying(true);
+      setError(null);
+      setInfo(null);
+      const data = await hrApplyClForLop({
+        month,
+        staff_user_ids: selectedStaffIds,
+      });
+
+      const created = Number(data?.total_created_requests || 0);
+      const units = Number(data?.total_applied_units || 0);
+      setInfo(`Bulk Apply CL completed. Created ${created} request(s), applied ${units.toFixed(1)} unit(s).`);
+      await loadData();
+    } catch (err: any) {
+      setError(err?.response?.data?.error || err?.response?.data?.detail || 'Failed to apply CL in bulk');
+    } finally {
+      setBulkApplying(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
@@ -369,12 +455,8 @@ export default function StaffValidationPage() {
         <div className="bg-white rounded-xl shadow-sm border p-4 mb-5">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div>
-              <label className="block text-sm text-slate-700 mb-1"><Calendar className="w-4 h-4 inline mr-1" />From Date</label>
-              <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-700 mb-1"><Calendar className="w-4 h-4 inline mr-1" />To Date</label>
-              <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
+              <label className="block text-sm text-slate-700 mb-1"><Calendar className="w-4 h-4 inline mr-1" />Month</label>
+              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
             </div>
             <div>
               <label className="block text-sm text-slate-700 mb-1">Search</label>
@@ -413,13 +495,44 @@ export default function StaffValidationPage() {
               </button>
             </div>
           </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              onClick={autoSelectLopAvailable}
+              className="rounded-lg border border-amber-300 bg-amber-50 text-amber-700 px-3 py-2 text-sm font-medium hover:bg-amber-100"
+            >
+              Auto Select LOP Available Staffs
+            </button>
+            <button
+              onClick={handleBulkApplyCl}
+              disabled={bulkApplying || selectedStaffIds.length === 0}
+              className="rounded-lg bg-emerald-600 text-white px-3 py-2 text-sm font-medium hover:bg-emerald-700 disabled:bg-slate-400"
+            >
+              {bulkApplying ? 'Applying CL...' : `Apply CL (${selectedStaffIds.length})`}
+            </button>
+            <button
+              onClick={() => setSelectedStaffIds([])}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Clear Selection
+            </button>
+          </div>
+
           {error && <div className="mt-3 p-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded">{error}</div>}
+          {info && <div className="mt-3 p-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded">{info}</div>}
         </div>
 
         <div className="bg-white rounded-xl border shadow-sm overflow-auto">
           <table className="min-w-[1200px] w-full text-sm">
             <thead className="bg-slate-50 text-slate-700">
               <tr>
+                <th className="px-3 py-2 text-left">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={(e) => toggleSelectAllFiltered(e.target.checked)}
+                  />
+                </th>
                 <th className="px-3 py-2 text-left">S.no</th>
                 <th className="px-3 py-2 text-left">Staff ID</th>
                 <th className="px-3 py-2 text-left">Staff Name</th>
@@ -438,16 +551,23 @@ export default function StaffValidationPage() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={14} className="px-3 py-8 text-center text-slate-500">
                     {loading ? <span className="inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading staff...</span> : 'No staff data for selected filters'}
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-3 py-8 text-center text-slate-500">No matching staff for search</td>
+                  <td colSpan={14} className="px-3 py-8 text-center text-slate-500">No matching staff for search</td>
                 </tr>
               ) : filteredRows.map((row) => (
                 <tr key={row.staff_user_id} className="border-t hover:bg-blue-50/40">
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedStaffIds.includes(row.staff_user_id)}
+                      onChange={(e) => toggleStaffSelection(row.staff_user_id, e.target.checked)}
+                    />
+                  </td>
                   <td className="px-3 py-2">{row.s_no}</td>
                   <td className="px-3 py-2 font-medium">{row.staff_id}</td>
                   <td className="px-3 py-2">{row.staff_name}</td>

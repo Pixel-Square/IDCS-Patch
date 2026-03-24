@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    SalaryBankDeclaration,
     SalaryDeductionType,
     SalaryEMIPlan,
     SalaryEarnType,
@@ -12,6 +13,7 @@ from .models import (
 
 
 admin.site.register(StaffSalaryDeclaration)
+admin.site.register(SalaryBankDeclaration)
 admin.site.register(SalaryPFConfig)
 admin.site.register(SalaryFormulaConfig)
 admin.site.register(SalaryDeductionType)

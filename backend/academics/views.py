@@ -1954,7 +1954,7 @@ class HODStaffListView(APIView):
 
 class DepartmentsListView(APIView):
     """Return a list of departments. Users with `academics.view_all_departments`
-    permission or staff users see all departments; others see only their effective
+    permission, PS role, or staff users see all departments; others see only their effective
     departments."""
     permission_classes = (IsAuthenticated,)
 
@@ -1963,8 +1963,10 @@ class DepartmentsListView(APIView):
         perms = get_user_permissions(user)
         from .models import Department
 
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
+
         # accept either view_all_departments or view_all_staff permission as global access
-        if ({'academics.view_all_departments', 'academics.view_all_staff'} & perms) or user.is_superuser:
+        if ({'academics.view_all_departments', 'academics.view_all_staff'} & perms) or user.is_superuser or has_ps_role:
             qs = Department.objects.all()
         else:
             # Use effective departments (own dept + DepartmentRole HOD/AHOD mappings)
@@ -1994,9 +1996,10 @@ class StaffsPageView(APIView):
     def get(self, request):
         user = request.user
         perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
 
         # require page-view permission unless superuser
-        if not (user.is_superuser or 'academics.view_staffs_page' in perms):
+        if not (user.is_superuser or has_ps_role or 'academics.view_staffs_page' in perms):
             return Response({'detail': 'You do not have permission to view staffs page.'}, status=403)
 
         from .models import Department, StaffProfile
@@ -2006,18 +2009,19 @@ class StaffsPageView(APIView):
 
         # Debug: Log user permissions
         logger.info(f"StaffsPage - User: {user.username}, Superuser: {user.is_superuser}")
+        logger.info(f"StaffsPage - Has PS role: {has_ps_role}")
         logger.info(f"StaffsPage - Permissions: {perms}")
         logger.info(f"StaffsPage - Has view_all_staff: {'academics.view_all_staff' in perms}")
         logger.info(f"StaffsPage - Has edit_staff: {'academics.edit_staff' in perms}")
 
         # Check if user can edit staff
-        can_edit = user.is_superuser or 'academics.edit_staff' in perms
+        can_edit = user.is_superuser or has_ps_role or 'academics.edit_staff' in perms
         
         # Check if user can view all staff (determines if role filter should be shown)
-        can_view_all = user.is_superuser or 'academics.view_all_staff' in perms
+        can_view_all = user.is_superuser or has_ps_role or 'academics.view_all_staff' in perms
 
         # determine departments to include
-        if user.is_superuser or ('academics.view_all_staff' in perms):
+        if user.is_superuser or has_ps_role or ('academics.view_all_staff' in perms):
             # View all departments
             logger.info(f"StaffsPage - Showing ALL departments (superuser or has view_all_staff)")
             dept_qs = Department.objects.all()
@@ -2115,7 +2119,7 @@ class StaffsPageView(APIView):
 
         # Check if user can import staff (HOD, AHOD, or IQAC role required)
         can_import = False
-        if user.is_superuser:
+        if user.is_superuser or has_ps_role:
             can_import = True
         else:
             try:
@@ -2252,16 +2256,17 @@ class StaffProfileCreateView(APIView):
         
         user = request.user
         perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
         
         # Check permission - require edit_staff or superuser to create staff
-        if not (user.is_superuser or 'academics.edit_staff' in perms):
+        if not (user.is_superuser or has_ps_role or 'academics.edit_staff' in perms):
             return Response(
                 {'detail': 'You do not have permission to create staff profiles.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
         # Validate department scope for non-superusers
-        if not user.is_superuser and 'academics.view_all_staff' not in perms:
+        if not user.is_superuser and not has_ps_role and 'academics.view_all_staff' not in perms:
             # HODs can only create staff in departments they are mapped to
             from academics.utils import get_user_effective_departments
             
@@ -2296,9 +2301,10 @@ class StaffProfileUpdateView(APIView):
         
         user = request.user
         perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
         
         # Check permission - require edit_staff or superuser to edit staff
-        if not (user.is_superuser or 'academics.edit_staff' in perms):
+        if not (user.is_superuser or has_ps_role or 'academics.edit_staff' in perms):
             return Response(
                 {'detail': 'You do not have permission to edit staff profiles.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -2313,7 +2319,7 @@ class StaffProfileUpdateView(APIView):
             )
         
         # Validate department scope for non-superusers without view_all_staff
-        if not user.is_superuser and 'academics.view_all_staff' not in perms:
+        if not user.is_superuser and not has_ps_role and 'academics.view_all_staff' not in perms:
             # HODs can only edit staff in departments they are mapped to
             from academics.utils import get_user_effective_departments
             
@@ -2358,9 +2364,10 @@ class StaffProfileDeleteView(APIView):
         
         user = request.user
         perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
         
         # Check permission - require edit_staff or superuser to delete staff
-        if not (user.is_superuser or 'academics.edit_staff' in perms):
+        if not (user.is_superuser or has_ps_role or 'academics.edit_staff' in perms):
             return Response(
                 {'detail': 'You do not have permission to delete staff profiles.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -2375,7 +2382,7 @@ class StaffProfileDeleteView(APIView):
             )
         
         # Validate department scope for non-superusers without view_all_staff
-        if not user.is_superuser and 'academics.view_all_staff' not in perms:
+        if not user.is_superuser and not has_ps_role and 'academics.view_all_staff' not in perms:
             # HODs can only delete staff in departments they are mapped to
             from academics.utils import get_user_effective_departments
             
@@ -2407,8 +2414,9 @@ class StaffStatusUpdateView(APIView):
 
         user = request.user
         perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
 
-        if not (user.is_superuser or 'academics.edit_staff' in perms):
+        if not (user.is_superuser or has_ps_role or 'academics.edit_staff' in perms):
             return Response(
                 {'detail': 'You do not have permission to update staff status.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -2423,7 +2431,7 @@ class StaffStatusUpdateView(APIView):
             )
 
         # Validate department scope for non-superusers without view_all_staff
-        if not user.is_superuser and 'academics.view_all_staff' not in perms:
+        if not user.is_superuser and not has_ps_role and 'academics.view_all_staff' not in perms:
             from academics.utils import get_user_effective_departments
 
             allowed_dept_ids = get_user_effective_departments(user)
@@ -2455,7 +2463,7 @@ class StaffStatusUpdateView(APIView):
 class StaffImportView(APIView):
     """Import staff members from an uploaded Excel (.xlsx) or CSV file.
 
-    Only HOD, AHOD, IQAC users, or superusers are allowed to call this endpoint.
+    Only HOD, AHOD, IQAC, PS users, or superusers are allowed to call this endpoint.
 
     Expected columns (case-insensitive, spaces/underscores ignored):
       Staff ID, Username, Password, First Name, Last Name, Email, Designation, Department, Status
@@ -2471,6 +2479,8 @@ class StaffImportView(APIView):
         if user.is_superuser:
             return True
         try:
+            if user.roles.filter(name__iexact='PS').exists():
+                return True
             if user.roles.filter(name__iexact='IQAC').exists():
                 return True
         except Exception:
@@ -6973,9 +6983,10 @@ class AllStaffListView(APIView):
     def get(self, request):
         user = request.user
         perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
 
         # Require page-view permission unless superuser
-        if not (user.is_superuser or 'academics.view_staffs_page' in perms):
+        if not (user.is_superuser or has_ps_role or 'academics.view_staffs_page' in perms):
             return Response({'detail': 'You do not have permission to view staff list.'}, status=403)
 
         from .models import StaffProfile, DepartmentRole, AcademicYear
@@ -7064,9 +7075,10 @@ class StaffDepartmentAssignView(APIView):
     def post(self, request):
         user = request.user
         perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
 
         # Check permission
-        if not (user.is_superuser or 'academics.edit_staff' in perms):
+        if not (user.is_superuser or has_ps_role or 'academics.edit_staff' in perms):
             return Response(
                 {'detail': 'You do not have permission to assign staff to departments.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -7107,7 +7119,7 @@ class StaffDepartmentAssignView(APIView):
             )
 
         # Validate department scope for non-superusers
-        if not user.is_superuser and 'academics.view_all_staff' not in perms:
+        if not user.is_superuser and not has_ps_role and 'academics.view_all_staff' not in perms:
             from academics.utils import get_user_effective_departments
             
             allowed_dept_ids = get_user_effective_departments(user)
@@ -7218,9 +7230,10 @@ class StaffDepartmentRoleRemoveView(APIView):
     def post(self, request):
         user = request.user
         perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
 
         # Check permission
-        if not (user.is_superuser or 'academics.edit_staff' in perms):
+        if not (user.is_superuser or has_ps_role or 'academics.edit_staff' in perms):
             return Response(
                 {'detail': 'You do not have permission to modify staff department assignments.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -7261,7 +7274,7 @@ class StaffDepartmentRoleRemoveView(APIView):
             )
 
         # Validate department scope for non-superusers
-        if not user.is_superuser and 'academics.view_all_staff' not in perms:
+        if not user.is_superuser and not has_ps_role and 'academics.view_all_staff' not in perms:
             from academics.utils import get_user_effective_departments
             
             allowed_dept_ids = get_user_effective_departments(user)

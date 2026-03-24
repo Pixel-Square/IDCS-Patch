@@ -12,10 +12,32 @@ class StaffSalaryDeclaration(models.Model):
     allowance = models.FloatField(default=0.0)
     pf_enabled = models.BooleanField(default=True)
     type2_pf_value = models.FloatField(default=0.0, help_text='Type 2 PF value per staff (unique per employee)')
+    bank = models.ForeignKey(
+        'SalaryBankDeclaration',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='staff_declarations',
+    )
+    account_no = models.CharField(max_length=64, blank=True, default='')
+    ifsc_code = models.CharField(max_length=32, blank=True, default='')
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['staff_id']
+
+
+class SalaryBankDeclaration(models.Model):
+    name = models.CharField(max_length=120, unique=True)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sort_order', 'name', 'id']
+
+    def __str__(self):
+        return self.name
 
 
 class SalaryPFConfig(models.Model):
@@ -95,6 +117,7 @@ class SalaryMonthlyInput(models.Model):
     earn_values = models.JSONField(default=dict, blank=True)
     deduction_values = models.JSONField(default=dict, blank=True)
     include_in_salary = models.BooleanField(default=True)
+    is_cash = models.BooleanField(default=False)
     od_new = models.FloatField(default=0.0)
     others = models.FloatField(default=0.0)
     updated_at = models.DateTimeField(auto_now=True)
@@ -106,6 +129,7 @@ class SalaryMonthlyInput(models.Model):
 
 class SalaryMonthPublish(models.Model):
     month = models.DateField(unique=True, help_text='Use first day of month')
+    is_active = models.BooleanField(default=True)
     published_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
