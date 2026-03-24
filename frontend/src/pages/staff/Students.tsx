@@ -18,6 +18,7 @@ type Student = {
   section_id?: number; 
   section_name?: string;
   department_code?: string;
+  department_short_name?: string;
   department_name?: string;
   home_department_code?: string;
   home_department_short_name?: string;
@@ -415,7 +416,8 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
       email: s.email ?? s.user?.email,
       section_id: r.section_id,
       section_name: r.section_name,
-      department_code: r.department_short_name || r.department?.code,
+      department_code: r.department?.code || r.department_short_name,
+      department_short_name: r.department_short_name || r.department?.short_name || r.department?.code,
       status: s.status || 'active',
     }))
     return { meta, students }
@@ -615,6 +617,78 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
     : viewMode === 'my-mentees' ? myMenteesSections
     : viewMode === 'department-students' ? deptSections
     : allSections
+
+  const sectionMetaById = new Map<number, SectionMeta>(
+    currentSectionList.map(section => [section.section_id, section])
+  )
+
+  const getRegNoLastThreeNumber = (regNo?: string): number => {
+    if (!regNo) return Number.MAX_SAFE_INTEGER
+    const digitsOnly = regNo.replace(/\D/g, '')
+    if (!digitsOnly) return Number.MAX_SAFE_INTEGER
+    const lastThree = digitsOnly.slice(-3)
+    return Number(lastThree)
+  }
+
+  const getBatchOrderValue = (batch?: string): number => {
+    if (!batch) return -1
+    const match = batch.match(/\d{4}/)
+    return match ? Number(match[0]) : -1
+  }
+
+  const compareByRegNoLastThree = (a: Student, b: Student): number => {
+    const regA = getRegNoLastThreeNumber(a.reg_no)
+    const regB = getRegNoLastThreeNumber(b.reg_no)
+    if (regA !== regB) return regA - regB
+    return (a.reg_no || '').localeCompare(b.reg_no || '')
+  }
+
+  const compareByDepartmentThenBatchThenRegNoLastThree = (a: Student, b: Student): number => {
+    const deptDiff = getStudentDepartment(a).localeCompare(getStudentDepartment(b))
+    if (deptDiff !== 0) return deptDiff
+    const batchA = getStudentBatch(a)
+    const batchB = getStudentBatch(b)
+    const batchDiff = getBatchOrderValue(batchB) - getBatchOrderValue(batchA)
+    if (batchDiff !== 0) return batchDiff
+    const batchNameDiff = batchB.localeCompare(batchA)
+    if (batchNameDiff !== 0) return batchNameDiff
+    return compareByRegNoLastThree(a, b)
+  }
+
+  const getStudentBatch = (student: Student): string => {
+    if (student.batch) return student.batch
+    const sectionMeta = student.section_id ? sectionMetaById.get(student.section_id) : undefined
+    return sectionMeta?.batch_name || ''
+  }
+
+  const getStudentDepartment = (student: Student): string => {
+    if (student.home_department_short_name) return student.home_department_short_name
+    if (student.department_short_name) return student.department_short_name
+    const sectionMeta = student.section_id ? sectionMetaById.get(student.section_id) : undefined
+    if (sectionMeta?.department_short_name) return sectionMeta.department_short_name
+    if (student.department_code) return student.department_code
+    return sectionMeta?.department_code || ''
+  }
+
+  const compareStudentsByViewMode = (a: Student, b: Student): number => {
+    if (viewMode === 'my-students') {
+      return compareByRegNoLastThree(a, b)
+    }
+
+    if (viewMode === 'department-students') {
+      return compareByDepartmentThenBatchThenRegNoLastThree(a, b)
+    }
+
+    if (viewMode === 'all-students') {
+      return compareByDepartmentThenBatchThenRegNoLastThree(a, b)
+    }
+
+    // Keep existing behavior for views not explicitly requested (e.g., my-mentees).
+    const nameA = `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase() || (a.username || '').toLowerCase()
+    const nameB = `${b.first_name || ''} ${b.last_name || ''}`.trim().toLowerCase() || (b.username || '').toLowerCase()
+    return nameA.localeCompare(nameB)
+  }
+
   const normalizedSearch = debouncedSearch.toLowerCase()
   const displayStudentsList: Student[] = [...lazyStudents]
     .filter(student => {
@@ -624,11 +698,7 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
       const regNo = (student.reg_no || '').toLowerCase()
       return regNo.includes(normalizedSearch) || fullName.includes(normalizedSearch) || username.includes(normalizedSearch)
     })
-    .sort((a, b) => {
-      const nameA = `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase() || (a.username || '').toLowerCase()
-      const nameB = `${b.first_name || ''} ${b.last_name || ''}`.trim().toLowerCase() || (b.username || '').toLowerCase()
-      return nameA.localeCompare(nameB)
-    })
+    .sort(compareStudentsByViewMode)
 
   // Pagination calculations
   const totalItems = displayStudentsList.length
@@ -780,11 +850,43 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
         method: 'POST',
         body: formData,
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setImportError(data.error || 'Import failed.')
+
+      let data: any = null
+      let fallbackText = ''
+      const contentType = (res.headers.get('content-type') || '').toLowerCase()
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json()
+        } catch {
+          data = null
+        }
       } else {
-        setImportResult(data)
+        try {
+          fallbackText = (await res.text()).trim()
+        } catch {
+          fallbackText = ''
+        }
+      }
+
+      if (!res.ok) {
+        if (res.status === 504) {
+          setImportError('Import timed out (504). The file may be too large for current server timeout. Try fewer rows per file, or ask admin to increase API/Gunicorn timeout.')
+        } else {
+          const serverMessage =
+            data?.error ||
+            data?.detail ||
+            (typeof data?.message === 'string' ? data.message : '') ||
+            (fallbackText && !fallbackText.startsWith('<!DOCTYPE') ? fallbackText : '')
+          setImportError(serverMessage || `Import failed with status ${res.status}.`)
+        }
+      } else {
+        setImportResult(data || {
+          message: 'Import completed.',
+          created: 0,
+          updated: 0,
+          errors: [],
+          total_errors: 0,
+        })
         // Refresh students list
         clearCache()
         fetchSectionsOrStudents(true)  // Bypass cache after import
@@ -1153,15 +1255,22 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
                       </div>
                     </td>
                     <td className="py-3 px-4">
+                        {(() => {
+                          const displayDept = getStudentDepartment(student)
+                          const sectionDept = student.department_short_name || student.department_code || ''
+                          const homeDept = student.home_department_short_name || ''
+                          const tooltip = homeDept
+                            ? `Home: ${homeDept}${sectionDept ? ` | Section: ${sectionDept}` : ''}`
+                            : (sectionDept || displayDept)
+                          return (
                         <span className="text-sm text-slate-700">
-                          {student.home_department_short_name
-                            ? <span title={`Home: ${student.home_department_short_name} | Section: ${student.department_code || ''}`}>
-                                {student.home_department_short_name}
+                            <span title={tooltip || undefined}>
+                                {displayDept || '-'}
                                 {student.is_shared_section && <span className="ml-1 text-xs text-amber-600 font-medium">(Y1)</span>}
-                              </span>
-                            : (student.department_code || '-')
-                          }
+                            </span>
                         </span>
+                          )
+                        })()}
                       </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2 text-slate-600">
@@ -1388,7 +1497,11 @@ export default function StudentsPage({ user }: StudentsPageProps = {}) {
                 <div className="flex-1">
                   <p className="text-sm font-medium text-slate-700">Download Template</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Template columns: student_reg_no, name, department, section, email, batch, status
+                    Template columns: student_reg_no, name, department, section, email, password, batch, status, core_department
+                    <br />
+                    Password column is used to set/update login password during import.
+                    <br />
+                    Password is required for new students and for users who currently have no usable password.
                     <br />
                     Valid status values: ACTIVE, INACTIVE, ALUMNI, DEBAR
                   </p>

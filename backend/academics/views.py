@@ -3752,6 +3752,29 @@ class PeriodAttendanceSessionViewSet(viewsets.ModelViewSet):
                 if not is_swap_assigned:
                     raise PermissionDenied('You are not allowed to mark attendance for this period')
 
+        # If this period/date has already been assigned to another staff member,
+        # the original staff must be blocked from marking (even through a
+        # different teaching_assignment lookup path).
+        assigned_conflict = PeriodAttendanceSession.objects.select_related('assigned_to', 'assigned_to__user').filter(
+            section=section,
+            period=period,
+            date=date,
+            assigned_to__isnull=False,
+        ).exclude(assigned_to=staff_profile).order_by('-id').first()
+        if assigned_conflict and not (user.is_superuser or 'analytics.edit_all_analytics' in perms):
+            assigned_name = ''
+            try:
+                assigned_name = assigned_conflict.assigned_to.user.get_full_name() if assigned_conflict.assigned_to and assigned_conflict.assigned_to.user else assigned_conflict.assigned_to.staff_id
+            except Exception:
+                assigned_name = ''
+            return Response({
+                'error': f'This period attendance has been assigned to {assigned_name}. You cannot mark attendance.',
+                'assigned_to': {
+                    'name': assigned_name,
+                    'staff_id': getattr(assigned_conflict.assigned_to, 'staff_id', ''),
+                },
+            }, status=403)
+
         with transaction.atomic():
             # Optionally create a temporary special timetable entry for this date/period
             try:
@@ -5095,6 +5118,19 @@ class StaffPeriodsView(APIView):
                     # No staff context: can't determine ownership; skip showing any session
                     sess_qs = sess_qs.none()
             session = sess_qs.order_by('-id').first()
+            if session is None:
+                # If a swap request was approved, assignment may exist on a session
+                # whose teaching_assignment does not match this resolved slot.
+                # Surface that assigned session so original staff is shown as locked.
+                try:
+                    session = PeriodAttendanceSession.objects.select_related('assigned_to', 'assigned_to__user').filter(
+                        section=a.section,
+                        period=a.period,
+                        date=date,
+                        assigned_to__isnull=False,
+                    ).exclude(assigned_to=staff_profile).order_by('-id').first()
+                except Exception:
+                    session = None
             # determine latest unlock request status for this session (if any)
             unlock_status = None
             unlock_id = None

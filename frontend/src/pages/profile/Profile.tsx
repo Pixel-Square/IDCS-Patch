@@ -134,7 +134,7 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
 
   // One-time edit state for name using a single source of truth for UI sync.
   const [isEditingName, setIsEditingName] = useState(false);
-  const [profile, setProfile] = useState({ name: '', email: '', nameEdited: false });
+  const [profile, setProfile] = useState({ name: '', first_name: '', last_name: '', email: '', nameEdited: false });
   const [nameEmailEditError, setNameEmailEditError] = useState<string | null>(null);
   const [nameEmailSaving, setNameEmailSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -292,6 +292,8 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
     const edited = Boolean((user as any)?.profileEdited ?? (user as any)?.name_email_edited);
     setProfile({
       name: getDisplayName(user),
+      first_name: String(user?.first_name || ''),
+      last_name: String(user?.last_name || ''),
       email: String(user?.email || ''),
       nameEdited: edited,
     });
@@ -614,10 +616,8 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
 
   async function handleSaveName() {
     setNameEmailEditError(null);
-    const fullName = String(profile.name || '').trim();
-    const parts = fullName.split(/\s+/).filter(Boolean);
-    const firstName = String(parts.shift() || '').trim();
-    const lastName = String(parts.join(' ')).trim();
+    const firstName = String(profile.first_name || '').trim();
+    const lastName = String(profile.last_name || '').trim();
 
     const confirmEdit = window.confirm(
       'This is a one-time edit. After saving you cannot change your name again.'
@@ -625,7 +625,7 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
     if (!confirmEdit) return;
 
     if (!firstName) {
-      setNameEmailEditError('Name cannot be empty.');
+      setNameEmailEditError('First name cannot be empty.');
       return;
     }
 
@@ -655,6 +655,8 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
       setUser(normalized);
       setProfile({
         name: getDisplayName(normalized),
+        first_name: String(normalized.first_name || ''),
+        last_name: String(normalized.last_name || ''),
         email: String(normalized.email || ''),
         nameEdited: true,
       });
@@ -668,13 +670,13 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
 
   function startEditingName() {
     if (profile.nameEdited) return;
-    setProfile((prev) => ({ ...prev, name: getDisplayName(user) }));
+    setProfile((prev) => ({ ...prev, name: getDisplayName(user), first_name: String(user?.first_name || ''), last_name: String(user?.last_name || '') }));
     setIsEditingName(true);
     setNameEmailEditError(null);
   }
 
   function cancelEditingName() {
-    setProfile((prev) => ({ ...prev, name: getDisplayName(user) }));
+    setProfile((prev) => ({ ...prev, name: getDisplayName(user), first_name: String(user?.first_name || ''), last_name: String(user?.last_name || '') }));
     setIsEditingName(false);
     setNameEmailEditError(null);
   }
@@ -1013,20 +1015,30 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                     <div className="space-y-2">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-500 w-20">Name:</span>
-                          <span className="text-gray-900 font-medium">
-                            {profile.name || '—'}
-                          </span>
+                          <span className="text-xs font-semibold text-gray-500 w-20">Username:</span>
+                          <span className="text-gray-900 font-medium">{user.username}</span>
                         </div>
                       </div>
-                      <input
-                        type="text"
-                        value={profile.name}
-                        onChange={(e) => setProfile((prev) => ({ ...prev, name: e.target.value }))}
-                        placeholder="Name"
-                        className="w-full px-2 py-1 border rounded text-sm"
-                        disabled={!isEditingName || nameEmailSaving}
-                      />
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={profile.first_name}
+                          onChange={(e) => setProfile((prev) => ({ ...prev, first_name: e.target.value }))}
+                          placeholder="First name"
+                          className="w-full px-2 py-1 border rounded text-sm"
+                          disabled={nameEmailSaving}
+                        />
+                        <input
+                          type="text"
+                          value={profile.last_name}
+                          onChange={(e) => setProfile((prev) => ({ ...prev, last_name: e.target.value }))}
+                          placeholder="Last name"
+                          className="w-full px-2 py-1 border rounded text-sm"
+                          disabled={nameEmailSaving}
+                        />
+                      </div>
+
                       {nameEmailEditError && <div className="text-xs text-red-600">{nameEmailEditError}</div>}
                       <div className="flex gap-2">
                         <button
@@ -1051,20 +1063,22 @@ export default function ProfilePage({ user: initialUser }: { user?: Me | null })
                     <div>
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-500 w-20">Name:</span>
-                          <span className="text-gray-900 font-medium">
-                            {profile.name || '—'}
-                          </span>
+                          <span className="text-xs font-semibold text-gray-500 w-20">Username:</span>
+                          <span className="text-gray-900 font-medium">{user.username}</span>
                         </div>
                       </div>
-                      <input
-                        type="text"
-                        value={profile.name}
-                        onChange={(e) => setProfile((prev) => ({ ...prev, name: e.target.value }))}
-                        placeholder="Name"
-                        className="mt-2 w-full px-2 py-1 border rounded text-sm"
-                        disabled={!isEditingName || nameEmailSaving}
-                      />
+
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <div>
+                          <span className="text-xs text-gray-500">First name</span>
+                          <div className="text-gray-900 font-medium">{user.first_name || '—'}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">Last name</span>
+                          <div className="text-gray-900 font-medium">{user.last_name || '—'}</div>
+                        </div>
+                      </div>
+
                       {!profile.nameEdited && (
                         <button
                           onClick={startEditingName}

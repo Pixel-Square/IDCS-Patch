@@ -135,7 +135,7 @@ export function StyledImpersonationForm() {
 
   return (
     <div style={{ maxWidth: '400px', margin: '20px auto', padding: '20px', border: '1px solid #ddd' }}>
-      <h2>🔐 Impersonate User</h2>
+      <h2>🔐 Super User</h2>
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '10px' }}>
           <label>Email: </label>

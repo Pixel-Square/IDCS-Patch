@@ -27,6 +27,36 @@ User = get_user_model()
 STUDENT_STATUS_CHOICES = ['ACTIVE', 'INACTIVE', 'ALUMNI', 'DEBAR']
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
+# Accept common header variants from CSV/Excel imports.
+_HEADER_ALIASES = {
+    'studentregno': 'student_reg_no',
+    'regno': 'student_reg_no',
+    'register_no': 'student_reg_no',
+    'register_number': 'student_reg_no',
+    'studentname': 'name',
+    'dept': 'department',
+    'dept_name': 'department',
+    'mail': 'email',
+    'emailid': 'email',
+    'passwords': 'password',
+    'pwd': 'password',
+    'batchyear': 'batch',
+    'coredept': 'core_department',
+    'coredepartment': 'core_department',
+}
+
+
+def _normalize_header(header: str) -> str:
+    cleaned = re.sub(r'[^a-z0-9]+', '_', str(header or '').strip().lower()).strip('_')
+    if not cleaned:
+        return ''
+    no_underscore = cleaned.replace('_', '')
+    if no_underscore in _HEADER_ALIASES:
+        return _HEADER_ALIASES[no_underscore]
+    if cleaned in _HEADER_ALIASES:
+        return _HEADER_ALIASES[cleaned]
+    return cleaned
+
 
 def _has_import_permission(user, perms):
     return user.is_superuser or user.is_staff or 'students.view_all_students' in perms
@@ -48,8 +78,8 @@ class StudentImportTemplateDownloadView(APIView):
             # Fallback: return a CSV template
             output = io.StringIO()
             writer = csv.writer(output)
-            writer.writerow(['student_reg_no', 'name', 'department', 'section', 'email', 'batch', 'status', 'core_department'])
-            writer.writerow(['REG2024001', 'John Doe', 'AI&DS', 'A', 'john.doe@example.com', '2024', 'ACTIVE', ''])
+            writer.writerow(['student_reg_no', 'name', 'department', 'section', 'email', 'password', 'batch', 'status', 'core_department'])
+            writer.writerow(['REG2024001', 'John Doe', 'AI&DS', 'A', 'john.doe@example.com', 'Student@123', '2024', 'ACTIVE', ''])
             response = HttpResponse(output.getvalue(), content_type='text/csv')
             response['Content-Disposition'] = 'attachment; filename="students_import_template.csv"'
             return response
@@ -68,11 +98,11 @@ class StudentImportTemplateDownloadView(APIView):
             ws = wb.active
             ws.title = 'Students Import'
 
-            headers = ['student_reg_no', 'name', 'department', 'section', 'email', 'batch', 'status', 'core_department']
+            headers = ['student_reg_no', 'name', 'department', 'section', 'email', 'password', 'batch', 'status', 'core_department']
             ws.append(headers)
 
             sample_dept = departments[0] if departments else 'AI&DS'
-            ws.append(['REG2024001', 'John Doe', sample_dept, 'A', 'john.doe@example.com', '2024', 'ACTIVE', ''])
+            ws.append(['REG2024001', 'John Doe', sample_dept, 'A', 'john.doe@example.com', 'Student@123', '2024', 'ACTIVE', ''])
 
             # Build a hidden "_Lists" sheet for dropdown reference data.
             # Cross-sheet references avoid the 255-char inline list limit.
@@ -91,21 +121,22 @@ class StudentImportTemplateDownloadView(APIView):
 
                 dv_core_dept = DataValidation(type='list', formula1=dept_ref, allow_blank=True)
                 ws.add_data_validation(dv_core_dept)
-                dv_core_dept.add('H2:H1000')
+                dv_core_dept.add('I2:I1000')
 
             status_ref = f"_Lists!$B$1:$B${len(STUDENT_STATUS_CHOICES)}"
             dv_status = DataValidation(type='list', formula1=status_ref, allow_blank=False)
             ws.add_data_validation(dv_status)
-            dv_status.add('G2:G1000')
+            dv_status.add('H2:H1000')
 
             ws.column_dimensions['A'].width = 20
             ws.column_dimensions['B'].width = 25
             ws.column_dimensions['C'].width = 15
             ws.column_dimensions['D'].width = 12
             ws.column_dimensions['E'].width = 32
-            ws.column_dimensions['F'].width = 12
+            ws.column_dimensions['F'].width = 20
             ws.column_dimensions['G'].width = 12
-            ws.column_dimensions['H'].width = 20
+            ws.column_dimensions['H'].width = 12
+            ws.column_dimensions['I'].width = 20
 
             # Save to buffer first
             raw_buf = BytesIO()
@@ -142,8 +173,8 @@ class StudentBulkImportView(APIView):
     """Bulk-import students from a CSV or Excel file.
 
     Existing students (matched by ``student_reg_no``) are updated; new ones are
-    created.  A default *unusable* password is set so the account cannot be used
-    until an admin assigns a password.
+    created. If a ``password`` column is provided and non-empty, the student's
+    user password is set/updated.
     """
     parser_classes = (MultiPartParser, FormParser)
     permission_classes = (IsAuthenticated,)
@@ -183,7 +214,7 @@ class StudentBulkImportView(APIView):
                 wb = load_workbook(uploaded_file, read_only=True, data_only=True)
                 ws = wb.active
                 raw_headers = [cell.value for cell in ws[1]]
-                headers = [str(h).strip() if h is not None else '' for h in raw_headers]
+                headers = [_normalize_header(str(h)) if h is not None else '' for h in raw_headers]
                 for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                     row_dict = {
                         headers[i]: (str(v).strip() if v is not None else '')
@@ -201,10 +232,18 @@ class StudentBulkImportView(APIView):
             try:
                 decoded = uploaded_file.read().decode('utf-8-sig')
                 reader = csv.DictReader(io.StringIO(decoded))
-                rows = [
-                    (idx, {k: (v or '').strip() for k, v in row.items()})
-                    for idx, row in enumerate(reader, start=2)
-                ]
+                rows = []
+                for idx, row in enumerate(reader, start=2):
+                    row_dict = {}
+                    for k, v in row.items():
+                        nk = _normalize_header(k)
+                        if not nk:
+                            continue
+                        # Keep first non-empty value if duplicate logical headers exist.
+                        value = (v or '').strip()
+                        if nk not in row_dict or (not row_dict[nk] and value):
+                            row_dict[nk] = value
+                    rows.append((idx, row_dict))
             except Exception as exc:
                 return Response(
                     {'error': f'Failed to parse CSV file: {exc}'},
@@ -239,6 +278,7 @@ class StudentBulkImportView(APIView):
                     dept_name = row.get('department', '').strip()
                     section_name = row.get('section', '').strip()
                     email = row.get('email', '').strip()
+                    password = row.get('password', '').strip()
                     batch_year = row.get('batch', '').strip()
                     row_status = row.get('status', 'ACTIVE').strip().upper()
                     core_dept_name = row.get('core_department', '').strip()
@@ -347,17 +387,30 @@ class StudentBulkImportView(APIView):
 
                         if existing.user:
                             user_obj = existing.user
-                            changed = False
+                            changed_fields = []
+                            if not password and not user_obj.has_usable_password():
+                                errors.append(
+                                    f'Row {row_idx}: password is required for reg_no "{reg_no}" because this user has no usable password.'
+                                )
+                                continue
                             if email and user_obj.email != email:
                                 user_obj.email = email
-                                changed = True
+                                changed_fields.append('email')
                             if name:
                                 parts = name.split()
-                                user_obj.first_name = parts[0]
-                                user_obj.last_name = ' '.join(parts[1:]) if len(parts) > 1 else ''
-                                changed = True
-                            if changed:
-                                user_obj.save(update_fields=['email', 'first_name', 'last_name'])
+                                first_name = parts[0]
+                                last_name = ' '.join(parts[1:]) if len(parts) > 1 else ''
+                                if user_obj.first_name != first_name:
+                                    user_obj.first_name = first_name
+                                    changed_fields.append('first_name')
+                                if user_obj.last_name != last_name:
+                                    user_obj.last_name = last_name
+                                    changed_fields.append('last_name')
+                            if password:
+                                user_obj.set_password(password)
+                                changed_fields.append('password')
+                            if changed_fields:
+                                user_obj.save(update_fields=sorted(set(changed_fields)))
                             # Ensure STUDENT role is assigned
                             try:
                                 from accounts.models import Role, UserRole
@@ -374,6 +427,12 @@ class StudentBulkImportView(APIView):
                         if not name:
                             errors.append(
                                 f'Row {row_idx}: name is required for new student (reg_no: "{reg_no}").'
+                            )
+                            continue
+
+                        if not password:
+                            errors.append(
+                                f'Row {row_idx}: password is required for new student (reg_no: "{reg_no}").'
                             )
                             continue
 
@@ -395,7 +454,7 @@ class StudentBulkImportView(APIView):
                             first_name=first_name,
                             last_name=last_name,
                         )
-                        new_user.set_unusable_password()
+                        new_user.set_password(password)
                         new_user.save()
 
                         new_profile = StudentProfile.objects.create(

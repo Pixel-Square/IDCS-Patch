@@ -279,7 +279,7 @@ export default function Login() {
                   onClick={() => setStage("impersonate")}
                   disabled={loading}
                 >
-                  Impersonate another user
+                  Super Login another user
                 </button>
               </div>
             )}
@@ -311,7 +311,7 @@ export default function Login() {
                     <textarea
                       id="reason"
                       className="block w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      placeholder="Why are you impersonating?"
+                      placeholder="Why are you Super Login?"
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       disabled={loading}
@@ -320,7 +320,7 @@ export default function Login() {
                   </div>
 
                   <p className="text-xs text-yellow-800">
-                    Note: This action is audited and the session will show an impersonation notice.
+                    Note: This action is audited and the session will show an super login notice.
                   </p>
                 </div>
 
@@ -345,7 +345,7 @@ export default function Login() {
                       Signing In...
                     </span>
                   ) : (
-                    "Impersonate & Sign In"
+                    "Super Login & Sign In"
                   )}
                 </button>
               </form>

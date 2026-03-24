@@ -35,7 +35,7 @@ export default function HalfDayRequestsApproval() {
   async function loadRequests() {
     setLoading(true)
     try {
-      const res = await fetchWithAuth('/api/staff-attendance/halfday-requests/pending_for_review/')
+      const res = await fetchWithAuth('/api/staff-attendance/half-day-requests/pending_for_review/')
       if (!res.ok) {
         if (res.status === 403) {
           // User is not HOD/AHOD
@@ -65,7 +65,7 @@ export default function HalfDayRequestsApproval() {
 
     try {
       const res = await fetchWithAuth(
-        `/api/staff-attendance/halfday-requests/${requestId}/review_request/`,
+        `/api/staff-attendance/half-day-requests/${requestId}/review_request/`,
         {
           method: 'POST',
           body: JSON.stringify({

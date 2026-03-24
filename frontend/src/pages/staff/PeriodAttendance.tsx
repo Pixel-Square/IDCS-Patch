@@ -222,7 +222,7 @@ export default function PeriodAttendance(){
   async function checkStaffAttendanceStatus() {
     setCheckingStaffAttendance(true)
     try {
-      const res = await fetchWithAuth(`/api/staff-attendance/halfday-requests/check_period_attendance_access/?date=${date}`)
+      const res = await fetchWithAuth(`/api/staff-attendance/half-day-requests/check_period_attendance_access/?date=${date}`)
       if (res.ok) {
         const data = await res.json()
         setStaffAttendanceStatus(data)
@@ -255,7 +255,7 @@ export default function PeriodAttendance(){
     
     setSubmittingHalfDayRequest(true)
     try {
-      const res = await fetchWithAuth('/api/staff-attendance/halfday-requests/', {
+      const res = await fetchWithAuth('/api/staff-attendance/half-day-requests/', {
         method: 'POST',
         body: JSON.stringify({
           attendance_date: date,
@@ -343,7 +343,7 @@ export default function PeriodAttendance(){
     async function loadHistory() {
       setLoadingHist(true)
       try {
-        const res = await fetchWithAuth('/api/staff-attendance/halfday-requests/?page_size=10')
+        const res = await fetchWithAuth('/api/staff-attendance/half-day-requests/?page_size=10')
         if (!res.ok) {
           if (res.status === 403) { setIsHod(false); setHistory([]); return }
           throw new Error('Failed')
@@ -1275,6 +1275,7 @@ export default function PeriodAttendance(){
   // Open swap modal
   function openSwapModal() {
     setSwapFor('daily')
+    setSelectedPeriodForSwap(null)
     setSwapModalOpen(true)
     loadDepartmentStaff()
   }
@@ -1284,6 +1285,11 @@ export default function PeriodAttendance(){
     setSelectedPeriodForSwap(period)
     setSwapModalOpen(true)
     loadDepartmentStaff()
+  }
+
+  function closeSwapModal() {
+    setSwapModalOpen(false)
+    setSelectedPeriodForSwap(null)
   }
 
   // Handle staff selection — CREATE REQUEST (pending approval by selected staff)
@@ -3631,6 +3637,77 @@ export default function PeriodAttendance(){
       )}
 
       {/* Bulk Modal */}
+      {swapModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-blue-50 flex items-start justify-between rounded-t-xl">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {swapFor === 'period' ? 'Request Staff for Period Attendance' : 'Request Staff for Daily Attendance'}
+                </h3>
+                {swapFor === 'period' && selectedPeriodForSwap && (
+                  <p className="text-xs text-slate-600 mt-1">
+                    {(selectedPeriodForSwap as any).combined_period_label || (selectedPeriodForSwap as any).period?.label || `Period ${(selectedPeriodForSwap as any).period?.index}`} - {(selectedPeriodForSwap as any).section_name}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={closeSwapModal}
+                className="p-1 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-slate-600" />
+              </button>
+            </div>
+
+            <div className="p-6 flex-1 overflow-y-auto">
+              {loadingStaff ? (
+                <div className="flex items-center justify-center py-10 text-slate-600">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  Loading department staff...
+                </div>
+              ) : departmentStaff.length === 0 ? (
+                <div className="text-center py-10 text-slate-600">
+                  <Users className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                  <p className="font-medium">No staff available</p>
+                  <p className="text-xs mt-1">No active staff found in your department.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-600 mb-3">Select a staff member to send assignment request.</p>
+                  {departmentStaff.map((staff: any) => (
+                    <button
+                      key={staff.id}
+                      onClick={() => handleSwapStaff(staff)}
+                      disabled={saving || savingDaily}
+                      className="w-full text-left p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors disabled:opacity-50"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-slate-900">{staff.name || staff.username || 'Unknown Staff'}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            {staff.staff_id || ''}{staff.designation ? ` - ${staff.designation}` : ''}
+                          </div>
+                        </div>
+                        <ArrowLeftRight className="w-4 h-4 text-indigo-500" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl flex justify-end">
+              <button
+                onClick={closeSwapModal}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {bulkModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl">

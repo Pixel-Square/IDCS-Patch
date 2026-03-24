@@ -156,7 +156,7 @@ const SuperuserImpersonationForm = () => {
               required
               style={styles.input}
             />
-            <small style={styles.hint}>ID of user to impersonate</small>
+            <small style={styles.hint}>ID of user to Super Login</small>
           </div>
 
           {/* Reason (Optional) */}
@@ -166,7 +166,7 @@ const SuperuserImpersonationForm = () => {
               name="reason"
               value={formData.reason}
               onChange={handleChange}
-              placeholder="Why are you impersonating this user?"
+              placeholder="Why are you Super Login this user?"
               style={{ ...styles.input, minHeight: '100px' }}
             />
             <small style={styles.hint}>For audit log</small>
