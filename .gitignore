@@ -19,11 +19,8 @@ backend/media/
 backend/staticfiles/
 
 # Env files
-.env.*
-.env.local
-.env.dev
-.env.prod
-backend/.env
+.env*
+backend/.env*
 
 # Local TLS artifacts generated during certbot runs
 .letsencrypt/
