@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, Save, FileText, Settings, DollarSign, Calculator, Table as TableIcon, Download, Send } from 'lucide-react';
 import {
+  downloadSalaryReportExcel,
   getDeductionTypes,
   getEarnTypes,
+  getSalaryBankDeclarations,
+  getSalaryReport,
   getMonthlySalarySheet,
   getPfConfig,
   getSalaryDeclarations,
@@ -13,6 +16,7 @@ import {
   downloadMonthlySalarySheet,
   publishSalaryMonth,
   savePfConfig,
+  saveSalaryBankDeclarations,
   saveSalaryDeclarations,
   saveSalaryFormulas,
   getEmiPlans,
@@ -29,21 +33,59 @@ type DeclarationRow = {
   allowance: number;
   pf_enabled: boolean;
   type2_pf_value: number;
+  bank_id?: number | null;
+  bank_name?: string;
+  account_no?: string;
+  ifsc_code?: string;
   is_new?: boolean;
+};
+
+type BankDeclarationRow = {
+  id?: number;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+};
+
+type SalaryReportType = 'payroll' | 'bank_staff';
+
+type PayrollReportData = {
+  month: string;
+  earn_types: Array<{ id: number; name: string }>;
+  deduction_types: Array<{ id: number; name: string; mode?: string }>;
+  section1: {
+    rows: Array<any>;
+    grand_total: any;
+  };
+  section2: {
+    bank_columns: string[];
+    rows: Array<any>;
+    grand_total: any;
+  };
+};
+
+type BankStaffReportData = {
+  month: string;
+  bank_filter: string;
+  bank_options: string[];
+  rows: Array<any>;
+  count: number;
 };
 
 function monthToken(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-type TabType = 'declaration' | 'pf' | 'deduction' | 'formula' | 'monthly';
+type TabType = 'declaration' | 'bank_declaration' | 'pf' | 'deduction' | 'formula' | 'monthly' | 'salary_report';
 
 const TAB_CONFIG: Record<TabType, { label: string; icon: React.ReactNode }> = {
   declaration: { label: 'Declaration', icon: <FileText className="w-5 h-5" /> },
+  bank_declaration: { label: 'Bank Declaration', icon: <FileText className="w-5 h-5" /> },
   pf: { label: 'PF Config', icon: <Settings className="w-5 h-5" /> },
   deduction: { label: 'Deductions & EMI', icon: <DollarSign className="w-5 h-5" /> },
   formula: { label: 'Formulas', icon: <Calculator className="w-5 h-5" /> },
   monthly: { label: 'Monthly Sheet', icon: <TableIcon className="w-5 h-5" /> },
+  salary_report: { label: 'Salary Report', icon: <TableIcon className="w-5 h-5" /> },
 };
 
 export default function StaffSalaryPage() {
@@ -56,6 +98,8 @@ export default function StaffSalaryPage() {
   const [declSearchTerm, setDeclSearchTerm] = useState('');
   const [declDeptFilter, setDeclDeptFilter] = useState('');
   const [declCurrentPage, setDeclCurrentPage] = useState(1);
+  const [bankOptions, setBankOptions] = useState<Array<{ id: number; name: string }>>([]);
+  const [bankDeclarations, setBankDeclarations] = useState<BankDeclarationRow[]>([]);
 
   const [pfConfig, setPfConfig] = useState<any>(null);
   const [deductionTypes, setDeductionTypes] = useState<any[]>([]);
@@ -68,6 +112,12 @@ export default function StaffSalaryPage() {
   const [monthlySearchTerm, setMonthlySearchTerm] = useState('');
   const [monthlyDeptFilter, setMonthlyDeptFilter] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [salaryReportType, setSalaryReportType] = useState<SalaryReportType>('payroll');
+  const [salaryReportMonth, setSalaryReportMonth] = useState(monthToken());
+  const [salaryReportBankFilter, setSalaryReportBankFilter] = useState('');
+  const [salaryReportLoading, setSalaryReportLoading] = useState(false);
+  const [payrollReport, setPayrollReport] = useState<PayrollReportData | null>(null);
+  const [bankStaffReport, setBankStaffReport] = useState<BankStaffReportData | null>(null);
 
   const [newEmi, setNewEmi] = useState<any>({
     staff_user_id: '',
@@ -90,8 +140,9 @@ export default function StaffSalaryPage() {
     try {
       setLoading(true);
       setError(null);
-      const [declRes, pfRes, dedRes, earnRes, formulaRes, monthRes, emiRes] = await Promise.allSettled([
+      const [declRes, bankRes, pfRes, dedRes, earnRes, formulaRes, monthRes, emiRes] = await Promise.allSettled([
         getSalaryDeclarations(),
+        getSalaryBankDeclarations(),
         getPfConfig(),
         getDeductionTypes(),
         getEarnTypes(),
@@ -103,6 +154,7 @@ export default function StaffSalaryPage() {
 
       if (declRes.status === 'fulfilled') {
         setDeclarations(declRes.value.results || []);
+        setBankOptions(declRes.value.bank_options || []);
         // Auto-open edit mode for new declarations (first time)
         const newRows = declRes.value.results || [];
         const editMap: Record<number, boolean> = {};
@@ -116,7 +168,15 @@ export default function StaffSalaryPage() {
         }
       } else {
         setDeclarations([]);
+        setBankOptions([]);
         issues.push(`Declaration: ${apiErrorText(declRes.reason)}`);
+      }
+
+      if (bankRes.status === 'fulfilled') {
+        setBankDeclarations(bankRes.value.results || []);
+      } else {
+        setBankDeclarations([]);
+        issues.push(`Bank Declarations: ${apiErrorText(bankRes.reason)}`);
       }
 
       if (pfRes.status === 'fulfilled') {
@@ -192,6 +252,28 @@ export default function StaffSalaryPage() {
     }
   };
 
+  const handleSaveBankDeclarations = async () => {
+    try {
+      const items = bankDeclarations
+        .map((row, idx) => ({
+          id: row.id,
+          name: String(row.name || '').trim(),
+          is_active: Boolean(row.is_active),
+          sort_order: Number(row.sort_order || idx + 1),
+        }))
+        .filter((row) => row.name);
+
+      await saveSalaryBankDeclarations(items);
+      await loadAll();
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to save bank declarations');
+    }
+  };
+
+  const handleDeclarationFieldChange = (staffUserId: number, patch: Partial<DeclarationRow>) => {
+    setDeclarations((prev) => prev.map((r) => (r.staff_user_id === staffUserId ? { ...r, ...patch } : r)));
+  };
+
   const handleSavePfConfig = async () => {
     try {
       await savePfConfig(pfConfig);
@@ -227,6 +309,7 @@ export default function StaffSalaryPage() {
       await saveMonthlySalarySheet(month, [{
         staff_user_id: row.staff_user_id,
         include_in_salary: Boolean(row.include_in_salary),
+        is_cash: Boolean(row.is_cash),
         earn_values: row.earn_values,
         deduction_values: row.deduction_values,
         od_new: row.od_new,
@@ -237,6 +320,33 @@ export default function StaffSalaryPage() {
       setError(e?.response?.data?.error || 'Failed to save monthly values');
     }
   };
+
+  const loadSalaryReport = async () => {
+    try {
+      setSalaryReportLoading(true);
+      setError(null);
+      const payload = await getSalaryReport({
+        month: salaryReportMonth,
+        report_type: salaryReportType,
+        bank: salaryReportType === 'bank_staff' ? salaryReportBankFilter : undefined,
+      });
+
+      if (payload?.report_type === 'payroll') {
+        setPayrollReport(payload.report || null);
+      } else {
+        setBankStaffReport(payload.report || null);
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to load salary report');
+    } finally {
+      setSalaryReportLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'salary_report') return;
+    loadSalaryReport();
+  }, [activeTab, salaryReportMonth, salaryReportType, salaryReportBankFilter]);
 
   const handleToggleMonthlyInclude = async (row: any, checked: boolean) => {
     try {
@@ -253,6 +363,7 @@ export default function StaffSalaryPage() {
       await saveMonthlySalarySheet(month, [{
         staff_user_id: row.staff_user_id,
         include_in_salary: checked,
+        is_cash: Boolean(row.is_cash),
         earn_values: row.earn_values,
         deduction_values: row.deduction_values,
         od_new: row.od_new,
@@ -264,14 +375,41 @@ export default function StaffSalaryPage() {
     }
   };
 
+  const handleToggleMonthlyCash = async (row: any, checked: boolean) => {
+    try {
+      setMonthlySheet((prev: any) => {
+        if (!prev?.results) return prev;
+        return {
+          ...prev,
+          results: prev.results.map((x: any) =>
+            x.staff_user_id === row.staff_user_id ? { ...x, is_cash: checked } : x,
+          ),
+        };
+      });
+
+      await saveMonthlySalarySheet(month, [{
+        staff_user_id: row.staff_user_id,
+        include_in_salary: Boolean(row.include_in_salary),
+        is_cash: checked,
+        earn_values: row.earn_values,
+        deduction_values: row.deduction_values,
+        od_new: row.od_new,
+        others: row.others,
+      }]);
+      await loadAll();
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to update cash flag');
+    }
+  };
+
   const handleDownloadMonthlySheet = async () => {
     try {
       const response = await downloadMonthlySalarySheet(month, monthlyDeptFilter || undefined);
-      const blob = new Blob([response.data], { type: 'text/csv' });
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `salary_monthly_sheet_${month}.csv`;
+      link.download = `salary_monthly_sheet_${month}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -284,12 +422,36 @@ export default function StaffSalaryPage() {
   const handlePublishMonthlySheet = async () => {
     try {
       setPublishing(true);
-      await publishSalaryMonth(month);
+      const nextState = !Boolean(monthlySheet?.published);
+      await publishSalaryMonth(month, undefined, nextState);
       await loadAll();
     } catch (e: any) {
-      setError(e?.response?.data?.error || 'Failed to publish salary receipts');
+      setError(e?.response?.data?.error || 'Failed to update publish state');
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const handleDownloadSalaryReport = async () => {
+    try {
+      const response = await downloadSalaryReportExcel({
+        month: salaryReportMonth,
+        report_type: salaryReportType,
+        bank: salaryReportType === 'bank_staff' ? salaryReportBankFilter : undefined,
+      });
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = salaryReportType === 'payroll'
+        ? `salary_payroll_report_${salaryReportMonth}.xlsx`
+        : `salary_bank_staff_report_${salaryReportMonth}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to download salary report');
     }
   };
 
@@ -418,13 +580,16 @@ export default function StaffSalaryPage() {
               </div>
             ) : (
               <>
-              <table className="min-w-[1100px] w-full text-sm">
+              <table className="min-w-[1400px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-2 py-2 text-left">S.No</th>
                     <th className="px-2 py-2 text-left">Staff ID</th>
                     <th className="px-2 py-2 text-left">Name</th>
                     <th className="px-2 py-2 text-left">Dept</th>
+                    <th className="px-2 py-2 text-left">Bank</th>
+                    <th className="px-2 py-2 text-left">A/C No</th>
+                    <th className="px-2 py-2 text-left">IFSC CODE</th>
                     <th className="px-2 py-2 text-right">Basic Salary</th>
                     <th className="px-2 py-2 text-right">Allowance</th>
                     <th className="px-2 py-2 text-right">Type 2 PF Value</th>
@@ -455,20 +620,53 @@ export default function StaffSalaryPage() {
                         <td className="px-2 py-2 font-medium">{row.staff_id}</td>
                         <td className="px-2 py-2">{row.name}</td>
                         <td className="px-2 py-2 text-sm text-slate-600">{row.department.name}</td>
+                        <td className="px-2 py-2">
+                          <select
+                            disabled={!editable}
+                            value={String(row.bank_id || '')}
+                            onChange={(e) => handleDeclarationFieldChange(row.staff_user_id, { bank_id: e.target.value ? Number(e.target.value) : null })}
+                            className="border rounded px-2 py-1 w-44 disabled:bg-slate-100"
+                          >
+                            <option value="">Select Bank</option>
+                            {bankOptions.map((bank) => (
+                              <option key={bank.id} value={bank.id}>{bank.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="text"
+                            disabled={!editable}
+                            value={row.account_no || ''}
+                            onChange={(e) => handleDeclarationFieldChange(row.staff_user_id, { account_no: e.target.value })}
+                            className="border rounded px-2 py-1 w-44 disabled:bg-slate-100"
+                            placeholder="Enter account number"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="text"
+                            disabled={!editable}
+                            value={row.ifsc_code || ''}
+                            onChange={(e) => handleDeclarationFieldChange(row.staff_user_id, { ifsc_code: e.target.value.toUpperCase() })}
+                            className="border rounded px-2 py-1 w-36 uppercase disabled:bg-slate-100"
+                            placeholder="IFSC code"
+                          />
+                        </td>
                         <td className="px-2 py-2 text-right">
                           <input type="number" disabled={!editable} value={row.basic_salary}
-                            onChange={(e) => setDeclarations((p) => p.map((r) => r.staff_user_id === row.staff_user_id ? { ...r, basic_salary: Number(e.target.value) } : r))}
+                            onChange={(e) => handleDeclarationFieldChange(row.staff_user_id, { basic_salary: Number(e.target.value) })}
                             className="border rounded px-2 py-1 w-32 text-right disabled:bg-slate-100" />
                         </td>
                         <td className="px-2 py-2 text-right">
                           <input type="number" disabled={!editable} value={row.allowance}
-                            onChange={(e) => setDeclarations((p) => p.map((r) => r.staff_user_id === row.staff_user_id ? { ...r, allowance: Number(e.target.value) } : r))}
+                            onChange={(e) => handleDeclarationFieldChange(row.staff_user_id, { allowance: Number(e.target.value) })}
                             className="border rounded px-2 py-1 w-32 text-right disabled:bg-slate-100" />
                         </td>
                         {isNonTeaching && (
                           <td className="px-2 py-2 text-right">
                             <input type="number" disabled={!editable} value={row.type2_pf_value}
-                              onChange={(e) => setDeclarations((p) => p.map((r) => r.staff_user_id === row.staff_user_id ? { ...r, type2_pf_value: Number(e.target.value) } : r))}
+                              onChange={(e) => handleDeclarationFieldChange(row.staff_user_id, { type2_pf_value: Number(e.target.value) })}
                               className="border rounded px-2 py-1 w-32 text-right disabled:bg-slate-100" placeholder="Type 2 PF" />
                           </td>
                         )}
@@ -477,7 +675,7 @@ export default function StaffSalaryPage() {
                         )}
                         <td className="px-2 py-2 text-center">
                           <input type="checkbox" disabled={!editable} checked={row.pf_enabled}
-                            onChange={(e) => setDeclarations((p) => p.map((r) => r.staff_user_id === row.staff_user_id ? { ...r, pf_enabled: e.target.checked } : r))} />
+                            onChange={(e) => handleDeclarationFieldChange(row.staff_user_id, { pf_enabled: e.target.checked })} />
                         </td>
                         <td className="px-2 py-2 text-center space-x-2">
                           {!editable ? (
@@ -565,6 +763,70 @@ export default function StaffSalaryPage() {
               })()}
               </>
             )}
+          </section>
+        )}
+
+        {/* Bank Declaration Tab */}
+        {activeTab === 'bank_declaration' && (
+          <section className="bg-white border rounded-xl p-4">
+            <h2 className="text-xl font-semibold mb-3">Bank Declaration</h2>
+            <p className="text-sm text-slate-600 mb-4">Define bank names that will be selectable in staff salary declaration rows.</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-2 px-3 py-2">
+              <label className="text-xs font-semibold text-slate-700 uppercase">Bank Name</label>
+              <label className="text-xs font-semibold text-slate-700 uppercase">Status</label>
+              <label className="text-xs font-semibold text-slate-700 uppercase">Sort Order</label>
+              <label className="text-xs font-semibold text-slate-700 uppercase">Actions</label>
+            </div>
+
+            <div className="space-y-2 mb-4">
+              {bankDeclarations.map((b, idx) => (
+                <div key={b.id || `bank-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                  <input
+                    value={b.name || ''}
+                    onChange={(e) => setBankDeclarations((prev) => prev.map((x) => x === b ? { ...x, name: e.target.value } : x))}
+                    className="border rounded px-3 py-2"
+                    placeholder="Enter bank name"
+                  />
+                  <label className="inline-flex items-center gap-2 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(b.is_active)}
+                      onChange={(e) => setBankDeclarations((prev) => prev.map((x) => x === b ? { ...x, is_active: e.target.checked } : x))}
+                    />
+                    {b.is_active ? 'Active' : 'Inactive'}
+                  </label>
+                  <input
+                    type="number"
+                    value={b.sort_order || idx + 1}
+                    onChange={(e) => setBankDeclarations((prev) => prev.map((x) => x === b ? { ...x, sort_order: Number(e.target.value) } : x))}
+                    className="border rounded px-3 py-2"
+                    placeholder="1, 2, 3..."
+                  />
+                  <button
+                    onClick={() => setBankDeclarations((prev) => prev.filter((x) => x !== b))}
+                    className="px-3 py-2 border rounded border-red-200 text-red-700 hover:bg-red-50"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setBankDeclarations((prev) => [...prev, { name: '', is_active: true, sort_order: prev.length + 1 }])}
+                className="px-3 py-2 border rounded inline-flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" /> Add Bank
+              </button>
+              <button
+                onClick={handleSaveBankDeclarations}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 inline-flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" /> Save Bank Declaration
+              </button>
+            </div>
           </section>
         )}
 
@@ -812,15 +1074,15 @@ export default function StaffSalaryPage() {
                     onClick={handleDownloadMonthlySheet}
                     className="px-3 py-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-2 text-sm"
                   >
-                    <Download className="w-4 h-4" /> Download
+                    <Download className="w-4 h-4" /> Download Excel
                   </button>
                   <button
                     onClick={handlePublishMonthlySheet}
                     disabled={publishing}
-                    className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-400 inline-flex items-center gap-2 text-sm"
+                    className={`px-3 py-2 rounded text-white disabled:bg-slate-400 inline-flex items-center gap-2 text-sm ${monthlySheet?.published ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                   >
                     {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    Publish
+                    {monthlySheet?.published ? 'Deactivate Publish' : 'Activate Publish'}
                   </button>
                 </div>
               </div>
@@ -859,10 +1121,11 @@ export default function StaffSalaryPage() {
               <thead className="bg-slate-100 border-b border-slate-200 sticky top-0 z-20">
                 <tr>
                   <th className="px-3 py-2 text-center font-semibold text-slate-700 sticky left-0 z-30 bg-slate-100 border-r border-slate-200 min-w-[70px]">Pay</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[70px] z-30 bg-slate-100 border-r border-slate-200 min-w-[60px]">S.No</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[130px] z-30 bg-slate-100 border-r border-slate-200 min-w-[100px]">Staff ID</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[230px] z-30 bg-slate-100 border-r border-slate-200 min-w-[150px]">Staff Name</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[380px] z-30 bg-slate-100 border-r border-slate-200 min-w-[120px]">Dept</th>
+                  <th className="px-3 py-2 text-center font-semibold text-slate-700 sticky left-[70px] z-30 bg-slate-100 border-r border-slate-200 min-w-[70px]">Cash</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[140px] z-30 bg-slate-100 border-r border-slate-200 min-w-[60px]">S.No</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[200px] z-30 bg-slate-100 border-r border-slate-200 min-w-[100px]">Staff ID</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[300px] z-30 bg-slate-100 border-r border-slate-200 min-w-[150px]">Staff Name</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 sticky left-[450px] z-30 bg-slate-100 border-r border-slate-200 min-w-[120px]">Dept</th>
                   <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Basic salary</th>
                   <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[100px]">Allowance</th>
                   <th className="px-3 py-2 text-right font-semibold text-slate-700 min-w-[80px]">Days</th>
@@ -989,10 +1252,18 @@ export default function StaffSalaryPage() {
                               className="w-4 h-4"
                             />
                           </td>
-                          <td className="px-3 py-2 font-semibold text-slate-900 sticky left-[70px] z-10 bg-inherit border-r border-slate-200">{staffCounter}</td>
-                          <td className="px-3 py-2 text-slate-900 sticky left-[130px] z-10 bg-inherit border-r border-slate-200">{r.staff_id}</td>
-                          <td className="px-3 py-2 text-slate-900 sticky left-[230px] z-10 bg-inherit border-r border-slate-200">{r.staff_name}</td>
-                          <td className="px-3 py-2 text-slate-700 sticky left-[380px] z-10 bg-inherit border-r border-slate-200">{r.department.name}</td>
+                          <td className="px-3 py-2 text-center sticky left-[70px] z-10 bg-inherit border-r border-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(r.is_cash ?? false)}
+                              onChange={(ev) => handleToggleMonthlyCash(r, ev.target.checked)}
+                              className="w-4 h-4"
+                            />
+                          </td>
+                          <td className="px-3 py-2 font-semibold text-slate-900 sticky left-[140px] z-10 bg-inherit border-r border-slate-200">{staffCounter}</td>
+                          <td className="px-3 py-2 text-slate-900 sticky left-[200px] z-10 bg-inherit border-r border-slate-200">{r.staff_id}</td>
+                          <td className="px-3 py-2 text-slate-900 sticky left-[300px] z-10 bg-inherit border-r border-slate-200">{r.staff_name}</td>
+                          <td className="px-3 py-2 text-slate-700 sticky left-[450px] z-10 bg-inherit border-r border-slate-200">{r.department.name}</td>
                           <td className="px-3 py-2 text-right text-slate-700">{Number(r.basic_salary).toFixed(2)}</td>
                           <td className="px-3 py-2 text-right text-slate-700">{Number(r.allowance).toFixed(2)}</td>
                           <td className="px-3 py-2 text-right text-slate-700">{Number(r.days).toFixed(2)}</td>
@@ -1046,9 +1317,10 @@ export default function StaffSalaryPage() {
                         <tr key={`dept-total-${dept.id}`} className="border-b bg-gradient-to-r from-blue-50 to-blue-100/50 font-semibold text-slate-800">
                           <td className="px-3 py-2 sticky left-0 z-10 bg-inherit"></td>
                           <td className="px-3 py-2 sticky left-[70px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[130px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[230px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[380px] z-10 bg-inherit border-r border-slate-200">{dept.name} Total</td>
+                          <td className="px-3 py-2 sticky left-[140px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[200px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[300px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[450px] z-10 bg-inherit border-r border-slate-200">{dept.name} Total</td>
                           <td className="px-3 py-2 text-right">{totals.basic_salary.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">{totals.allowance.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">{totals.days.toFixed(2)}</td>
@@ -1078,9 +1350,10 @@ export default function StaffSalaryPage() {
                         <tr key="grand-total" className="border-b bg-gradient-to-r from-green-50 to-green-100/50 font-bold text-slate-800">
                           <td className="px-3 py-2 sticky left-0 z-10 bg-inherit"></td>
                           <td className="px-3 py-2 sticky left-[70px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[130px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[230px] z-10 bg-inherit"></td>
-                          <td className="px-3 py-2 sticky left-[380px] z-10 bg-inherit border-r border-slate-200">Final College Total</td>
+                          <td className="px-3 py-2 sticky left-[140px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[200px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[300px] z-10 bg-inherit"></td>
+                          <td className="px-3 py-2 sticky left-[450px] z-10 bg-inherit border-r border-slate-200">Final College Total</td>
                           <td className="px-3 py-2 text-right">{totals.basic_salary.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">{totals.allowance.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">{totals.days.toFixed(2)}</td>
@@ -1110,6 +1383,213 @@ export default function StaffSalaryPage() {
               </tbody>
             </table>
             </div>
+          </section>
+        )}
+
+        {activeTab === 'salary_report' && (
+          <section className="bg-white border rounded-xl p-4 space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="text-sm font-medium text-slate-700 block mb-1">Month</label>
+                <input
+                  type="month"
+                  value={salaryReportMonth}
+                  onChange={(e) => setSalaryReportMonth(e.target.value)}
+                  className="border rounded px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 block mb-1">Report Type</label>
+                <select
+                  value={salaryReportType}
+                  onChange={(e) => setSalaryReportType(e.target.value as SalaryReportType)}
+                  className="border rounded px-3 py-2 min-w-[220px]"
+                >
+                  <option value="payroll">Pay Roll Report</option>
+                  <option value="bank_staff">Bank-wise Staff Report</option>
+                </select>
+              </div>
+              {salaryReportType === 'bank_staff' && (
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Bank</label>
+                  <select
+                    value={salaryReportBankFilter}
+                    onChange={(e) => setSalaryReportBankFilter(e.target.value)}
+                    className="border rounded px-3 py-2 min-w-[220px]"
+                  >
+                    <option value="">All Banks</option>
+                    {(bankStaffReport?.bank_options || []).map((bankName) => (
+                      <option key={bankName} value={bankName}>{bankName}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <button
+                onClick={loadSalaryReport}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 inline-flex items-center gap-2"
+              >
+                {salaryReportLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Load Report'}
+              </button>
+              <button
+                onClick={handleDownloadSalaryReport}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded hover:bg-slate-100 inline-flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" /> Download Excel
+              </button>
+            </div>
+
+            {salaryReportType === 'payroll' && payrollReport && (
+              <>
+                <div className="border rounded-lg overflow-auto">
+                  <div className="px-3 py-2 bg-slate-50 border-b text-sm font-semibold text-slate-800">Pay Roll Report - Section 1</div>
+                  <table className="min-w-[1300px] w-full text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-2 py-2 text-left">S.No</th>
+                        <th className="px-2 py-2 text-left">Staff Type</th>
+                        <th className="px-2 py-2 text-right">Salary</th>
+                        <th className="px-2 py-2 text-right">LOP</th>
+                        {(payrollReport.earn_types || []).map((e) => (
+                          <th key={`rep-earn-${e.id}`} className="px-2 py-2 text-right">{e.name}</th>
+                        ))}
+                        <th className="px-2 py-2 text-right">Gross Salary</th>
+                        <th className="px-2 py-2 text-right">P.F</th>
+                        {(payrollReport.deduction_types || []).map((d) => (
+                          <th key={`rep-ded-${d.id}`} className="px-2 py-2 text-right">{d.name}</th>
+                        ))}
+                        <th className="px-2 py-2 text-right">Total Deduction</th>
+                        <th className="px-2 py-2 text-right">Net Salary</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(payrollReport.section1?.rows || []).map((row: any) => (
+                        <tr key={`s1-${row.s_no}`} className="border-t">
+                          <td className="px-2 py-2">{row.s_no}</td>
+                          <td className="px-2 py-2">{row.staff_type}</td>
+                          <td className="px-2 py-2 text-right">{Number(row.salary || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{Number(row.lop || 0).toFixed(2)}</td>
+                          {(payrollReport.earn_types || []).map((e) => (
+                            <td key={`s1-earn-${row.s_no}-${e.id}`} className="px-2 py-2 text-right">{Number((row.earn || {})[String(e.id)] || 0).toFixed(2)}</td>
+                          ))}
+                          <td className="px-2 py-2 text-right">{Number(row.gross_salary || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{Number(row.pf_amount || 0).toFixed(2)}</td>
+                          {(payrollReport.deduction_types || []).map((d) => (
+                            <td key={`s1-ded-${row.s_no}-${d.id}`} className="px-2 py-2 text-right">{Number((row.deduction || {})[String(d.id)] || 0).toFixed(2)}</td>
+                          ))}
+                          <td className="px-2 py-2 text-right">{Number(row.total_deduction || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{Number(row.net_salary || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      {payrollReport.section1?.grand_total && (
+                        <tr className="border-t bg-slate-100 font-semibold">
+                          <td className="px-2 py-2"></td>
+                          <td className="px-2 py-2">Grand Total</td>
+                          <td className="px-2 py-2 text-right">{Number(payrollReport.section1.grand_total.salary || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{Number(payrollReport.section1.grand_total.lop || 0).toFixed(2)}</td>
+                          {(payrollReport.earn_types || []).map((e) => (
+                            <td key={`s1-grand-earn-${e.id}`} className="px-2 py-2 text-right">{Number((payrollReport.section1.grand_total.earn || {})[String(e.id)] || 0).toFixed(2)}</td>
+                          ))}
+                          <td className="px-2 py-2 text-right">{Number(payrollReport.section1.grand_total.gross_salary || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{Number(payrollReport.section1.grand_total.pf_amount || 0).toFixed(2)}</td>
+                          {(payrollReport.deduction_types || []).map((d) => (
+                            <td key={`s1-grand-ded-${d.id}`} className="px-2 py-2 text-right">{Number((payrollReport.section1.grand_total.deduction || {})[String(d.id)] || 0).toFixed(2)}</td>
+                          ))}
+                          <td className="px-2 py-2 text-right">{Number(payrollReport.section1.grand_total.total_deduction || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{Number(payrollReport.section1.grand_total.net_salary || 0).toFixed(2)}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="border rounded-lg overflow-auto">
+                  <div className="px-3 py-2 bg-slate-50 border-b text-sm font-semibold text-slate-800">Pay Roll Report - Section 2</div>
+                  <table className="min-w-[1100px] w-full text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-2 py-2 text-left">S.No</th>
+                        <th className="px-2 py-2 text-left">Staff Type</th>
+                        {(payrollReport.section2?.bank_columns || []).map((bankName) => (
+                          <React.Fragment key={`bhead-${bankName}`}>
+                            <th className="px-2 py-2 text-right">{bankName} Total Request</th>
+                            <th className="px-2 py-2 text-right">{bankName} Amount</th>
+                          </React.Fragment>
+                        ))}
+                        <th className="px-2 py-2 text-right">Cash</th>
+                        <th className="px-2 py-2 text-right">Total Salary</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(payrollReport.section2?.rows || []).map((row: any) => (
+                        <tr key={`s2-${row.s_no}`} className="border-t">
+                          <td className="px-2 py-2">{row.s_no}</td>
+                          <td className="px-2 py-2">{row.staff_type}</td>
+                          {(payrollReport.section2?.bank_columns || []).map((bankName) => (
+                            <React.Fragment key={`s2-bank-${row.s_no}-${bankName}`}>
+                              <td className="px-2 py-2 text-right">{Number((row.banks || {})[bankName]?.total_request || 0)}</td>
+                              <td className="px-2 py-2 text-right">{Number((row.banks || {})[bankName]?.amount || 0).toFixed(2)}</td>
+                            </React.Fragment>
+                          ))}
+                          <td className="px-2 py-2 text-right">{Number(row.cash || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{Number(row.total_salary || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      {payrollReport.section2?.grand_total && (
+                        <tr className="border-t bg-slate-100 font-semibold">
+                          <td className="px-2 py-2"></td>
+                          <td className="px-2 py-2">Grand Total</td>
+                          {(payrollReport.section2?.bank_columns || []).map((bankName) => (
+                            <React.Fragment key={`s2-grand-${bankName}`}>
+                              <td className="px-2 py-2 text-right">{Number((payrollReport.section2.grand_total.banks || {})[bankName]?.total_request || 0)}</td>
+                              <td className="px-2 py-2 text-right">{Number((payrollReport.section2.grand_total.banks || {})[bankName]?.amount || 0).toFixed(2)}</td>
+                            </React.Fragment>
+                          ))}
+                          <td className="px-2 py-2 text-right">{Number(payrollReport.section2.grand_total.cash || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{Number(payrollReport.section2.grand_total.total_salary || 0).toFixed(2)}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {salaryReportType === 'bank_staff' && bankStaffReport && (
+              <div className="border rounded-lg overflow-auto">
+                <div className="px-3 py-2 bg-slate-50 border-b text-sm font-semibold text-slate-800">
+                  Bank-wise Staff Report ({bankStaffReport.count})
+                </div>
+                <table className="min-w-[900px] w-full text-sm">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th className="px-2 py-2 text-left">S.No</th>
+                      <th className="px-2 py-2 text-left">Staff ID</th>
+                      <th className="px-2 py-2 text-left">Staff Name</th>
+                      <th className="px-2 py-2 text-left">Department</th>
+                      <th className="px-2 py-2 text-left">Bank</th>
+                      <th className="px-2 py-2 text-right">Gross Salary</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(bankStaffReport.rows || []).map((row: any) => (
+                      <tr key={`bank-staff-${row.staff_user_id}-${row.s_no}`} className="border-t">
+                        <td className="px-2 py-2">{row.s_no}</td>
+                        <td className="px-2 py-2">{row.staff_id}</td>
+                        <td className="px-2 py-2">{row.staff_name}</td>
+                        <td className="px-2 py-2">{row.department}</td>
+                        <td className="px-2 py-2">{row.bank}</td>
+                        <td className="px-2 py-2 text-right">{Number(row.gross_salary || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                    {bankStaffReport.rows?.length === 0 && (
+                      <tr>
+                        <td className="px-2 py-6 text-center text-slate-500" colSpan={6}>No rows found for selected filter</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         )}
       </div>

@@ -304,7 +304,7 @@ export default function OrganizationStaffAttendanceAnalytics() {
     }
 
     try {
-      const params = new URLSearchParams({ format: 'csv', report_type: reportType });
+      const params = new URLSearchParams({ format: 'excel', report_type: reportType });
 
       if (reportType === '1') {
         params.append('from_date', fromDate);
@@ -330,8 +330,8 @@ export default function OrganizationStaffAttendanceAnalytics() {
       const link = document.createElement('a');
       link.href = url;
       const filename = reportType === '1'
-        ? (toDate ? `organization_attendance_${fromDate}_to_${toDate}.csv` : `organization_attendance_${fromDate}.csv`)
-        : `organization_attendance_type_${reportType}_${month}.csv`;
+        ? (toDate ? `organization_attendance_${fromDate}_to_${toDate}.xlsx` : `organization_attendance_${fromDate}.xlsx`)
+        : `organization_attendance_type_${reportType}_${month}.xlsx`;
       link.download = filename;
       document.body.appendChild(link);
       link.click();
@@ -741,7 +741,7 @@ export default function OrganizationStaffAttendanceAnalytics() {
             <div className="mb-6 flex justify-end">
               <button onClick={downloadCSV} className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
                 <Download className="w-4 h-4" />
-                Download as CSV
+                Download as Excel
               </button>
             </div>
 
@@ -804,7 +804,7 @@ export default function OrganizationStaffAttendanceAnalytics() {
               </div>
               <button onClick={downloadCSV} className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
                 <Download className="w-4 h-4" />
-                Download as CSV
+                Download as Excel
               </button>
             </div>
 

@@ -250,3 +250,11 @@ export async function hrApplyRequest(data: {
   const res = await apiClient.post(`${BASE_URL}/requests/hr_apply_request/`, data);
   return res.data;
 }
+
+export async function hrApplyClForLop(data: {
+  month: string;
+  staff_user_ids: number[];
+}): Promise<any> {
+  const res = await apiClient.post(`${BASE_URL}/requests/hr_apply_cl_for_lop/`, data);
+  return res.data;
+}

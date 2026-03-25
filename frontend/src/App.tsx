@@ -356,7 +356,7 @@ export default function App() {
                 />
                 <Route
                   path="/staffs"
-                  element={<ProtectedRoute user={user} requiredPermissions={["academics.view_staffs_page"]} element={<StaffsPage />} />}
+                  element={<ProtectedRoute user={user} requiredRoles={['PS']} requiredPermissions={["academics.view_staffs_page"]} element={<StaffsPage />} />}
                 />
                 <Route
                   path="/advisor/teaching"

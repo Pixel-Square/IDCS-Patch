@@ -139,22 +139,32 @@ class AttendanceRecord(models.Model):
             
             if apply_absence:
 
+                fn_no_record_mode = in_limit == mid_split
+                an_no_record_mode = out_limit == mid_split
+
                 if _needs_biometric_calc(self.fn_status):
-                    if self.morning_in:
-                        # FN: Present if came before/at the in_time_limit
-                        if self.morning_in <= in_limit:
-                            self.fn_status = 'present'
-                        else:
-                            # Came late (after in_time_limit) - FN absent
-                            self.fn_status = 'absent'
+                    if fn_no_record_mode:
+                        # When IN limit equals noon split, FN should be treated as no-record.
+                        self.fn_status = None
                     else:
-                        # No morning_in time - FN absent
-                        self.fn_status = 'absent'
+                        if self.morning_in:
+                            # FN: Present if came before/at the in_time_limit
+                            if self.morning_in <= in_limit:
+                                self.fn_status = 'present'
+                            else:
+                                # Came late (after in_time_limit) - FN absent
+                                self.fn_status = 'absent'
+                        else:
+                            # No morning_in time - FN absent
+                            self.fn_status = 'absent'
                 # else: Preserve leave status (CL, OD, ML, COL, etc.)
                 
                 # === Calculate AN status ===
                 if _needs_biometric_calc(self.an_status):
-                    if self.morning_in and self.evening_out:
+                    if an_no_record_mode:
+                        # When OUT limit equals noon split, AN should be treated as no-record.
+                        self.an_status = None
+                    elif self.morning_in and self.evening_out:
                         # Has both in and out times
                         # AN is absent if:
                         # 1. Came after mid_split (came after 1 PM - missed forenoon and morning)
@@ -182,11 +192,20 @@ class AttendanceRecord(models.Model):
                 
             else:
                 # No settings OR time-based absence is disabled — simple present/absent logic
+                fn_no_record_mode = in_limit == mid_split
+                an_no_record_mode = out_limit == mid_split
+
                 if _needs_biometric_calc(self.fn_status):
-                    self.fn_status = 'present' if self.morning_in else 'absent'
+                    if fn_no_record_mode:
+                        self.fn_status = None
+                    else:
+                        self.fn_status = 'present' if self.morning_in else 'absent'
                 
                 if _needs_biometric_calc(self.an_status):
-                    self.an_status = 'present' if self.evening_out else 'absent'
+                    if an_no_record_mode:
+                        self.an_status = None
+                    else:
+                        self.an_status = 'present' if self.evening_out else 'absent'
             
             # === Calculate overall status based on FN and AN ===
             # Overall status logic:

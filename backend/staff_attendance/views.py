@@ -4,6 +4,8 @@ import calendar
 import re
 import traceback as tb_module
 from datetime import datetime, date as date_type, timedelta
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
 from django.core.management import call_command
 from django.db import transaction
 from django.utils import timezone
@@ -326,6 +328,8 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
             )
             if export_format == 'csv':
                 return self._export_staff_monthly_matrix_csv(payload)
+            elif export_format == 'excel':
+                return self._export_staff_monthly_matrix_excel(payload)
             return Response(payload)
 
         # `from_date` is required; `to_date` is optional. If only `from_date` provided,
@@ -570,6 +574,13 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
             filename = f"organization_attendance_{from_date_str}_to_{to_date_str}.csv"
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
             return response
+        
+        elif export_format == 'excel':
+            return self._export_organization_analytics_excel(
+                analytics_list, from_date_str, to_date_str, total_staff, total_records, 
+                total_present, total_absent, working_days, staff_cl_count, staff_od_count,
+                staff_late_entry_count, staff_col_count, staff_others_count
+            )
         
         else:
             # Return JSON
@@ -854,6 +865,159 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
 
         response = Response(output.getvalue(), content_type='text/csv')
         filename = f"organization_staff_attendance_type_{report_type}_{month}.csv"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    def _export_staff_monthly_matrix_excel(self, payload):
+        """Export staff monthly matrix data as Excel file"""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Staff Attendance'
+
+        month = payload.get('month')
+        report_type = payload.get('report_type')
+        
+        # Add title and metadata
+        ws.append(['Organization Staff Attendance Analytics'])
+        ws.append(['Report Type', f"Type {report_type}"])
+        ws.append(['Month', month])
+        ws.append([])
+
+        # Add headers
+        header = ['Staff ID', 'Staff Name']
+        if report_type in ['2', '4', '5']:
+            header.append('Days')
+        header.extend(payload.get('day_columns') or [])
+        ws.append(header)
+
+        # Style header row
+        header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        header_font = Font(bold=True, color='FFFFFF')
+        for cell in ws[ws.max_row]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # Add data rows
+        for row in payload.get('staff_rows') or []:
+            excel_row = [row.get('staff_id', ''), row.get('staff_name', '')]
+            if report_type in ['2', '4', '5']:
+                excel_row.append(row.get('days', 0))
+            values = row.get('values') or {}
+            for dcol in payload.get('day_columns') or []:
+                cell = values.get(dcol) or {}
+                value = cell.get('value', '-')
+                excel_row.append(value)
+            ws.append(excel_row)
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        # Save to BytesIO and return
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        response = Response(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        filename = f"organization_staff_attendance_type_{report_type}_{month}.xlsx"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    def _export_organization_analytics_excel(self, analytics_list, from_date_str, to_date_str, 
+                                             total_staff, total_records, total_present, total_absent, 
+                                             working_days, staff_cl_count, staff_od_count,
+                                             staff_late_entry_count, staff_col_count, staff_others_count):
+        """Export organization analytics data as Excel file"""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Analytics'
+
+        # Add header section
+        ws.append(['ORGANIZATION ATTENDANCE ANALYTICS'])
+        ws.append(['Date Range', f'{from_date_str} to {to_date_str}'])
+        ws.append(['Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
+        ws.append([])
+
+        # Add summary section
+        ws.append(['ORGANIZATION ATTENDANCE SUMMARY'])
+        ws.append(['Total Staff', total_staff])
+        ws.append(['Total Records', total_records])
+        ws.append(['No. of Staff with CL', staff_cl_count])
+        ws.append(['No. of Staff with OD', staff_od_count])
+        ws.append(['No. of Staff with Late Entry', staff_late_entry_count])
+        ws.append(['No. of Staff with COL', staff_col_count])
+        ws.append(['No. of Staff with Others', staff_others_count])
+        ws.append(['Total Present Days', total_present])
+        ws.append(['Total Absent Days', total_absent])
+        ws.append(['Total Working Days (excluding holidays)', working_days])
+        ws.append([])
+
+        # Add staff-wise details header
+        ws.append(['STAFF-WISE ATTENDANCE'])
+        header_row = ['Staff Name', 'Email', 'Department', 'Present', 'Absent', 'CL', 'OD', 'Late Entry', 'COL', 'Others', 'Attendance %']
+        ws.append(header_row)
+
+        # Style header row
+        header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        header_font = Font(bold=True, color='FFFFFF')
+        for cell in ws[ws.max_row]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # Add staff records
+        for item in sorted(analytics_list, key=lambda x: x['name']):
+            attendance_pct = (item['present'] / working_days * 100) if working_days and working_days > 0 else 0
+            ws.append([
+                item['name'],
+                item['email'],
+                item['department'],
+                round(item['present'], 1),
+                round(item['absent'], 1),
+                item['cl_count'],
+                item['od_count'],
+                item['late_entry_count'],
+                item['col_count'],
+                item['others_count'],
+                f"{attendance_pct:.2f}%"
+            ])
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        # Save to BytesIO and return
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        response = Response(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        filename = f"organization_attendance_{from_date_str}_to_{to_date_str}.xlsx"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 

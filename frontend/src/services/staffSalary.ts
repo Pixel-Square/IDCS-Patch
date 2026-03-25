@@ -80,6 +80,14 @@ export async function saveSalaryDeclarations(items: any[]) {
   return postWithFallback('/declarations/', { items });
 }
 
+export async function getSalaryBankDeclarations() {
+  return getWithFallback('/bank_declarations/');
+}
+
+export async function saveSalaryBankDeclarations(items: any[]) {
+  return postWithFallback('/bank_declarations/', { items });
+}
+
 export async function getPfConfig() {
   return getWithFallback('/pf_config/');
 }
@@ -154,8 +162,35 @@ export async function downloadMonthlySalarySheet(month: string, department_id?: 
   throw lastError;
 }
 
-export async function publishSalaryMonth(month: string, department_id?: string) {
-  return postWithFallback('/publish_month/', { month, department_id });
+export async function publishSalaryMonth(month: string, department_id?: string, is_published?: boolean) {
+  return postWithFallback('/publish_month/', { month, department_id, is_published });
+}
+
+export async function getSalaryReport(params: { month: string; report_type: 'payroll' | 'bank_staff'; bank?: string }) {
+  return getWithFallback('/salary_reports/', { params });
+}
+
+export async function downloadSalaryReportExcel(params: { month: string; report_type: 'payroll' | 'bank_staff'; bank?: string }) {
+  const queryParams: any = { ...params, format: 'excel' };
+
+  const roots = getSalaryBaseCandidates();
+  let lastError: any;
+  for (const root of roots) {
+    try {
+      const res = await apiClient.get(`${root}/salary_reports/`, {
+        params: queryParams,
+        responseType: 'blob',
+      });
+      return res;
+    } catch (err: any) {
+      lastError = err;
+      const status = err?.response?.status;
+      if (status && status !== 404) {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
 }
 
 export async function getMySalaryReceipts(month?: string) {
