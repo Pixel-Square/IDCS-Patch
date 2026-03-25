@@ -243,7 +243,7 @@ export default function AssignedSubjectsPage() {
       console.log('Raw students array length:', raw.length)
       console.log('Has pagination count?', sdata.count)
       
-      let studs = raw.map((s:any) => ({
+      const studs = raw.map((s:any) => ({
         id: Number(s.id),
         reg_no: String(s.reg_no ?? s.regno ?? ''),
         username: String(s.username ?? s.name ?? s.full_name ?? ''),

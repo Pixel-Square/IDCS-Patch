@@ -925,7 +925,7 @@ export default function PosterMakerPage({ embedded = false, staffMode = false }:
     setForwardingToBranding(true);
     setForwardError('');
     try {
-      let posterUrl = result.export_url || '';
+      const posterUrl = result.export_url || '';
       let posterDataUrl = result.dataUrl || '';
 
       async function blobUrlToDataUrl(url: string): Promise<string> {

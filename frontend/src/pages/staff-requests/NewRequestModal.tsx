@@ -30,15 +30,12 @@ export default function NewRequestModal({ onClose, onCreated, onSuccess, presele
     setLoading(true);
     setFilterMessage(null);
     try {
-      let data: RequestTemplate[];
-      let message: string | undefined;
-
       // Always filter by date: use preselectedDate or today so earn/deduct
       // forms are correctly separated based on holiday vs working day.
       const dateToFilter = preselectedDate || new Date().toISOString().slice(0, 10);
       const result = await filterTemplatesForDate(dateToFilter);
-      data = result.templates;
-      message = result.message;
+      const data: RequestTemplate[] = result.templates;
+      const message: string | undefined = result.message;
       if (message) {
         setFilterMessage(message);
       }

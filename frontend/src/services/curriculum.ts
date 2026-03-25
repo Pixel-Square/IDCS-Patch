@@ -129,7 +129,7 @@ export async function fetchCurriculumPendingCount(): Promise<CurriculumPendingCo
     const byDept = new Map<number, { department: string; count: number }>();
 
     for (const row of rows || []) {
-      if (Boolean((row as any)?.is_elective)) continue;
+      if ((row as any)?.is_elective) continue;
       const statusRaw = String((row as any)?.approval_status ?? (row as any)?.status ?? '').toUpperCase().trim();
       if (statusRaw !== 'PENDING') continue;
 
