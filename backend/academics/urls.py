@@ -46,6 +46,7 @@ from .views import UnifiedUnlockRequestsView, DepartmentStudentsView, AllStudent
 from .views import BulkAssignSecondarySectionView, RemoveSecondarySectionView
 from .student_import_views import StudentImportTemplateDownloadView, StudentBulkImportView
 from .rfreader_views import RFReaderGateListCreateView, RFReaderStudentListCreateView, RFReaderLastScanView
+from .barcode_views import StudentBarcodeLookupView
 
 
 router = DefaultRouter()
@@ -144,4 +145,7 @@ urlpatterns = [
     path('attendance-assignment-requests/', AttendanceAssignmentRequestView.as_view()),
     path('attendance-assignment-requests/<int:pk>/<str:action>/', AttendanceAssignmentRequestActionView.as_view()),
     path('analytics/attendance-notification-count/', AttendanceNotificationCountView.as_view()),
+    
+    # Barcode Lookup
+    path('student/lookup/<str:code>/', StudentBarcodeLookupView.as_view()),
 ]

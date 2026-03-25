@@ -74,13 +74,23 @@ import ApplicationsInboxPage from './pages/applications/ApplicationsInboxPage';
 import ApplicationsPage from './pages/applications/ApplicationsPage';
 import ApplicationFormPage from './pages/applications/ApplicationFormPage';
 import ApplicationDetailPage from './pages/applications/ApplicationDetailPage';
+import CoePortalPage from './pages/COE/CoePortalPage';
+import StudentsList from './pages/COE/StudentsList';
+import CourseList from './pages/COE/CourseList';
+import ArrearList from './pages/COE/ArrearList';
+import BundleAllocation from './pages/COE/BundleAllocation';
+import BundleBarcodeView from './pages/COE/BundleBarcodeView';
+import OnePageReport from './pages/COE/OnePageReport';
 import IDCSScanTestPage from './pages/IDCSScan/TestPage';
+import BarScan from './pages/COE/BarScan';
+import BarScanMarkEntry from './pages/COE/BarScanMarkEntry';
 import IDCSScanGatepassPage from './pages/IDCSScan/GatepassPage';
 import RFReaderAssignCardsPage from './pages/RFReader/AssignCardsPage';
 import RFReaderCreateGatePage from './pages/RFReader/CreateGatePage';
 import RFReaderTestStudentsPage from './pages/RFReader/TestStudentsPage';
 import RFReaderAddStudentsRFPage from './pages/RFReader/AddStudentsRFPage';
 import AttendanceAnalyticsRequestsPage from './pages/attendance/AttendanceAnalyticsRequestsPage';
+import RetrivalPage from './pages/COE/RetrivalPage';
 
 type RoleObj = { name: string };
 type Me = {
@@ -97,6 +107,13 @@ export default function App() {
   const [user, setUser] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const { collapsed } = useSidebar();
+
+  const canAccessCoePortal = (currentUser: Me | null) => {
+    if (!currentUser) return false;
+    const email = String(currentUser.email || '').toLowerCase().trim();
+    const perms = (currentUser.permissions || []).map((p) => String(p || '').toLowerCase());
+    return email === 'coe@krct.ac.in' || perms.includes('coe.portal.access');
+  };
 
   // ── Branding role: local-only session, not backed by the API ────────────
   const isBrandingUser = localStorage.getItem('branding_auth') === 'true';
@@ -219,6 +236,46 @@ export default function App() {
                 <Route
                   path="/applications/:id"
                   element={<ApplicationDetailPage />}
+                />
+                <Route
+                  path="/coe"
+                  element={canAccessCoePortal(user) ? <CoePortalPage user={user} /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/students"
+                  element={canAccessCoePortal(user) ? <StudentsList /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/courses"
+                  element={canAccessCoePortal(user) ? <CourseList /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/arrears"
+                  element={canAccessCoePortal(user) ? <ArrearList /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/bundle-allocation"
+                  element={canAccessCoePortal(user) ? <BundleAllocation /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/bundle-barcodes"
+                  element={canAccessCoePortal(user) ? <BundleBarcodeView /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/bar-scan"
+                  element={canAccessCoePortal(user) ? <BarScan /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/bar-scan/entry"
+                  element={canAccessCoePortal(user) ? <BarScanMarkEntry /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/retrival"
+                  element={canAccessCoePortal(user) ? <RetrivalPage /> : <Navigate to="/dashboard" replace />}
+                />
+                <Route
+                  path="/coe/one-page-report"
+                  element={canAccessCoePortal(user) ? <OnePageReport /> : <Navigate to="/dashboard" replace />}
                 />
                 <Route path="/queries" element={<QueriesPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />

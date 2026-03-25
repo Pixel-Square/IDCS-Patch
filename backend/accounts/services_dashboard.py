@@ -52,6 +52,7 @@ def resolve_dashboard_capabilities(user) -> Dict:
         }
         return {
             'username': '',
+            'email': '',
             'is_iqac_main': False,
             'profile_type': None,
             'roles': [],
@@ -158,6 +159,7 @@ def resolve_dashboard_capabilities(user) -> Dict:
         'can_view_feedback_page': 'feedback.feedback_page' in lower_perms,
         'can_create_feedback': 'feedback.create' in lower_perms,
         'can_reply_feedback': 'feedback.reply' in lower_perms,
+        'can_access_coe_portal': ('coe.portal.access' in lower_perms) or str(getattr(user, 'email', '') or '').strip().lower() == 'coe@krct.ac.in',
     }
 
     hod_role_present = any(str(r).upper() == 'HOD' for r in role_names)
@@ -172,10 +174,12 @@ def resolve_dashboard_capabilities(user) -> Dict:
         'staff_students': bool('students.view_students' in lower_perms),
         'hod_obe_requests': bool(hod_role_present),
         'feedback_page': bool(flags.get('can_view_feedback_page')),
+        'coe_portal': bool(flags.get('can_access_coe_portal')),
     }
 
     return {
         'username': str(getattr(user, 'username', '') or ''),
+        'email': str(getattr(user, 'email', '') or ''),
         'is_iqac_main': bool(is_iqac_main),
         'profile_type': profile_type,
         'roles': role_names,
