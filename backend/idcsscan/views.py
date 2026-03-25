@@ -41,12 +41,12 @@ from rest_framework.views import APIView
 from academics.models import StaffProfile, StudentProfile
 from academics.models import RFReaderGate, RFReaderScan
 from academics.rfreader_serializers import RFReaderGateSerializer
-from academics.serializers import StaffProfileSerializer
 from applications import models as app_models
 from applications.services import application_state
 from applications.services.approval_engine import _get_flow_for_application
 
 from idcsscan.models import GatepassOfflineScan
+from idcsscan.serializers import SecurityStaffProfileSerializer
 
 
 class PingView(APIView):
@@ -535,19 +535,16 @@ class ManageSecurityUsersView(APIView):
 
         qs = StaffProfile.objects.select_related("user", "department").filter(user__roles__name__iexact="SECURITY")
         qs = qs.order_by("staff_id")
-        return Response(StaffProfileSerializer(qs, many=True).data)
+        return Response(SecurityStaffProfileSerializer(qs, many=True).data)
 
     def post(self, request, *args, **kwargs):
         if not _has_security_user_management_permission(request.user):
             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
-        payload = dict(request.data or {})
-        payload["roles"] = ["SECURITY"]
-
-        serializer = StaffProfileSerializer(data=payload)
+        serializer = SecurityStaffProfileSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         staff_profile = serializer.save()
-        return Response(StaffProfileSerializer(staff_profile).data, status=status.HTTP_201_CREATED)
+        return Response(SecurityStaffProfileSerializer(staff_profile).data, status=status.HTTP_201_CREATED)
 
 
 class ManageSecurityUserDetailView(APIView):
@@ -566,14 +563,10 @@ class ManageSecurityUserDetailView(APIView):
         if not staff_profile.user.roles.filter(name__iexact="SECURITY").exists():
             return Response({"detail": "Target user is not a SECURITY user."}, status=status.HTTP_400_BAD_REQUEST)
 
-        payload = dict(request.data or {})
-        # Force role to SECURITY regardless of what caller sends
-        payload["roles"] = ["SECURITY"]
-
-        serializer = StaffProfileSerializer(staff_profile, data=payload, partial=True)
+        serializer = SecurityStaffProfileSerializer(staff_profile, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         staff_profile = serializer.save()
-        return Response(StaffProfileSerializer(staff_profile).data)
+        return Response(SecurityStaffProfileSerializer(staff_profile).data)
 
 
 class RFReaderScanExportCsvView(APIView):

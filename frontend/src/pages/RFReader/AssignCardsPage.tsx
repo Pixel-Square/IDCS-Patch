@@ -305,9 +305,13 @@ export default function RFReaderAssignCardsPage() {
 
       ;(async () => {
         try {
-          while (true) {
+          let keepReading = true
+          while (keepReading) {
             const { value, done } = await reader.read()
-            if (done) break
+            if (done) {
+              keepReading = false
+              break
+            }
             bufferRef.current += value
             const normalized = bufferRef.current.replace(/\r/g, '\n')
             const lines = normalized.split('\n')

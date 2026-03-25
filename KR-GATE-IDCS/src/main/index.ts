@@ -108,10 +108,16 @@ function matchesKnownSerial(port: any): boolean {
 
 let mainWindow: BrowserWindow | null = null
 
+const PROD_ALLOWED_API_HOSTS = String(process.env.KR_GATE_ALLOWED_API_HOSTS || 'gate.krgi.co.in')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean)
+
 function isAllowedApiUrl(rawUrl: string): boolean {
   try {
     const url = new URL(String(rawUrl))
-    const isHttpsProd = url.protocol === 'https:' && url.hostname === 'db.krgi.co.in'
+    const isHttpsProd =
+      url.protocol === 'https:' && PROD_ALLOWED_API_HOSTS.includes(String(url.hostname || '').toLowerCase())
 
     if (app.isPackaged) return isHttpsProd
 

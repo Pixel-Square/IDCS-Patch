@@ -292,7 +292,11 @@ export default function TeachingAssignmentsPage(){
         staffData = (d.results || d) as Staff[]
         // if backend didn't filter, apply client-side filter
         if (selectedDept){ 
-          staffData = staffData.filter(s => (s.department && s.department.id === selectedDept) || (s as any).department === selectedDept) 
+          staffData = staffData.filter((s) => {
+            const dept = s.department
+            if (typeof dept === 'number') return dept === selectedDept
+            return !!dept && dept.id === selectedDept
+          })
         }
         setStaff(staffData)
         // Initialize elective staff with same data initially

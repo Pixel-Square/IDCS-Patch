@@ -383,9 +383,13 @@ export default function RFReaderTestStudentsPage() {
 
       (async () => {
         try {
-          while (true) {
+          let keepReading = true;
+          while (keepReading) {
             const { value, done } = await reader.read();
-            if (done) break;
+            if (done) {
+              keepReading = false;
+              break;
+            }
             bufferRef.current += value;
             // Some devices use "\r" without "\n". Normalize to simplify splitting.
             const normalized = bufferRef.current.replace(/\r/g, '\n');

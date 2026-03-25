@@ -1,0 +1,44 @@
+[Unit]
+Description=gunicorn daemon for KR GATE IDCS
+After=network.target
+
+[Service]
+User=iqac
+Group=www-data
+UMask=0007
+WorkingDirectory=/home/iqac/IDCS-Restart/backend
+EnvironmentFile=/home/iqac/IDCS-Restart/backend/.env
+EnvironmentFile=/home/iqac/IDCS-Restart/backend/.env.krgate
+Environment=DJANGO_SECRET_KEY=-xsKIV1W-ijQdV4_el5kHl2nADZF0HGqrKN6LXXoMGtou2NDjczF5JZNByUGax4LneQ
+Environment=GUNICORN_WORKERS=3
+Environment=GUNICORN_THREADS=2
+Environment=GUNICORN_TIMEOUT=300
+Environment=GUNICORN_GRACEFUL_TIMEOUT=30
+Environment=GUNICORN_KEEPALIVE=5
+Environment=GUNICORN_MAX_REQUESTS=1200
+Environment=GUNICORN_MAX_REQUESTS_JITTER=120
+ExecStart=/home/iqac/IDCS-Restart/backend/.venv/bin/gunicorn \
+  --worker-class gthread \
+  --workers ${GUNICORN_WORKERS} \
+  --threads ${GUNICORN_THREADS} \
+  --timeout ${GUNICORN_TIMEOUT} \
+  --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT} \
+  --keep-alive ${GUNICORN_KEEPALIVE} \
+  --max-requests ${GUNICORN_MAX_REQUESTS} \
+  --max-requests-jitter ${GUNICORN_MAX_REQUESTS_JITTER} \
+  --worker-tmp-dir /dev/shm \
+  --bind unix:/run/gunicorn-krgate/gunicorn.sock \
+  --access-logfile - \
+  --error-logfile - \
+  erp.wsgi_krgate:application
+
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=60
+LimitNOFILE=65536
+RuntimeDirectory=gunicorn-krgate
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

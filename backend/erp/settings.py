@@ -242,8 +242,6 @@ REST_FRAMEWORK = {
 SLOW_REQUEST_LOG_ENABLED = os.getenv('SLOW_REQUEST_LOG_ENABLED', '1') == '1'
 SLOW_REQUEST_LOG_MS = int(os.getenv('SLOW_REQUEST_LOG_MS', '1200'))
 
-from rest_framework_simplejwt.settings import api_settings as jwt_api_settings
-
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('ACCESS_TOKEN_MINUTES', '60'))),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),

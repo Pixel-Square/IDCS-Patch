@@ -688,7 +688,7 @@ export default function RFReaderCardsDataPage() {
                             alt={row.username || row.identifier}
                             className="absolute inset-0 w-9 h-9 rounded-full object-cover border border-gray-200 shadow-sm"
                             onError={(e) => {
-                              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                              (e.currentTarget as HTMLImageElement).style.display = 'none'
                             }}
                           />
                         )}

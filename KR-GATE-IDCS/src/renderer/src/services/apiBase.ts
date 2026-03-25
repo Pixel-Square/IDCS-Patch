@@ -11,17 +11,20 @@ function normalizeBaseUrl(value: string): string {
   return `https://${trimmed}`
 }
 
-const PROD_API_BASE = 'https://db.krgi.co.in'
+const DEFAULT_PROD_API_BASE = 'https://gate.krgi.co.in'
 
 function getFallbackFromEnvOrDefault(): string {
   const fromEnv = import.meta.env.VITE_API_BASE_FALLBACK
   if (fromEnv) return normalizeBaseUrl(fromEnv)
-  return normalizeBaseUrl('https://db.krgi.co.in')
+  return normalizeBaseUrl('https://gate.krgi.co.in')
 }
 
 export function getApiBase(): string {
   // Packaged/production builds must always talk to the production backend.
-  if (import.meta.env.PROD) return normalizeBaseUrl(PROD_API_BASE)
+  if (import.meta.env.PROD) {
+    const fromEnv = import.meta.env.VITE_API_BASE
+    return normalizeBaseUrl(fromEnv || DEFAULT_PROD_API_BASE)
+  }
 
   const fromEnv = import.meta.env.VITE_API_BASE
   if (fromEnv) return normalizeBaseUrl(fromEnv)

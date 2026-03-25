@@ -156,9 +156,6 @@ type FeedbackForm = {
   class_context_display?: string[];
   active: boolean;
   is_submitted?: boolean;
-  // Multi-class selection fields returned by API
-  years?: number[];
-  sections?: number[];
   submission_status?: string;
   common_comment_enabled?: boolean;
 };
