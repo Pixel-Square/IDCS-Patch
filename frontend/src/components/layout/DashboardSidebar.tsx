@@ -88,6 +88,8 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   const perms = (data?.permissions || []).map((p) => String(p || '').toLowerCase());
   const canObeMaster = perms.includes('obe.master.manage');
   const isStaff = data?.flags?.is_staff || false;
+  const canFetchPendingSwap = rolesForHook.some((r) => ['HOD', 'AHOD', 'ADVISOR'].includes(r));
+  const canFetchPendingAttendanceAssign = rolesForHook.some((r) => ['HOD', 'AHOD', 'ADVISOR', 'IQAC'].includes(r));
 
   useEffect(() => {
     let mounted = true;
@@ -134,21 +136,48 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
         setPendingAttendanceReqCount(0);
         return;
       }
+
+      if (!canFetchPendingSwap && !canFetchPendingAttendanceAssign) {
+        setPendingSwapReqCount(0);
+        setPendingAttendanceReqCount(0);
+        return;
+      }
+
       try {
-        const [swapRes, attendanceRes] = await Promise.all([
-          fetchWithAuth('/api/timetable/swap-requests/?status=PENDING'),
-          fetchWithAuth('/api/academics/attendance-assignment-requests/?status=PENDING'),
-        ]);
-        if (!mounted) return;
-        if (swapRes.ok) {
-          const d = await swapRes.json();
-          setPendingSwapReqCount((d.received || []).length);
+        const requests: Promise<Response>[] = [];
+        if (canFetchPendingSwap) {
+          requests.push(fetchWithAuth('/api/timetable/swap-requests/?status=PENDING'));
         }
-        if (attendanceRes.ok) {
-          const d = await attendanceRes.json();
-          setPendingAttendanceReqCount(
-            (d.received || []).length
-          );
+        if (canFetchPendingAttendanceAssign) {
+          requests.push(fetchWithAuth('/api/academics/attendance-assignment-requests/?status=PENDING'));
+        }
+
+        const responses = await Promise.all(requests);
+        if (!mounted) return;
+
+        let index = 0;
+        if (canFetchPendingSwap) {
+          const swapRes = responses[index++];
+          if (swapRes?.ok) {
+            const d = await swapRes.json();
+            setPendingSwapReqCount((d.received || []).length);
+          } else {
+            setPendingSwapReqCount(0);
+          }
+        } else {
+          setPendingSwapReqCount(0);
+        }
+
+        if (canFetchPendingAttendanceAssign) {
+          const attendanceRes = responses[index++];
+          if (attendanceRes?.ok) {
+            const d = await attendanceRes.json();
+            setPendingAttendanceReqCount((d.received || []).length);
+          } else {
+            setPendingAttendanceReqCount(0);
+          }
+        } else {
+          setPendingAttendanceReqCount(0);
         }
       } catch {
         // badge is best-effort
@@ -161,7 +190,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
       mounted = false;
       window.clearInterval(interval);
     };
-  }, [isStaff]);
+  }, [isStaff, canFetchPendingSwap, canFetchPendingAttendanceAssign]);
 
   // auto-expand Academic when on /academic routes
   useEffect(() => {
