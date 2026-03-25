@@ -59,6 +59,7 @@ import { fetchCurriculumPendingCount } from '../../services/curriculum';
   idscan_gatescan: Shield,
   rf_reader: Grid,
   feedback: MessageCircle,
+  announcements: Bell,
   create_event: PartyPopper,
   my_proposals: FileText,
   hod_event_approvals: ClipboardList,
@@ -75,6 +76,7 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   const [pendingSwapReqCount, setPendingSwapReqCount] = useState<number>(0);
   const [pendingAttendanceReqCount, setPendingAttendanceReqCount] = useState<number>(0);
   const [pendingCurriculumCount, setPendingCurriculumCount] = useState<number>(0);
+  const [unreadAnnouncementsCount, setUnreadAnnouncementsCount] = useState<number>(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [applicationsNav, setApplicationsNav] = useState<ApplicationsNavResponse | null>(null);
 
@@ -86,6 +88,8 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
 
   const perms = (data?.permissions || []).map((p) => String(p || '').toLowerCase());
   const canObeMasterManage = perms.includes('obe.master.manage');
+
+  const canViewAnnouncements = perms.includes('announcements.view_announcement_page');
   const isStaff = data?.flags?.is_staff || false;
   const canFetchPendingSwap = rolesForHook.some((r) => ['HOD', 'AHOD', 'ADVISOR'].includes(r));
   const canFetchPendingAttendanceAssign = rolesForHook.some((r) => ['HOD', 'AHOD', 'ADVISOR', 'IQAC'].includes(r));
@@ -249,6 +253,37 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
       window.clearInterval(interval);
     };
   }, [isIqacForBadge]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchUnreadAnnouncements = async () => {
+      if (!canViewAnnouncements) {
+        setUnreadAnnouncementsCount(0);
+        return;
+      }
+      try {
+        const response = await fetchWithAuth('/api/announcements/announcements/unread-count/');
+        if (!mounted) return;
+        if (!response.ok) {
+          setUnreadAnnouncementsCount(0);
+          return;
+        }
+        const payload = await response.json();
+        setUnreadAnnouncementsCount(Number(payload?.unread_count || 0));
+      } catch {
+        if (!mounted) return;
+        setUnreadAnnouncementsCount(0);
+      }
+    };
+
+    fetchUnreadAnnouncements();
+    const interval = window.setInterval(fetchUnreadAnnouncements, 30_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, [canViewAnnouncements]);
   // auto-expand RFReader when on /iqac/rf-reader routes
   useEffect(() => {
     if (loc.pathname.startsWith('/iqac/rf-reader')) {
@@ -341,6 +376,11 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
   // Feedback page: require explicit feedback permission
   if (permsLower.includes('feedback.feedback_page')) {
     items.push({ key: 'feedback', label: 'Feedback', to: '/feedback' });
+  }
+
+  // Announcements page: permission-driven visibility
+  if (permsLower.includes('announcements.view_announcement_page')) {
+    items.push({ key: 'announcements', label: 'Announcements', to: '/announcements' });
   }
 
   // Advisor pages: require ADVISOR role or explicit permission
@@ -625,6 +665,9 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
                       ) : null}
                       {i.key === 'department_curriculum' && isIqac && pendingCurriculumCount > 0 ? (
                         <span className="ml-2 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[11px] font-semibold rounded-full bg-red-600 text-white">{pendingCurriculumCount > 99 ? '99+' : pendingCurriculumCount}</span>
+                      ) : null}
+                      {i.key === 'announcements' && unreadAnnouncementsCount > 0 ? (
+                        <span className="ml-2 inline-flex items-center justify-center w-2.5 h-2.5 rounded-full bg-blue-500" title="Unread announcements" />
                       ) : null}
                     </span>
                     {isGroup && !collapsed && (

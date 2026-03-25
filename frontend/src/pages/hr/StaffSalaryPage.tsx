@@ -422,7 +422,7 @@ export default function StaffSalaryPage() {
   const handlePublishMonthlySheet = async () => {
     try {
       setPublishing(true);
-      const nextState = !Boolean(monthlySheet?.published);
+      const nextState = !monthlySheet?.published;
       await publishSalaryMonth(month, undefined, nextState);
       await loadAll();
     } catch (e: any) {
@@ -1176,8 +1176,8 @@ export default function StaffSalaryPage() {
                   const sumDeductionValues = (rows: any[], dedId: string) =>
                     rows.reduce((sum, r) => sum + Number(r.deduction_values?.[dedId] ?? 0), 0);
                   
-                  let finalRowsToRender: any[] = [];
-                  let grandTotals = {
+                  const finalRowsToRender: any[] = [];
+                  const grandTotals = {
                     basic_salary: 0, allowance: 0, days: 0, gross_salary: 0, lop_amount: 0,
                     earn_totals: {} as Record<string, number>,
                     total_salary: 0, pf_amount: 0, od_new: 0,

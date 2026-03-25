@@ -339,7 +339,7 @@ export default function DeptList() {
 
   const isPendingSubject = (row: any) => {
     const statusRaw = String(row?.approval_status ?? row?.status ?? '').toUpperCase().trim();
-    return !Boolean(row?.is_elective) && statusRaw === 'PENDING';
+    return !row?.is_elective && statusRaw === 'PENDING';
   };
   const matchesFilter = (row: any) => {
     const rowBatchId = row?.batch?.id ?? row?.batch_id ?? null;
