@@ -56,6 +56,27 @@ async function refreshToken(): Promise<string> {
   const refresh = localStorage.getItem('refresh')
   if (!refresh) throw new Error('no refresh token')
 
+  // Defensive check: detect if `refresh` actually contains an access token
+  try {
+    const parts = String(refresh).split('.')
+    if (parts.length === 3) {
+      const b = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+      const padded = b + '='.repeat((4 - (b.length % 4)) % 4)
+      const payload = JSON.parse(decodeURIComponent(Array.prototype.map.call(atob(padded), function(c: string) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+      }).join('')))
+      const tt = (payload && (payload.token_type || payload.type || payload.kid)) || ''
+      if (String(tt).toLowerCase().includes('access')) {
+        // Bad state: stored refresh is an access token. Clear tokens and abort.
+        localStorage.removeItem('access')
+        localStorage.removeItem('refresh')
+        throw new Error('stored refresh token appears to be an access token')
+      }
+    }
+  } catch (err) {
+    // ignore parse errors and let backend return informative error
+  }
+
   const refreshUrls = Array.from(
     new Set(
       getApiBaseCandidates().map((base) => `${base}/api/accounts/token/refresh/`),
