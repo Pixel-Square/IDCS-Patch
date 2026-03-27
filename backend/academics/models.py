@@ -77,6 +77,9 @@ class Department(models.Model):
     name = models.CharField(max_length=128)
     # Short form for display (abbreviation) e.g. 'CSE', 'EEE'
     short_name = models.CharField(max_length=32, blank=True)
+    # Visibility control across academic pages: non-teaching departments are
+    # hidden by default unless explicitly requested in authorized mapping flows.
+    is_teaching = models.BooleanField(default=True)
 
     # S&H hierarchy: sub-departments (Maths, English, Tamil, Physics, Chemistry)
     # point to their parent S&H department.

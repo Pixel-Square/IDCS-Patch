@@ -2082,6 +2082,15 @@ class DepartmentsListView(APIView):
                 return Response({'results': []})
             qs = Department.objects.filter(id__in=dept_ids)
 
+        include_non_teaching = str(request.query_params.get('include_non_teaching', 'false')).strip().lower() in {'1', 'true', 'yes'}
+        can_include_non_teaching = bool(
+            user.is_superuser
+            or has_ps_role
+            or ({'academics.edit_staff', 'academics.view_all_departments', 'academics.view_all_staff'} & perms)
+        )
+        if not (include_non_teaching and can_include_non_teaching):
+            qs = qs.filter(is_teaching=True)
+
         results = []
         for d in qs:
             results.append({'id': d.id, 'code': getattr(d, 'code', None), 'name': getattr(d, 'name', None), 'short_name': getattr(d, 'short_name', None)})
@@ -2127,6 +2136,9 @@ class StaffsPageView(APIView):
         # Check if user can view all staff (determines if role filter should be shown)
         can_view_all = user.is_superuser or has_ps_role or 'academics.view_all_staff' in perms
 
+        include_non_teaching = str(request.query_params.get('include_non_teaching', 'false')).strip().lower() in {'1', 'true', 'yes'}
+        can_include_non_teaching = bool(user.is_superuser or has_ps_role or can_edit or can_view_all)
+
         # determine departments to include
         if user.is_superuser or has_ps_role or ('academics.view_all_staff' in perms):
             # View all departments
@@ -2144,6 +2156,9 @@ class StaffsPageView(APIView):
             
             logger.info(f"StaffsPage - Showing departments: {dept_ids} (includes primary + HOD mappings)")
             dept_qs = Department.objects.filter(id__in=dept_ids)
+
+        if not (include_non_teaching and can_include_non_teaching):
+            dept_qs = dept_qs.filter(is_teaching=True)
 
         results = []
         for d in dept_qs.order_by('code'):

@@ -58,6 +58,7 @@ export default function RFReaderCardsDataPage() {
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [deptFilter, setDeptFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [photoFilter, setPhotoFilter] = useState('ALL');
 
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -250,6 +251,11 @@ export default function RFReaderCardsDataPage() {
       if (roleFilter !== 'ALL' && row.role !== roleFilter) return false;
       if (deptFilter !== 'ALL' && row.department !== deptFilter) return false;
       if (statusFilter !== 'ALL' && row.status !== statusFilter) return false;
+      if (photoFilter !== 'ALL') {
+        const hasPhoto = Boolean(row.profile_image_url);
+        if (photoFilter === 'UPLOADED' && !hasPhoto) return false;
+        if (photoFilter === 'NOT_UPLOADED' && hasPhoto) return false;
+      }
       if (search.trim()) {
         const q = search.toLowerCase();
         if (
@@ -262,7 +268,7 @@ export default function RFReaderCardsDataPage() {
       }
       return true;
     });
-  }, [data, search, roleFilter, deptFilter, statusFilter]);
+  }, [data, search, roleFilter, deptFilter, statusFilter, photoFilter]);
 
   // Export PDF
   const downloadPdf = async () => {
@@ -619,6 +625,18 @@ export default function RFReaderCardsDataPage() {
             <option value="ALL">All Status</option>
             <option value="Connected">Connected</option>
             <option value="Not Connected">Not Connected</option>
+          </select>
+        </div>
+        <div className="w-full sm:w-48">
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Profile Photo</label>
+          <select
+            value={photoFilter}
+            onChange={(e) => setPhotoFilter(e.target.value)}
+            className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-lg shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+          >
+            <option value="ALL">All</option>
+            <option value="UPLOADED">Uploaded</option>
+            <option value="NOT_UPLOADED">Not Uploaded</option>
           </select>
         </div>
       </div>

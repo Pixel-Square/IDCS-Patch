@@ -64,6 +64,7 @@ export default function StaffsPage() {
   const [canEdit, setCanEdit] = useState(false)
   const [canViewAllStaff, setCanViewAllStaff] = useState(false)
   const [canImport, setCanImport] = useState(false)
+  const [includeNonTeaching, setIncludeNonTeaching] = useState(false)
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [statusEditStaff, setStatusEditStaff] = useState<StaffMember | null>(null)
   const [statusValue, setStatusValue] = useState<string>('')
@@ -108,13 +109,14 @@ export default function StaffsPage() {
 
   useEffect(() => {
     fetchStaffs()
-  }, [])
+  }, [includeNonTeaching])
 
   async function fetchStaffs() {
     try {
       setLoading(true)
       setError(null)
-      const res = await fetchWithAuth('/api/academics/staffs-page/')
+      const qp = includeNonTeaching ? '?include_non_teaching=true' : ''
+      const res = await fetchWithAuth(`/api/academics/staffs-page/${qp}`)
       
       if (!res.ok) {
         if (res.status === 403) {
@@ -132,9 +134,18 @@ export default function StaffsPage() {
       setCanViewAllStaff(data.can_view_all || false)
       setCanImport(data.can_import || false)
       
-      // Set first department as default (or 'all' if user can view all staff)
-      if (depts.length > 0 && currentDeptId === null) {
-        setCurrentDeptId(data.can_view_all ? 'all' : depts[0].id)
+      // Keep selection stable; if current selection disappears, move to a valid default.
+      if (depts.length > 0) {
+        const deptIds = new Set<number>(depts.map((d: Department) => d.id))
+        const canSeeAll = Boolean(data.can_view_all)
+
+        if (currentDeptId === null) {
+          setCurrentDeptId(canSeeAll ? 'all' : depts[0].id)
+        } else if (currentDeptId !== 'all' && !deptIds.has(currentDeptId)) {
+          setCurrentDeptId(canSeeAll ? 'all' : depts[0].id)
+        }
+      } else {
+        setCurrentDeptId(null)
       }
     } catch (err) {
       console.error('Error fetching staffs:', err)
@@ -272,7 +283,7 @@ export default function StaffsPage() {
     })
   }, [allStaff, allStaffSearch])
 
-  const isOverallView = canViewAllStaff
+  const isOverallView = currentDeptId === 'all'
 
   const handleAssignStaffToDept = async (staffId: number) => {
     if (currentDeptId === 'all' || currentDeptId === null) {
@@ -496,15 +507,33 @@ export default function StaffsPage() {
                   )}
                 </div>
               )}
+              {canEdit && (
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={includeNonTeaching}
+                    onChange={(e) => setIncludeNonTeaching(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Include Non-Teaching (mapping only)
+                </label>
+              )}
             </div>
           </div>
           <div>
             <h4 className="text-sm font-medium text-gray-700 mb-2">Department:</h4>
             <div className="flex flex-wrap gap-2">
-              {isOverallView ? (
-                <div className="px-4 py-2 rounded-full text-sm font-medium bg-indigo-100 text-indigo-700 border-2 border-indigo-200">
+              {canViewAllStaff ? (
+                <button
+                  onClick={() => setCurrentDeptId('all')}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                    isOverallView
+                      ? 'bg-indigo-100 text-indigo-700 border-2 border-indigo-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
                   All Departments
-                </div>
+                </button>
               ) : null}
               {departments.map((dept) => {
                 const isActive = currentDeptId === dept.id
@@ -513,7 +542,6 @@ export default function StaffsPage() {
                   <button
                     key={dept.id}
                     onClick={() => setCurrentDeptId(dept.id)}
-                    disabled={isOverallView}
                     className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
                       isActive
                         ? 'bg-blue-100 text-blue-700'
@@ -530,7 +558,7 @@ export default function StaffsPage() {
 
         {/* Staff Table for Selected Department(s) */}
         {currentDeptId !== null && (() => {
-          if (isOverallView || currentDeptId === 'all') {
+          if (isOverallView) {
             // Show all staff across all departments
             const allStaffs = departments.flatMap(d =>
               (d.staffs || []).map(staff => ({ ...staff, departmentInfo: d } as StaffMember & { departmentInfo: Department }))
@@ -1012,7 +1040,7 @@ export default function StaffsPage() {
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-auto">
               {allStaffLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
@@ -1028,7 +1056,7 @@ export default function StaffsPage() {
                   <p>{allStaffSearch ? 'No staff members match your search' : 'No staff members found'}</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div>
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50 sticky top-0">
                       <tr>

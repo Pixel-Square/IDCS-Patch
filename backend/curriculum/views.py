@@ -420,6 +420,7 @@ class CurriculumDepartmentsView(APIView):
     def get(self, request):
         user = request.user
         from academics.models import Department
+        include_non_teaching = str(request.query_params.get('include_non_teaching', 'false')).strip().lower() in {'1', 'true', 'yes'}
         
         # Users with global access see all departments
         if user.is_superuser or user.groups.filter(name__in=['IQAC', 'HAA']).exists():
@@ -449,6 +450,14 @@ class CurriculumDepartmentsView(APIView):
                     return Response({'results': []})
                 
                 qs = Department.objects.filter(id__in=dept_ids)
+
+        can_include_non_teaching = bool(
+            user.is_superuser
+            or user.groups.filter(name__in=['IQAC', 'HAA']).exists()
+            or (get_user_permissions(user) & {'curriculum_master_edit', 'curriculum_master_publish', 'CURRICULUM_MASTER_EDIT', 'CURRICULUM_MASTER_PUBLISH'})
+        )
+        if not (include_non_teaching and can_include_non_teaching):
+            qs = qs.filter(is_teaching=True)
         
         results = []
         for d in qs:

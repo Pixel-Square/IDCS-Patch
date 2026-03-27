@@ -687,8 +687,8 @@ class GetUserDepartmentView(APIView):
             try:
                 from academics.models import Department
                 
-                # Get all departments (no is_active filter - Department model doesn't have that field)
-                departments = Department.objects.all().order_by('name')
+                # Default to teaching departments only.
+                departments = Department.objects.filter(is_teaching=True).order_by('name')
                 departments_list = [{
                     'id': dept.id,
                     'name': dept.name,
@@ -750,7 +750,7 @@ class GetUserDepartmentView(APIView):
             # For non-HOD users, return single department from staff profile
             try:
                 staff_profile = StaffProfile.objects.get(user=user)
-                if staff_profile.department:
+                if staff_profile.department and staff_profile.department.is_teaching:
                     return Response({
                         'success': True,
                         'has_multiple_departments': False,
@@ -792,14 +792,15 @@ class GetUserDepartmentView(APIView):
                 staff=staff_profile,
                 role='HOD',
                 is_active=True,
-                academic_year=active_ay
+                academic_year=active_ay,
+                department__is_teaching=True,
             ).order_by('department__name')
             
             departments_count = department_roles.count()
             
             if departments_count == 0:
                 # Fall back to staff profile department
-                if staff_profile.department:
+                if staff_profile.department and staff_profile.department.is_teaching:
                     return Response({
                         'success': True,
                         'has_multiple_departments': False,
