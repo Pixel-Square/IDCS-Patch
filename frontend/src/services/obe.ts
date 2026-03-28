@@ -685,6 +685,111 @@ export async function upsertIqacQpPattern(payload: { class_type: string; questio
   };
 }
 
+
+export type CustomExamBatch = {
+  id: number;
+  name?: string;
+  label?: string;
+  start_year?: number | null;
+  end_year?: number | null;
+  department?: { id: number; code?: string | null; name?: string | null } | null;
+  course?: { id: number; code?: string | null; name?: string | null } | null;
+};
+
+export async function fetchIqacCustomExamBatches(): Promise<CustomExamBatch[]> {
+  throw new Error('fetchIqacCustomExamBatches requires academic_year_id. Use fetchIqacCustomExamBatchesByYear().');
+}
+
+export type AcademicYearItem = {
+  id: number;
+  name: string;
+  parity?: string | null;
+  is_active?: boolean;
+};
+
+export async function fetchAcademicYears(): Promise<AcademicYearItem[]> {
+  const url = `${apiBase()}/api/academics/academic-years/`;
+  const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json', ...authHeader() } });
+  if (!res.ok) await parseError(res, 'Academic years fetch failed');
+  const data = await res.json();
+  // DRF viewsets may paginate; be tolerant.
+  if (Array.isArray(data)) return data as AcademicYearItem[];
+  if (data && Array.isArray((data as any).results)) return (data as any).results as AcademicYearItem[];
+  return [];
+}
+
+export async function fetchIqacCustomExamBatchesByYear(academic_year_id: number): Promise<CustomExamBatch[]> {
+  const url = `${apiBase()}/api/obe/iqac/custom-exam/batches?academic_year_id=${encodeURIComponent(String(academic_year_id))}`;
+  const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json', ...authHeader() } });
+  if (!res.ok) await parseError(res, 'Batches fetch failed');
+  const data = await res.json();
+  return Array.isArray(data?.batches) ? (data.batches as CustomExamBatch[]) : [];
+}
+
+export type CustomExamQpPatternResponse = {
+  batch_id: number;
+  class_type: string;
+  question_paper_type: string | null;
+  exam: string;
+  pattern: QpPatternConfig;
+  is_override: boolean;
+  updated_at?: string | null;
+  updated_by?: number | null;
+};
+
+export async function fetchIqacBatchQpPattern(params: { batch_id: number; class_type: string; question_paper_type?: string | null; exam: string }): Promise<CustomExamQpPatternResponse> {
+  const qpParts: string[] = [];
+  qpParts.push(`batch_id=${encodeURIComponent(String(params.batch_id))}`);
+  const ct = String(params.class_type || '').trim();
+  if (ct) qpParts.push(`class_type=${encodeURIComponent(ct)}`);
+  if (params.question_paper_type) qpParts.push(`question_paper_type=${encodeURIComponent(String(params.question_paper_type || '').trim())}`);
+  qpParts.push(`exam=${encodeURIComponent(String(params.exam || '').trim())}`);
+  const qp = qpParts.length ? `?${qpParts.join('&')}` : '';
+  const url = `${apiBase()}/api/obe/iqac/custom-exam/qp-pattern${qp}`;
+  const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json', ...authHeader() } });
+  if (!res.ok) await parseError(res, 'Batch QP pattern fetch failed');
+  const data = await res.json();
+  const pattern = normalizeQpPattern(data?.pattern);
+  return {
+    batch_id: Number(data?.batch_id),
+    class_type: String(data?.class_type || ''),
+    question_paper_type: data?.question_paper_type == null ? null : String(data.question_paper_type),
+    exam: String(data?.exam || ''),
+    pattern,
+    is_override: Boolean(data?.is_override),
+    updated_at: data?.updated_at ?? null,
+    updated_by: typeof data?.updated_by === 'number' ? data.updated_by : null,
+  };
+}
+
+export async function upsertIqacBatchQpPattern(payload: { batch_id: number; class_type: string; question_paper_type?: string | null; exam: string; pattern: QpPatternConfig }): Promise<CustomExamQpPatternResponse> {
+  const url = `${apiBase()}/api/obe/iqac/custom-exam/qp-pattern/save`;
+  const body = {
+    batch_id: payload.batch_id,
+    class_type: String(payload.class_type || '').trim(),
+    question_paper_type: payload.question_paper_type ? String(payload.question_paper_type || '').trim() : null,
+    exam: String(payload.exam || '').trim(),
+    pattern: {
+      marks: Array.isArray(payload.pattern?.marks) ? payload.pattern.marks : [],
+      cos: Array.isArray(payload.pattern?.cos) ? payload.pattern.cos : undefined,
+    },
+  };
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() }, body: JSON.stringify(body) });
+  if (!res.ok) await parseError(res, 'Batch QP pattern save failed');
+  const data = await res.json();
+  const pattern = normalizeQpPattern(data?.pattern);
+  return {
+    batch_id: Number(data?.batch_id),
+    class_type: String(data?.class_type || ''),
+    question_paper_type: data?.question_paper_type == null ? null : String(data.question_paper_type),
+    exam: String(data?.exam || ''),
+    pattern,
+    is_override: Boolean(data?.is_override),
+    updated_at: data?.updated_at ?? null,
+    updated_by: typeof data?.updated_by === 'number' ? data.updated_by : null,
+  };
+}
+
 export type IqacCqiConfig = { options: any[]; divider: number; multiplier: number; updated_at?: string | null; updated_by?: number | null };
 
 export async function fetchIqacCqiConfig(): Promise<IqacCqiConfig> {

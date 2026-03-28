@@ -6,8 +6,9 @@ import AcademicControllerQPPage from './AcademicControllerQPPage';
 import AcademicControllerWeightsPage from './AcademicControllerWeightsPage';
 import AcademicControllerCQIPage from './AcademicControllerCQIPage';
 import AcademicControllerActiveLearningPage from './AcademicControllerActiveLearningPage';
+import AcademicControllerPublishPage from './AcademicControllerPublishPage';
 
-type TabKey = 'dashboard' | 'due_dates' | 'courses' | 'weights' | 'active_learning' | 'qp' | 'cqi';
+type TabKey = 'dashboard' | 'due_dates' | 'courses' | 'weights' | 'active_learning' | 'qp' | 'cqi' | 'publish';
 
 export default function AcademicControllerPage(): JSX.Element {
   const location = useLocation();
@@ -31,6 +32,7 @@ export default function AcademicControllerPage(): JSX.Element {
     { key: 'courses', label: 'Courses' },
     { key: 'qp', label: 'QP' },
     { key: 'cqi', label: 'CQI Editor' },
+    { key: 'publish', label: 'PUBLISH' },
   ];
 
   return (
@@ -72,6 +74,7 @@ export default function AcademicControllerPage(): JSX.Element {
         {tab === 'courses' && <AcademicControllerCoursesPage />}
         {tab === 'qp' && <AcademicControllerQPPage />}
         {tab === 'cqi' && <AcademicControllerCQIPage />}
+        {tab === 'publish' && <AcademicControllerPublishPage />}
       </div>
     </main>
   );

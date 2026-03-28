@@ -1049,6 +1049,35 @@ class ObeQpPatternConfig(models.Model):
         ]
 
 
+class ObeBatchQpPatternOverride(models.Model):
+    """Batch-scoped override for QP patterns.
+
+    This enables IQAC/OBE master to customize question pattern (marks + CO mapping)
+    for a specific student batch, per class type and assessment.
+    """
+
+    batch = models.ForeignKey('academics.Batch', on_delete=models.CASCADE, related_name='obe_qp_overrides')
+    class_type = models.CharField(max_length=50)
+    question_paper_type = models.CharField(max_length=50, null=True, blank=True)
+    exam = models.CharField(max_length=50)
+    pattern = models.JSONField(default=dict)
+    updated_by = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'obe_batch_qp_pattern_override'
+        constraints = [
+            UniqueConstraint(
+                fields=['batch', 'class_type', 'question_paper_type', 'exam'],
+                name='unique_batch_qp_pattern_override_key',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['batch', 'exam']),
+            models.Index(fields=['class_type', 'question_paper_type', 'exam']),
+        ]
+
+
 class ClassTypeWeights(models.Model):
     """IQAC-controlled weights per class type.
 

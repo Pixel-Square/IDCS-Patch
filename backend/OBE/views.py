@@ -251,6 +251,20 @@ def _get_teaching_assignment_student_ids(ta) -> list[int]:
     return ids
 
 
+def _get_studentprofile_queryset_for_teaching_assignment(ta):
+    """Return a stable StudentProfile queryset for the TA's roster."""
+    from academics.models import StudentProfile
+
+    ids = _get_teaching_assignment_student_ids(ta)
+    if not ids:
+        return StudentProfile.objects.none()
+    return (
+        StudentProfile.objects.select_related('user', 'section')
+        .filter(id__in=ids)
+        .order_by('user__last_name', 'user__first_name', 'user__username')
+    )
+
+
 _DB_COLUMN_EXISTS_CACHE: dict[tuple[str, str], bool] = {}
 
 
@@ -1496,6 +1510,12 @@ def _enforce_mark_entry_not_blocked(
     teaching_assignment_id: int | None = None,
 ):
     """Block edits after publish unless an IQAC approval window is active."""
+    # Check master config to see if publish lock is active globally
+    master_cfg_qs = ObeAssessmentMasterConfig.objects.filter(id=1).first()
+    master_cfg = master_cfg_qs.config if master_cfg_qs and getattr(master_cfg_qs, 'config', None) else {}
+    if not master_cfg.get('edit_requests_enabled', True):
+        return None
+
     user = getattr(request, 'user', None)
     if _has_obe_master_permission(user):
         return None
@@ -2270,6 +2290,250 @@ def qp_pattern_upsert(request):
     })
 
 
+def _normalize_exam_key(s) -> str:
+    e = str(s or '').strip().upper()
+    return e
+
+
+def _validate_qp_pattern_payload(pattern_raw):
+    """Shared validator for QP pattern payloads.
+
+    Accepts:
+      - list[marks]
+      - { marks: [...], cos?: [...] }
+    Returns:
+      (pattern_dict, error_response)
+    """
+    marks_raw = None
+    cos_raw = None
+    if isinstance(pattern_raw, list):
+        marks_raw = pattern_raw
+    elif isinstance(pattern_raw, dict):
+        marks_raw = pattern_raw.get('marks')
+        cos_raw = pattern_raw.get('cos')
+    else:
+        return None, Response({'detail': 'pattern must be a list or an object with marks'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not isinstance(marks_raw, list):
+        return None, Response({'detail': 'pattern.marks must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+
+    marks: list[float] = []
+    for x in marks_raw:
+        try:
+            v = float(x)
+            if v < 0:
+                return None, Response({'detail': 'pattern marks must be non-negative'}, status=status.HTTP_400_BAD_REQUEST)
+            marks.append(v)
+        except Exception:
+            return None, Response({'detail': 'pattern marks must be numbers'}, status=status.HTTP_400_BAD_REQUEST)
+
+    cos = None
+    if cos_raw is not None:
+        if not isinstance(cos_raw, list):
+            return None, Response({'detail': 'pattern.cos must be a list if provided'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(cos_raw) != len(marks):
+            return None, Response({'detail': 'pattern.cos length must match pattern.marks length'}, status=status.HTTP_400_BAD_REQUEST)
+        cleaned_cos = []
+        for x in cos_raw:
+            if isinstance(x, str):
+                s = x.strip()
+                if s in {'both', '1&2', '3&4'}:
+                    cleaned_cos.append(s)
+                    continue
+                try:
+                    x = int(float(s))
+                except Exception:
+                    return None, Response({'detail': 'pattern.cos must contain numbers or split markers'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                n = int(x)
+            except Exception:
+                return None, Response({'detail': 'pattern.cos must contain numbers or split markers'}, status=status.HTTP_400_BAD_REQUEST)
+            if n <= 0:
+                return None, Response({'detail': 'pattern.cos values must be positive integers'}, status=status.HTTP_400_BAD_REQUEST)
+            cleaned_cos.append(n)
+        cos = cleaned_cos
+
+    out = {'marks': marks}
+    if cos is not None:
+        out['cos'] = cos
+    return out, None
+
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def iqac_custom_exam_batches(request):
+    auth = _require_permissions(request, {'obe.view'})
+    if auth:
+        return auth
+
+    from academics.models import Batch
+
+    # Return cohort batches directly from DB, de-duplicated by their cohort range.
+    # Some databases can contain multiple Batch rows that display the same cohort
+    # (e.g., repeated 2024-2028). The UI only needs a single entry per cohort.
+    qs = (
+        Batch.objects.filter(is_active=True)
+        .values('id', 'name', 'start_year', 'end_year')
+        .order_by('-start_year', '-end_year', 'name', '-id')
+    )
+
+    out = []
+    seen_labels = set()
+    for row in qs[:2000]:
+        sy = row.get('start_year')
+        ey = row.get('end_year')
+
+        label = (row.get('name') or '').strip()
+        if sy and ey:
+            label = f"{sy}-{ey}"
+        elif sy and not ey:
+            try:
+                label = f"{int(sy)}-{int(sy) + 4}"
+            except Exception:
+                pass
+
+        label = label.strip() or str(row.get('id') or '')
+
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
+
+        out.append({
+            'id': row['id'],
+            'label': label,
+            'start_year': sy,
+            'end_year': ey,
+        })
+
+    return Response({'batches': out})
+
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def iqac_batch_qp_pattern_get(request):
+    from .models import ObeBatchQpPatternOverride, ObeQpPatternConfig
+
+    qp = _get_query_params(request)
+    batch_id = _parse_int(qp.get('batch_id'))
+    class_type = str(qp.get('class_type') or '').strip().upper()
+    question_paper_type = str(qp.get('question_paper_type') or '').strip().upper()
+    exam = _normalize_exam_key(qp.get('exam'))
+
+    if not batch_id:
+        return Response({'detail': 'batch_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not class_type:
+        return Response({'detail': 'class_type is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not exam:
+        return Response({'detail': 'exam is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if question_paper_type not in {'QP1', 'QP2'}:
+        question_paper_type = ''
+    qp_type_val = question_paper_type if question_paper_type else None
+
+    obj = ObeBatchQpPatternOverride.objects.filter(batch_id=batch_id, class_type=class_type, question_paper_type=qp_type_val, exam=exam).first()
+    if obj is not None:
+        pattern = getattr(obj, 'pattern', None)
+        if not isinstance(pattern, dict):
+            pattern = {'marks': []}
+        return Response({
+            'batch_id': batch_id,
+            'class_type': class_type,
+            'question_paper_type': qp_type_val,
+            'exam': exam,
+            'pattern': pattern,
+            'is_override': True,
+            'updated_at': obj.updated_at.isoformat() if getattr(obj, 'updated_at', None) else None,
+            'updated_by': obj.updated_by,
+        })
+
+    # Fallback: reuse global IQAC qp-pattern only for supported global exam keys.
+    fallback_pattern = {'marks': []}
+    fallback_updated_at = None
+    fallback_updated_by = None
+    if exam in {'CIA', 'CIA1', 'CIA2', 'MODEL'}:
+        g = ObeQpPatternConfig.objects.filter(class_type=class_type, question_paper_type=qp_type_val, exam=exam).first()
+        if g is None and exam in {'CIA1', 'CIA2'}:
+            g = ObeQpPatternConfig.objects.filter(class_type=class_type, question_paper_type=qp_type_val, exam='CIA').first()
+        if g is not None:
+            raw = getattr(g, 'pattern', None)
+            if isinstance(raw, dict):
+                fallback_pattern = raw
+            elif isinstance(raw, list):
+                fallback_pattern = {'marks': raw}
+            fallback_updated_at = g.updated_at.isoformat() if getattr(g, 'updated_at', None) else None
+            fallback_updated_by = g.updated_by
+
+    return Response({
+        'batch_id': batch_id,
+        'class_type': class_type,
+        'question_paper_type': qp_type_val,
+        'exam': exam,
+        'pattern': fallback_pattern,
+        'is_override': False,
+        'updated_at': fallback_updated_at,
+        'updated_by': fallback_updated_by,
+    })
+
+
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def iqac_batch_qp_pattern_upsert(request):
+    auth = _require_obe_master_permission(request)
+    if auth:
+        return auth
+
+    from .models import ObeBatchQpPatternOverride
+    from academics.models import Batch
+
+    data = request.data if isinstance(request.data, dict) else {}
+    batch_id = _parse_int(data.get('batch_id'))
+    class_type = str(data.get('class_type') or '').strip().upper()
+    question_paper_type = str(data.get('question_paper_type') or '').strip().upper()
+    exam = _normalize_exam_key(data.get('exam'))
+    pattern_raw = data.get('pattern')
+
+    if not batch_id:
+        return Response({'detail': 'batch_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not class_type:
+        return Response({'detail': 'class_type is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not exam:
+        return Response({'detail': 'exam is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if question_paper_type not in {'QP1', 'QP2'}:
+        question_paper_type = ''
+    qp_type_val = question_paper_type if question_paper_type else None
+
+    if not Batch.objects.filter(id=batch_id).exists():
+        return Response({'detail': 'batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    pattern, err = _validate_qp_pattern_payload(pattern_raw)
+    if err is not None:
+        return err
+
+    obj, _ = ObeBatchQpPatternOverride.objects.update_or_create(
+        batch_id=batch_id,
+        class_type=class_type,
+        question_paper_type=qp_type_val,
+        exam=exam,
+        defaults={'pattern': pattern, 'updated_by': getattr(request.user, 'id', None)},
+    )
+
+    return Response({
+        'status': 'ok',
+        'batch_id': batch_id,
+        'class_type': class_type,
+        'question_paper_type': qp_type_val,
+        'exam': exam,
+        'pattern': obj.pattern if isinstance(getattr(obj, 'pattern', None), dict) else {'marks': []},
+        'is_override': True,
+        'updated_at': obj.updated_at.isoformat() if getattr(obj, 'updated_at', None) else None,
+        'updated_by': obj.updated_by,
+    })
+
+
 @api_view(['GET'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
@@ -3024,7 +3288,13 @@ def _get_due_schedule_for_request(request, subject_code: str, assessment: str, t
     # - If a global override exists and it is CLOSED, publishing is allowed only when an explicit
     #   IQAC approval exists (so approving a request actually enables publishing).
     # - If no global override exists, normal due/approval logic applies.
-    if (not assessment_enabled) or (not assessment_open):
+    master_cfg_qs = ObeAssessmentMasterConfig.objects.filter(id=1).first()
+    master_cfg = master_cfg_qs.config if master_cfg_qs and getattr(master_cfg_qs, 'config', None) else {}
+    unlimited_publish = not master_cfg.get('edit_requests_enabled', True)
+
+    if unlimited_publish:
+        publish_allowed = True
+    elif (not assessment_enabled) or (not assessment_open):
         publish_allowed = False
     elif global_override_active:
         if bool(global_is_open):
@@ -5800,36 +6070,14 @@ def cia1_marks(request, subject_id):
     except Exception:
         elective_student_ids = []
 
-    # If no section_ids and no elective students found, return empty roster instead of 403
-    if not section_ids and not elective_student_ids:
-        students = StudentProfile.objects.none()
-    else:
-        try:
-            students = (
-                StudentProfile.objects.select_related('user', 'section')
-                .filter(
-                    Q(id__in=elective_student_ids)
-                    | Q(section_id__in=section_ids)
-                    | Q(section_assignments__section_id__in=section_ids, section_assignments__end_date__isnull=True)
-                )
-                .distinct()
-                .order_by('user__last_name', 'user__first_name', 'user__username')
-            )
-        except (ValueError, FieldError) as e:
-            return Response(
-                {
-                    'detail': 'CIA1 roster query failed.',
-                    'error': str(e),
-                    'how_to_fix': [
-                        'Ensure the selected Teaching Assignment has a valid Section and Semester',
-                        'Ensure elective choices are imported for the elective subject',
-                        'Ensure student section assignments are consistent',
-                    ],
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-    ta = selected_ta or _resolve_staff_teaching_assignment(request, subject_code=(subject.code if subject is not None else str(subject_id)), teaching_assignment_id=ta_id)
+    # Roster: use the same TA roster logic as SSA/Model (section assignments + legacy section, and elective choices).
+    # This avoids over-including students via broad StudentProfile joins.
+    ta = selected_ta or _resolve_staff_teaching_assignment(
+        request,
+        subject_code=(subject.code if subject is not None else str(subject_id)),
+        teaching_assignment_id=ta_id,
+    )
+    students = _get_studentprofile_queryset_for_teaching_assignment(ta)
     strict_scope = _strict_assignment_scope(subject_code=(subject.code if subject is not None else str(subject_id)), teaching_assignment=ta)
 
     from .models import Cia1Mark
@@ -6131,35 +6379,13 @@ def cia2_marks(request, subject_id):
     except Exception:
         elective_student_ids = []
 
-    if not section_ids and not elective_student_ids:
-        students = StudentProfile.objects.none()
-    else:
-        try:
-            students = (
-                StudentProfile.objects.select_related('user', 'section')
-                .filter(
-                    Q(id__in=elective_student_ids)
-                    | Q(section_id__in=section_ids)
-                    | Q(section_assignments__section_id__in=section_ids, section_assignments__end_date__isnull=True)
-                )
-                .distinct()
-                .order_by('user__last_name', 'user__first_name', 'user__username')
-            )
-        except (ValueError, FieldError) as e:
-            return Response(
-                {
-                    'detail': 'CIA2 roster query failed.',
-                    'error': str(e),
-                    'how_to_fix': [
-                        'Ensure the selected Teaching Assignment has a valid Section and Semester',
-                        'Ensure elective choices are imported for the elective subject',
-                        'Ensure student section assignments are consistent',
-                    ],
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-    ta = selected_ta or _resolve_staff_teaching_assignment(request, subject_code=(subject.code if subject is not None else str(subject_id)), teaching_assignment_id=ta_id)
+    # Roster: use the same TA roster logic as SSA/Model (section assignments + legacy section, and elective choices).
+    ta = selected_ta or _resolve_staff_teaching_assignment(
+        request,
+        subject_code=(subject.code if subject is not None else str(subject_id)),
+        teaching_assignment_id=ta_id,
+    )
+    students = _get_studentprofile_queryset_for_teaching_assignment(ta)
     strict_scope = _strict_assignment_scope(subject_code=(subject.code if subject is not None else str(subject_id)), teaching_assignment=ta)
 
     from .models import Cia2Mark
