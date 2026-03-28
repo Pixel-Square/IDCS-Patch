@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchIqacQpPattern, upsertIqacQpPattern } from '../../services/obe';
+import {
+  fetchIqacBatchQpPattern,
+  fetchAcademicYears,
+  fetchIqacCustomExamBatchesByYear,
+  fetchIqacQpPattern,
+  upsertIqacBatchQpPattern,
+  upsertIqacQpPattern,
+  type AcademicYearItem,
+  type CustomExamBatch,
+} from '../../services/obe';
 import { fetchAssessmentMasterConfig, saveAssessmentMasterConfig } from '../../services/cdapDb';
 
 type QpOption = {
@@ -10,6 +19,8 @@ type QpOption = {
 };
 
 export default function AcademicControllerQPPage(): JSX.Element {
+  const [tab, setTab] = useState<'qp' | 'custom'>('qp');
+
   const options: QpOption[] = useMemo(
     () => [
       { key: 'THEORY_QP1', label: 'Theory QP 1', class_type: 'THEORY', question_paper_type: 'QP1' },
@@ -53,6 +64,29 @@ export default function AcademicControllerQPPage(): JSX.Element {
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
 
+  // Customizable Exam (batch override)
+  const [academicYears, setAcademicYears] = useState<AcademicYearItem[]>([]);
+  const [selectedAcademicYearId, setSelectedAcademicYearId] = useState<number | null>(null);
+  const [batches, setBatches] = useState<CustomExamBatch[]>([]);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
+  const selectedBatch = useMemo(() => batches.find((b) => b.id === selectedBatchId) || null, [batches, selectedBatchId]);
+
+  const customExamKeys = useMemo(
+    () => [
+      { key: 'SSA1', label: 'SSA 1' },
+      { key: 'SSA2', label: 'SSA 2' },
+      { key: 'FORMATIVE1', label: 'FA 1' },
+      { key: 'FORMATIVE2', label: 'FA 2' },
+      { key: 'CIA1', label: 'CIA 1' },
+      { key: 'CIA2', label: 'CIA 2' },
+      { key: 'MODEL', label: 'MODEL' },
+    ],
+    []
+  );
+  const [selectedCustomExam, setSelectedCustomExam] = useState<string>('SSA1');
+  const [customIsOverride, setCustomIsOverride] = useState<boolean>(false);
+
   const backendKey = useMemo(() => {
     const class_type = selected?.class_type || 'THEORY';
     const question_paper_type = selected?.question_paper_type || null;
@@ -63,9 +97,21 @@ export default function AcademicControllerQPPage(): JSX.Element {
     };
   }, [selected, selectedExam]);
 
+  const customBackendKey = useMemo(() => {
+    const class_type = selected?.class_type || 'THEORY';
+    const question_paper_type = selected?.question_paper_type || null;
+    return {
+      batch_id: selectedBatchId,
+      class_type,
+      question_paper_type,
+      exam: selectedCustomExam,
+    };
+  }, [selected?.class_type, selected?.question_paper_type, selectedBatchId, selectedCustomExam]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      if (tab !== 'qp') return;
       setMessage(null);
       setError(null);
       setIsLoading(true);
@@ -116,7 +162,130 @@ export default function AcademicControllerQPPage(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [backendKey]);
+  }, [backendKey, tab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (tab !== 'custom') return;
+    (async () => {
+      setBatchLoading(true);
+      try {
+        const years = await fetchAcademicYears();
+        if (cancelled) return;
+        setAcademicYears(years);
+
+        const active = years.find((y) => y.is_active) || years[0] || null;
+        const ayId = selectedAcademicYearId ?? (active ? Number(active.id) : null);
+        setSelectedAcademicYearId(ayId);
+        if (!ayId) {
+          setBatches([]);
+          setSelectedBatchId(null);
+          return;
+        }
+
+        const list = await fetchIqacCustomExamBatchesByYear(ayId);
+        if (cancelled) return;
+        setBatches(list);
+        if (!selectedBatchId && list.length) setSelectedBatchId(list[0].id);
+      } catch (e: any) {
+        if (cancelled) return;
+        setError(String(e?.message || e || 'Failed to load batches.'));
+      } finally {
+        if (!cancelled) setBatchLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (tab !== 'custom') return;
+    if (!selectedAcademicYearId) return;
+    (async () => {
+      setBatchLoading(true);
+      setError(null);
+      try {
+        const list = await fetchIqacCustomExamBatchesByYear(selectedAcademicYearId);
+        if (cancelled) return;
+        setBatches(list);
+        // Reset batch if current batch is not in list.
+        if (selectedBatchId && !list.some((b) => b.id === selectedBatchId)) {
+          setSelectedBatchId(list[0]?.id ?? null);
+        }
+        if (!selectedBatchId && list.length) setSelectedBatchId(list[0].id);
+      } catch (e: any) {
+        if (cancelled) return;
+        setError(String(e?.message || e || 'Failed to load batches.'));
+        setBatches([]);
+      } finally {
+        if (!cancelled) setBatchLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAcademicYearId, tab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCustom() {
+      if (tab !== 'custom') return;
+      if (!customBackendKey.batch_id) return;
+      setMessage(null);
+      setError(null);
+      setIsLoading(true);
+      setLastSavedAt(null);
+      setCustomIsOverride(false);
+      try {
+        const data = await fetchIqacBatchQpPattern({
+          batch_id: customBackendKey.batch_id,
+          class_type: customBackendKey.class_type,
+          question_paper_type: customBackendKey.question_paper_type,
+          exam: customBackendKey.exam,
+        });
+        if (cancelled) return;
+        const marks = Array.isArray((data as any)?.pattern?.marks) ? (data as any).pattern.marks : [];
+        const cos = Array.isArray((data as any)?.pattern?.cos) ? (data as any).pattern.cos : [];
+
+        const storedCoToUi = (stored: any): string => {
+          const s = String(stored ?? '').trim();
+          if (!s) return '';
+          const n = Number(s);
+          if (Number.isFinite(n)) {
+            if (n === 12) return '1&2';
+            if (n === 34) return '3&4';
+            return String(Math.trunc(n));
+          }
+          const upper = s.toUpperCase();
+          if (upper === 'BOTH') return 'both';
+          if (upper === '1&2' || upper === '3&4' || upper === 'BOTH') return upper;
+          return s;
+        };
+
+        const normalized: PatternRow[] = marks.map((m: any, idx: number) => ({
+          marks: String(m),
+          co: cos[idx] == null ? '' : storedCoToUi(cos[idx]),
+        }));
+        setPatternRows(normalized);
+        setLastSavedAt((data as any)?.updated_at ?? null);
+        setCustomIsOverride(Boolean((data as any)?.is_override));
+      } catch (e: any) {
+        if (cancelled) return;
+        setError(String(e?.message || e || 'Failed to load pattern.'));
+        setPatternRows([]);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    loadCustom();
+    return () => {
+      cancelled = true;
+    };
+  }, [customBackendKey, tab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,7 +351,9 @@ export default function AcademicControllerQPPage(): JSX.Element {
   };
 
   const addRow = () => {
-    setPatternRows((prev) => [...prev, { marks: '', co: selectedExam === 'CIA2' ? '3' : '1' }]);
+    const examKey = tab === 'custom' ? String(selectedCustomExam || '') : String(selectedExam || '');
+    const defaultCo = examKey === 'CIA2' || examKey === 'SSA2' || examKey === 'FORMATIVE2' ? '3' : '1';
+    setPatternRows((prev) => [...prev, { marks: '', co: defaultCo }]);
   };
 
   const deleteRow = (idx: number) => {
@@ -244,20 +415,37 @@ export default function AcademicControllerQPPage(): JSX.Element {
         setError('CO values must be valid for all rows.');
         return;
       }
-      const saved = await upsertIqacQpPattern({
-        class_type: backendKey.class_type,
-        question_paper_type: backendKey.question_paper_type,
-        exam: backendKey.exam,
-        pattern: { marks, cos },
-      });
-      setLastSavedAt(saved?.updated_at ?? null);
-      setMessage('Saved.');
+      if (tab === 'custom') {
+        if (!customBackendKey.batch_id) {
+          setError('Select a batch.');
+          return;
+        }
+        const saved = await upsertIqacBatchQpPattern({
+          batch_id: customBackendKey.batch_id,
+          class_type: customBackendKey.class_type,
+          question_paper_type: customBackendKey.question_paper_type,
+          exam: customBackendKey.exam,
+          pattern: { marks, cos },
+        });
+        setLastSavedAt(saved?.updated_at ?? null);
+        setCustomIsOverride(Boolean(saved?.is_override));
+        setMessage('Saved override.');
+      } else {
+        const saved = await upsertIqacQpPattern({
+          class_type: backendKey.class_type,
+          question_paper_type: backendKey.question_paper_type,
+          exam: backendKey.exam,
+          pattern: { marks, cos },
+        });
+        setLastSavedAt(saved?.updated_at ?? null);
+        setMessage('Saved.');
 
-      // Best-effort broadcast so already-open CIA pages can refresh patterns without a full reload.
-      try {
-        window.dispatchEvent(new CustomEvent('obe:qp-pattern-updated', { detail: { ...backendKey } }));
-      } catch {
-        // ignore
+        // Best-effort broadcast so already-open CIA pages can refresh patterns without a full reload.
+        try {
+          window.dispatchEvent(new CustomEvent('obe:qp-pattern-updated', { detail: { ...backendKey } }));
+        } catch {
+          // ignore
+        }
       }
     } catch (e: any) {
       setError(e?.message || 'Save failed.');
@@ -271,6 +459,25 @@ export default function AcademicControllerQPPage(): JSX.Element {
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>QP</div>
         <div style={{ fontSize: 13, color: '#6b7280' }}>Select the QP/class type option.</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        {([
+          { key: 'qp', label: 'QP Pattern' },
+          { key: 'custom', label: 'Customizable Exam' },
+        ] as const).map((t) => {
+          const active = tab === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={active ? 'obe-btn obe-btn-primary' : 'obe-btn obe-btn-secondary'}
+              type="button"
+            >
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -289,21 +496,87 @@ export default function AcademicControllerQPPage(): JSX.Element {
         })}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        {(['CIA1', 'CIA2', 'MODEL'] as const).map((k) => {
-          const active = selectedExam === k;
-          return (
-            <button
-              key={k}
-              onClick={() => setSelectedExam(k)}
-              className={active ? 'obe-btn obe-btn-primary' : 'obe-btn obe-btn-secondary'}
-              type="button"
-            >
-              {k === 'CIA1' ? 'CIA 1' : k === 'CIA2' ? 'CIA 2' : 'MODEL'}
-            </button>
-          );
-        })}
-      </div>
+      {tab === 'qp' ? (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          {(['CIA1', 'CIA2', 'MODEL'] as const).map((k) => {
+            const active = selectedExam === k;
+            return (
+              <button
+                key={k}
+                onClick={() => setSelectedExam(k)}
+                className={active ? 'obe-btn obe-btn-primary' : 'obe-btn obe-btn-secondary'}
+                type="button"
+              >
+                {k === 'CIA1' ? 'CIA 1' : k === 'CIA2' ? 'CIA 2' : 'MODEL'}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="obe-card" style={{ padding: 12, marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'end' }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 800, marginBottom: 6 }}>Academic year</div>
+              <select
+                className="obe-input"
+                value={selectedAcademicYearId == null ? '' : String(selectedAcademicYearId)}
+                onChange={(e) => setSelectedAcademicYearId(e.target.value ? Number(e.target.value) : null)}
+                style={{ minWidth: 220 }}
+                disabled={batchLoading}
+              >
+                <option value="">Select</option>
+                {academicYears.map((y) => (
+                  <option key={y.id} value={String(y.id)}>
+                    {y.name}{y.parity ? ` (${y.parity})` : ''}{y.is_active ? ' • Active' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 800, marginBottom: 6 }}>Batch</div>
+              <select
+                className="obe-input"
+                value={selectedBatchId == null ? '' : String(selectedBatchId)}
+                onChange={(e) => setSelectedBatchId(e.target.value ? Number(e.target.value) : null)}
+                style={{ minWidth: 260 }}
+                disabled={batchLoading}
+              >
+                <option value="">Select batch</option>
+                {batches.map((b) => (
+                  <option key={b.id} value={String(b.id)}>
+                    {String((b as any)?.label ?? (b as any)?.name ?? b.id)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 800, marginBottom: 6 }}>Exam</div>
+              <select className="obe-input" value={selectedCustomExam} onChange={(e) => setSelectedCustomExam(e.target.value)} style={{ minWidth: 180 }}>
+                {customExamKeys.map((k) => (
+                  <option key={k.key} value={k.key}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ fontSize: 12, color: '#6b7280' }}>
+              {selectedBatch ? (
+                <div>
+                  <div style={{ fontWeight: 800, color: '#111827' }}>{String((selectedBatch as any)?.label ?? (selectedBatch as any)?.name ?? selectedBatch.id)}</div>
+                  <div>
+                    {customIsOverride ? 'Using batch override' : 'No override (fallback where available)'}
+                  </div>
+                </div>
+              ) : (
+                <div>{batchLoading ? 'Loading batches…' : 'Select a batch to edit overrides.'}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {selected ? (
         <div className="obe-card" style={{ padding: 12 }}>
@@ -330,7 +603,11 @@ export default function AcademicControllerQPPage(): JSX.Element {
       <div className="obe-card" style={{ padding: 12, marginTop: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 10 }}>
           <div style={{ fontWeight: 900, color: '#111827' }}>QP Pattern</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>{selectedExam === 'CIA1' ? 'CIA 1' : selectedExam === 'CIA2' ? 'CIA 2' : 'MODEL'} • {selected?.label || selectedKey}</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            {tab === 'qp'
+              ? `${selectedExam === 'CIA1' ? 'CIA 1' : selectedExam === 'CIA2' ? 'CIA 2' : 'MODEL'} • ${selected?.label || selectedKey}`
+              : `${customExamKeys.find((k) => k.key === selectedCustomExam)?.label || selectedCustomExam} • ${selected?.label || selectedKey}${selectedBatch ? ` • ${selectedBatch.name}` : ''}`}
+          </div>
         </div>
 
         {error ? (
@@ -383,7 +660,7 @@ export default function AcademicControllerQPPage(): JSX.Element {
                         style={{ maxWidth: 160 }}
                       >
                         <option value="">Select</option>
-                        {selectedExam === 'MODEL' ? (
+                        {(tab === 'custom' ? selectedCustomExam : selectedExam) === 'MODEL' ? (
                           <>
                             <option value="1">1</option>
                             <option value="2">2</option>
@@ -391,7 +668,7 @@ export default function AcademicControllerQPPage(): JSX.Element {
                             <option value="4">4</option>
                             <option value="5">5</option>
                           </>
-                        ) : selectedExam === 'CIA2' ? (
+                        ) : (tab === 'custom' ? selectedCustomExam : selectedExam) === 'CIA2' || (tab === 'custom' ? selectedCustomExam : selectedExam) === 'SSA2' || (tab === 'custom' ? selectedCustomExam : selectedExam) === 'FORMATIVE2' ? (
                           <>
                             <option value="3">3</option>
                             <option value="4">4</option>
