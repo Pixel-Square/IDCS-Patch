@@ -251,6 +251,20 @@ def _get_teaching_assignment_student_ids(ta) -> list[int]:
     return ids
 
 
+def _get_studentprofile_queryset_for_teaching_assignment(ta):
+    """Return a stable StudentProfile queryset for the TA's roster."""
+    from academics.models import StudentProfile
+
+    ids = _get_teaching_assignment_student_ids(ta)
+    if not ids:
+        return StudentProfile.objects.none()
+    return (
+        StudentProfile.objects.select_related('user', 'section')
+        .filter(id__in=ids)
+        .order_by('user__last_name', 'user__first_name', 'user__username')
+    )
+
+
 _DB_COLUMN_EXISTS_CACHE: dict[tuple[str, str], bool] = {}
 
 
@@ -2755,7 +2769,13 @@ def _get_due_schedule_for_request(request, subject_code: str, assessment: str, t
     # - If a global override exists and it is CLOSED, publishing is allowed only when an explicit
     #   IQAC approval exists (so approving a request actually enables publishing).
     # - If no global override exists, normal due/approval logic applies.
-    if (not assessment_enabled) or (not assessment_open):
+    master_cfg_qs = ObeAssessmentMasterConfig.objects.filter(id=1).first()
+    master_cfg = master_cfg_qs.config if master_cfg_qs and getattr(master_cfg_qs, 'config', None) else {}
+    unlimited_publish = not master_cfg.get('edit_requests_enabled', True)
+
+    if unlimited_publish:
+        publish_allowed = True
+    elif (not assessment_enabled) or (not assessment_open):
         publish_allowed = False
     elif global_override_active:
         if bool(global_is_open):
@@ -5531,36 +5551,14 @@ def cia1_marks(request, subject_id):
     except Exception:
         elective_student_ids = []
 
-    # If no section_ids and no elective students found, return empty roster instead of 403
-    if not section_ids and not elective_student_ids:
-        students = StudentProfile.objects.none()
-    else:
-        try:
-            students = (
-                StudentProfile.objects.select_related('user', 'section')
-                .filter(
-                    Q(id__in=elective_student_ids)
-                    | Q(section_id__in=section_ids)
-                    | Q(section_assignments__section_id__in=section_ids, section_assignments__end_date__isnull=True)
-                )
-                .distinct()
-                .order_by('user__last_name', 'user__first_name', 'user__username')
-            )
-        except (ValueError, FieldError) as e:
-            return Response(
-                {
-                    'detail': 'CIA1 roster query failed.',
-                    'error': str(e),
-                    'how_to_fix': [
-                        'Ensure the selected Teaching Assignment has a valid Section and Semester',
-                        'Ensure elective choices are imported for the elective subject',
-                        'Ensure student section assignments are consistent',
-                    ],
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-    ta = selected_ta or _resolve_staff_teaching_assignment(request, subject_code=(subject.code if subject is not None else str(subject_id)), teaching_assignment_id=ta_id)
+    # Roster: use the same TA roster logic as SSA/Model (section assignments + legacy section, and elective choices).
+    # This avoids over-including students via broad StudentProfile joins.
+    ta = selected_ta or _resolve_staff_teaching_assignment(
+        request,
+        subject_code=(subject.code if subject is not None else str(subject_id)),
+        teaching_assignment_id=ta_id,
+    )
+    students = _get_studentprofile_queryset_for_teaching_assignment(ta)
     strict_scope = _strict_assignment_scope(subject_code=(subject.code if subject is not None else str(subject_id)), teaching_assignment=ta)
 
     from .models import Cia1Mark
@@ -5862,35 +5860,13 @@ def cia2_marks(request, subject_id):
     except Exception:
         elective_student_ids = []
 
-    if not section_ids and not elective_student_ids:
-        students = StudentProfile.objects.none()
-    else:
-        try:
-            students = (
-                StudentProfile.objects.select_related('user', 'section')
-                .filter(
-                    Q(id__in=elective_student_ids)
-                    | Q(section_id__in=section_ids)
-                    | Q(section_assignments__section_id__in=section_ids, section_assignments__end_date__isnull=True)
-                )
-                .distinct()
-                .order_by('user__last_name', 'user__first_name', 'user__username')
-            )
-        except (ValueError, FieldError) as e:
-            return Response(
-                {
-                    'detail': 'CIA2 roster query failed.',
-                    'error': str(e),
-                    'how_to_fix': [
-                        'Ensure the selected Teaching Assignment has a valid Section and Semester',
-                        'Ensure elective choices are imported for the elective subject',
-                        'Ensure student section assignments are consistent',
-                    ],
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-    ta = selected_ta or _resolve_staff_teaching_assignment(request, subject_code=(subject.code if subject is not None else str(subject_id)), teaching_assignment_id=ta_id)
+    # Roster: use the same TA roster logic as SSA/Model (section assignments + legacy section, and elective choices).
+    ta = selected_ta or _resolve_staff_teaching_assignment(
+        request,
+        subject_code=(subject.code if subject is not None else str(subject_id)),
+        teaching_assignment_id=ta_id,
+    )
+    students = _get_studentprofile_queryset_for_teaching_assignment(ta)
     strict_scope = _strict_assignment_scope(subject_code=(subject.code if subject is not None else str(subject_id)), teaching_assignment=ta)
 
     from .models import Cia2Mark
