@@ -264,14 +264,14 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`obe-sidebar-btn ${active ? 'active' : ''}`}
+      className={`obe-assess-btn${active ? ' active' : ''}`}
     >
       {label}
     </button>
   );
 }
 
-// Extended tab button to support CQI floating variant
+// Extended tab button to support CQI variant
 function TabButtonExtended({
   active,
   label,
@@ -288,7 +288,7 @@ function TabButtonExtended({
   return (
     <button
       onClick={onClick}
-      className={`obe-sidebar-btn ${active ? 'active' : ''} ${isCqi ? 'cqi-floating-btn' : ''}`}
+      className={`obe-assess-btn${isCqi ? ' obe-assess-btn-cqi' : ''}${active ? ' active' : ''}`}
       {...(uniqueId ? { 'data-cqi-id': uniqueId } as any : {})}
     >
       {label}
@@ -1082,26 +1082,10 @@ export default function MarkEntryTabs({
         </div>
       ) : null}
 
-      <div style={{ 
-        background: 'linear-gradient(135deg, #f8fafc 0%, #e0f2fe 100%)',
-        borderRadius: 12,
-        padding: '16px',
-        marginBottom: 20,
-        border: '1px solid #cbd5e1',
-        boxShadow: '0 2px 8px rgba(2,6,23,0.04), inset 0 1px 0 rgba(255,255,255,0.5)'
-      }}>
-        <div style={{ 
-          fontSize: 12, 
-          fontWeight: 700, 
-          color: '#64748b', 
-          textTransform: 'uppercase', 
-          letterSpacing: '0.05em',
-          marginBottom: 12
-        }}>
-          Assessment Exams
-        </div>
-        <div className="obe-sidebar-nav" aria-label="Mark Entry sub-tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {visibleTabs.map((t, idx) => (
+      <div className="obe-assess-nav" aria-label="Mark Entry sub-tabs">
+        <span className="obe-assess-nav-label">Assessment Exams</span>
+        <div className="obe-assess-nav-row">
+          {visibleTabs.map((t) => (
             <React.Fragment key={t.key}>
               {t.cqi ? (
                 <TabButtonExtended

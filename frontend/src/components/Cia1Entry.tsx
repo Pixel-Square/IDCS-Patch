@@ -2075,27 +2075,36 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
 
   // QP Pattern status display (shown after roster loads)
   const qpPatternStatusBar = (
-    <div style={{ marginBottom: 10, padding: '8px 12px', background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' }}>
-      <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span>
-          <b>Assessment:</b> {assessmentLabel} | <b>Class:</b> {classTypeKey || 'N/A'} | <b>QP:</b> {qpTypeKey || 'N/A'}
+    <div style={{ marginBottom: 12, padding: '8px 14px', background: 'linear-gradient(180deg,#f8fafc,#ffffff)', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12, color: '#475569', fontWeight: 600, letterSpacing: '0.01em' }}>
+        <span style={{ color: '#94a3b8', fontWeight: 500 }}>Assessment</span>
+        <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+        <span style={{ color: '#1e293b' }}>{assessmentLabel}</span>
+        <span style={{ margin: '0 8px', color: '#e2e8f0' }}>|</span>
+        <span style={{ color: '#94a3b8', fontWeight: 500 }}>Class</span>
+        <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+        <span style={{ color: '#1e293b' }}>{classTypeKey || 'N/A'}</span>
+        <span style={{ margin: '0 8px', color: '#e2e8f0' }}>|</span>
+        <span style={{ color: '#94a3b8', fontWeight: 500 }}>QP</span>
+        <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+        <span style={{ color: '#1e293b', fontWeight: 700 }}>{qpTypeKey || 'N/A'}</span>
+      </span>
+      {iqacPatternLoading ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#0b74b8', background: '#e0f2fe', border: '1px solid #bae6fd', borderRadius: 999, padding: '2px 10px' }}>
+          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#0b74b8', animation: 'obe-pulse-dot 1.2s ease-in-out infinite' }} />
+          Loading pattern…
         </span>
-        {iqacPatternLoading ? (
-          <span style={{ color: '#3b82f6', fontSize: 11 }}>
-            ⟳ Loading pattern...
-          </span>
-        ) : null}
-        {iqacPatternError ? (
-          <span style={{ color: '#dc2626', fontSize: 11 }}>
-            ⚠ Pattern load failed
-          </span>
-        ) : null}
-        {!iqacPatternLoading && !iqacPatternError && iqacPattern ? (
-          <span style={{ color: '#10b981', fontSize: 11 }}>
-            ✓ Pattern loaded ({questions.length} questions)
-          </span>
-        ) : null}
-      </div>
+      ) : null}
+      {iqacPatternError ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 999, padding: '2px 10px' }}>
+          ⚠ Pattern load failed
+        </span>
+      ) : null}
+      {!iqacPatternLoading && !iqacPatternError && iqacPattern ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#047857', background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: 999, padding: '2px 10px' }}>
+          ✓ {questions.length} questions loaded
+        </span>
+      ) : null}
     </div>
   );
 

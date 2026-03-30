@@ -270,53 +270,47 @@ export default function CourseOBEPage(): JSX.Element {
         <div className="w-full min-w-0">
           <div className="obe-card mb-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
+              {/* Left: course code + name */}
               <div className="min-w-0 flex-1">
                 <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">
                   {courseId}
                 </h2>
                 {courseName ? (
-                  <div className="mt-2 text-lg font-bold text-gray-900 truncate">{courseName}</div>
+                  <div className="mt-1 text-base font-semibold text-gray-500 truncate">{courseName}</div>
                 ) : null}
-
-                <div className="mt-5 flex flex-wrap items-stretch gap-3">
-                  {/* Class Type card */}
-                  {!courseMetaLoaded && !courseClassType ? (
-                    <div className="obe-meta-skeleton" style={{ width: 160, height: 64 }} aria-label="Loading class type…" />
-                  ) : courseClassType ? (
-                    <div className="obe-meta-card obe-meta-card-type">
-                      <span className="obe-meta-card-label">
-                        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ display: 'inline', marginRight: 4, verticalAlign: '-1px' }}>
-                          <path d="M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1H2V3zm0 3h12v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6z"/>
-                        </svg>
-                        Course Type
-                      </span>
-                      <span className="obe-meta-card-value">{classTypeLabel}</span>
-                    </div>
-                  ) : null}
-
-                  {/* QP Type card */}
-                  {!courseMetaLoaded && !courseQpType ? (
-                    <div className="obe-meta-skeleton" style={{ width: 160, height: 64 }} aria-label="Loading QP type…" />
-                  ) : courseQpType ? (
-                    <div className="obe-meta-card obe-meta-card-qp">
-                      <span className="obe-meta-card-label">
-                        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ display: 'inline', marginRight: 4, verticalAlign: '-1px' }}>
-                          <path d="M4 0h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm0 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H4zm1 3h6v1H5V4zm0 2h6v1H5V6zm0 2h4v1H5V8z"/>
-                        </svg>
-                        Question Paper Type
-                      </span>
-                      <span className="obe-meta-card-value">
-                        {String(courseQpType).trim().toUpperCase()}
-                        {!courseMetaLoaded && (
-                          <span className="obe-meta-card-syncing" title="Syncing from database…" />
-                        )}
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              {/* Right: meta pills + back button — all inline */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {/* Course Type pill */}
+                {!courseMetaLoaded && !courseClassType ? (
+                  <div className="obe-meta-skeleton" style={{ width: 110, height: 40 }} aria-label="Loading class type…" />
+                ) : courseClassType ? (
+                  <div className="obe-meta-card obe-meta-card-type" style={{ minWidth: 0, padding: '5px 12px', gap: 2 }}>
+                    <span className="obe-meta-card-label" style={{ fontSize: 9, letterSpacing: '0.06em' }}>
+                      Course Type
+                    </span>
+                    <span className="obe-meta-card-value" style={{ fontSize: 13, fontWeight: 800 }}>{classTypeLabel}</span>
+                  </div>
+                ) : null}
+
+                {/* QP Type pill */}
+                {!courseMetaLoaded && !courseQpType ? (
+                  <div className="obe-meta-skeleton" style={{ width: 110, height: 40 }} aria-label="Loading QP type…" />
+                ) : courseQpType ? (
+                  <div className="obe-meta-card obe-meta-card-qp" style={{ minWidth: 0, padding: '5px 12px', gap: 2 }}>
+                    <span className="obe-meta-card-label" style={{ fontSize: 9, letterSpacing: '0.06em' }}>
+                      QP Type
+                    </span>
+                    <span className="obe-meta-card-value" style={{ fontSize: 13, fontWeight: 800 }}>
+                      {String(courseQpType).trim().toUpperCase()}
+                      {!courseMetaLoaded && (
+                        <span className="obe-meta-card-syncing" title="Syncing from database…" />
+                      )}
+                    </span>
+                  </div>
+                ) : null}
+
                 <button onClick={() => navigate('/obe')} className="obe-btn">
                   ← Back to courses
                 </button>

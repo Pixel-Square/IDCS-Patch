@@ -282,6 +282,88 @@
   min-width: 140px;
 }
 
+/* Assessment Exam Tab Navigation — compact professional strip */
+.obe-assess-nav {
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #f8fafc, #ffffff);
+  border-radius: 12px;
+  border: 1px solid rgba(226,232,240,0.9);
+  box-shadow: 0 2px 8px rgba(2,6,23,0.04);
+}
+
+.obe-assess-nav-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 10px;
+}
+
+.obe-assess-nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Base assessment tab button */
+.obe-assess-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  color: #475569;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease, color 140ms ease, border-color 140ms ease;
+  box-shadow: 0 1px 4px rgba(2,6,23,0.05);
+}
+
+.obe-assess-btn:hover {
+  background: linear-gradient(180deg, #f0f9ff, #e0f2fe);
+  border-color: #7dd3fc;
+  color: #0369a1;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(11,116,184,0.1);
+}
+
+.obe-assess-btn.active {
+  background: linear-gradient(135deg, #0b74b8, #0284c7);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(11,116,184,0.22);
+  transform: translateY(0);
+  font-weight: 800;
+}
+
+/* CQI variant — amber accent */
+.obe-assess-btn.obe-assess-btn-cqi {
+  background: linear-gradient(180deg, #fffbeb, #fef3c7);
+  border-color: rgba(245,158,11,0.35);
+  color: #92400e;
+}
+
+.obe-assess-btn.obe-assess-btn-cqi:hover {
+  background: linear-gradient(180deg, #fef3c7, #fde68a);
+  border-color: rgba(245,158,11,0.55);
+  color: #78350f;
+  box-shadow: 0 4px 12px rgba(245,158,11,0.15);
+}
+
+.obe-assess-btn.obe-assess-btn-cqi.active {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(245,158,11,0.28);
+}
+
 /* CQI table visual improvements */
 .cqi-table {
   border-collapse: collapse;
