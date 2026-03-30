@@ -1,4 +1,5 @@
 import React from 'react'
+import idcsLogo from '../assets/idcs-logo.png'
 
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;800&family=Titan+One&display=swap');
@@ -44,6 +45,14 @@ const css = `
     margin: 0;
     color: #444;
     line-height: 1.5;
+  }
+
+  .uc-logo {
+    display: block;
+    margin: 0 auto 18px auto;
+    width: 160px;
+    max-width: 100%;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.12));
   }
 
   .uc-stripes {
@@ -129,12 +138,23 @@ const css = `
   }
 
   @media (max-width: 768px) {
-    .uc-text-wrapper h1 { font-size: 2.5rem; }
-    .uc-text-wrapper p  { font-size: 1rem; }
-    .uc-text-wrapper    { padding: 30px 20px; width: 85%; }
+    .uc-text-wrapper h1 { font-size: 2rem; }
+    .uc-text-wrapper p  { font-size: 0.95rem; }
+    .uc-text-wrapper    { padding: 24px 18px; width: 88%; }
+    .uc-logo            { width: 110px; margin-bottom: 12px; }
     .uc-crane    { transform: scaleX(-1) scale(0.7); right: -10%; }
     .uc-forklift { transform: scale(0.8); }
     .uc-bulldozer{ transform: scale(0.5); }
+  }
+
+  @media (max-width: 480px) {
+    .uc-text-wrapper h1 { font-size: 1.5rem; letter-spacing: 1px; }
+    .uc-text-wrapper p  { font-size: 0.85rem; }
+    .uc-text-wrapper    { padding: 20px 14px; width: 92%; }
+    .uc-logo            { width: 90px; margin-bottom: 10px; }
+    .uc-crane    { transform: scaleX(-1) scale(0.5); right: -15%; }
+    .uc-forklift { transform: scale(0.65); }
+    .uc-bulldozer{ transform: scale(0.4); }
   }
 `
 
@@ -186,6 +206,7 @@ export default function BuildingInfo() {
         {/* Text */}
         <div className="uc-text-wrapper">
           <div className="uc-stripes" />
+          <img src={idcsLogo} alt="IDCS Logo" className="uc-logo" />
           <h1>Under Construction</h1>
           <p>We're working on something big!<br />Check back soon for updates.</p>
         </div>

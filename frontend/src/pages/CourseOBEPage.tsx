@@ -145,18 +145,27 @@ export default function CourseOBEPage(): JSX.Element {
         const matches = (rows || []).filter(
           (r) => String((r as any)?.course_code || '').trim() === code || String((r as any)?.course_code || '').trim().toUpperCase() === codeU,
         );
+        // Helper to extract QP type from a row, checking both possible field names
+        const getQpType = (row: any): string => {
+          // CurriculumDepartment uses 'question_paper_type', CurriculumMaster uses 'qp_type'
+          const qpt = String(row?.question_paper_type || row?.qp_type || '').trim().toUpperCase();
+          return qpt;
+        };
         const normQp = (v: any) => String(v || '').trim().toUpperCase();
         // Prefer the row that has a non-default QP type (this is what drives TCPR subtype behavior).
         const pick =
           matches.find((m) => {
-            const qp = normQp((m as any)?.question_paper_type);
+            const qp = getQpType(m);
             return qp && qp !== 'QP1';
           }) ||
           // Otherwise pick any row with a QP type.
-          matches.find((m) => normQp((m as any)?.question_paper_type)) ||
+          matches.find((m) => getQpType(m)) ||
           // Fallbacks.
           matches.find((m) => String((m as any)?.class_type || '').trim()) ||
           matches[0];
+
+        // Holds QP type found via elective fallback (used for courses with no CurriculumDepartment row).
+        let electiveQpType = '';
 
         if (!classTypeLockedFromTA && pick && (pick as any).class_type) {
           const ct = String((pick as any).class_type || '').trim();
@@ -177,14 +186,38 @@ export default function CourseOBEPage(): JSX.Element {
                 setCourseEnabledAssessments(match.enabled_assessments.map((x: any) => String(x).trim().toLowerCase()).filter(Boolean));
               }
             }
+            // Capture QP type from elective — needed when the course has no CurriculumDepartment row.
+            if (match) {
+              const eqp = String((match as any).question_paper_type || (match as any).qp_type || '').trim().toUpperCase();
+              if (eqp && eqp !== 'TCPR') electiveQpType = eqp;
+            }
           } catch (e) {
             // ignore elective fetch errors
           }
+        } else if (!pick) {
+          // classTypeLockedFromTA is true but no dept curriculum row found.
+          // Fetch elective to get the QP type for this course.
+          try {
+            const electives = await fetchElectives();
+            if (!mounted) return;
+            const match = (Array.isArray(electives) ? electives : (electives.results || [])).find((e: any) => String(e.course_code || '').trim().toUpperCase() === codeU);
+            if (match) {
+              const eqp = String((match as any).question_paper_type || (match as any).qp_type || '').trim().toUpperCase();
+              if (eqp && eqp !== 'TCPR') electiveQpType = eqp;
+            }
+          } catch {
+            // ignore
+          }
         }
         // DB always wins for QP type — save back to localStorage as updated cache.
+        // For elective-only courses (no CurriculumDepartment row), fall back to the elective's QP type.
         {
-          const qp = String((pick as any)?.question_paper_type || '').trim().toUpperCase();
+          // Read from database: check both field names (question_paper_type from CurriculumDepartment, qp_type from CurriculumMaster)
+          let qp = getQpType(pick);
+          // When no dept-curriculum row was found, use the elective subject's QP type.
+          if (!qp && electiveQpType) qp = electiveQpType;
           // For backward compat: TCPR stored as QP type means class_type=TCPR — use QP1 pattern.
+          // If database has empty/null value, default to QP1
           const finalQp = qp && qp !== 'TCPR' ? qp : 'QP1';
           setCourseQpType(finalQp);
           try { localStorage.setItem(`obe_course_qp_${courseId}`, finalQp); } catch {}

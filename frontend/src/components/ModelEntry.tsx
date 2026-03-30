@@ -164,6 +164,8 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
   const [tcplSheet, setTcplSheet] = useState<TcplSheetState>({});
   const [theorySheet, setTheorySheet] = useState<TcplSheetState>({});
   const [iqacPattern, setIqacPattern] = useState<{ marks: number[]; cos?: Array<number | string> } | null>(null);
+  const [iqacPatternLoading, setIqacPatternLoading] = useState(false);
+  const [iqacPatternError, setIqacPatternError] = useState<string | null>(null);
 
   const [requestReason, setRequestReason] = useState('');
   const [requesting, setRequesting] = useState(false);
@@ -305,6 +307,8 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
       if (classKey.startsWith('THEORY')) classKey = 'THEORY';
       if (!classKey) {
         setIqacPattern(null);
+        setIqacPatternLoading(false);
+        setIqacPatternError(null);
         return;
       }
 
@@ -313,6 +317,8 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
       const qpKey = String(normalizedQpType || '').trim();
       const qpForApi = classKey === 'THEORY' ? (qpKey ? qpKey : null) : null;
 
+      setIqacPatternLoading(true);
+      setIqacPatternError(null);
       try {
         const res = await OBE.fetchIqacQpPattern({
           class_type: classKey,
@@ -322,9 +328,13 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
         const p = Array.isArray(res?.pattern?.marks) ? res.pattern.marks : [];
         if (!alive) return;
         setIqacPattern(p.length ? (res.pattern as any) : null);
-      } catch {
+        setIqacPatternError(null);
+      } catch (e: any) {
         if (!alive) return;
         setIqacPattern(null);
+        setIqacPatternError(String(e?.message || e || 'Failed to load QP pattern'));
+      } finally {
+        if (alive) setIqacPatternLoading(false);
       }
     };
     run();
@@ -1505,6 +1515,21 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
           </>
         ) : null}
         {' '}| QP: <b>{normalizedQpType || 'QP1'}</b>
+        {iqacPatternLoading ? (
+          <span style={{ marginLeft: 8, color: '#3b82f6', fontSize: 11 }}>
+            ⟳ Loading QP pattern...
+          </span>
+        ) : null}
+        {iqacPatternError ? (
+          <span style={{ marginLeft: 8, color: '#dc2626', fontSize: 11 }}>
+            ⚠ Pattern load failed
+          </span>
+        ) : null}
+        {!iqacPatternLoading && !iqacPatternError && iqacPattern ? (
+          <span style={{ marginLeft: 8, color: '#10b981', fontSize: 11 }}>
+            ✓ Pattern loaded ({questions.length} questions)
+          </span>
+        ) : null}
       </div>
 
       {loading ? <div style={{ color: '#6b7280', marginBottom: 8 }}>Loading roster…</div> : null}

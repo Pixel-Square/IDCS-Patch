@@ -2171,7 +2171,7 @@ def qp_pattern_get(request):
 
     Query params:
       class_type=THEORY|TCPR|TCPL|LAB|...
-      question_paper_type=QP1|QP2 (optional)
+      question_paper_type=QP1|QP2|ASPR|... (optional; any active QP type code)
     exam=CIA|CIA1|CIA2|MODEL
 
         Returns:
@@ -2189,8 +2189,8 @@ def qp_pattern_get(request):
     if exam not in {'CIA', 'CIA1', 'CIA2', 'MODEL'}:
         return Response({'detail': 'exam must be CIA, CIA1, CIA2, or MODEL'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if question_paper_type not in {'QP1', 'QP2'}:
-        question_paper_type = ''
+    # Allow any non-empty QP type code (QP1, QP2, ASPR, etc.) as a pattern discriminator.
+    # Empty/null means: generic pattern with no QP type filter.
     qp_type_val = question_paper_type if question_paper_type else None
 
     obj = ObeQpPatternConfig.objects.filter(class_type=class_type, question_paper_type=qp_type_val, exam=exam).first()
@@ -2230,7 +2230,7 @@ def qp_pattern_upsert(request):
     """Upsert QP pattern. IQAC/OBE master only.
 
         Body:
-            { class_type: string, question_paper_type?: 'QP1'|'QP2'|null, exam: 'CIA'|'CIA1'|'CIA2'|'MODEL', pattern: number[] | { marks: number[], cos?: (number|string)[] } }
+            { class_type: string, question_paper_type?: 'QP1'|'QP2'|'ASPR'|null, exam: 'CIA'|'CIA1'|'CIA2'|'MODEL', pattern: number[] | { marks: number[], cos?: (number|string)[] } }
     """
     auth = _require_obe_master_permission(request)
     if auth:
@@ -2249,8 +2249,8 @@ def qp_pattern_upsert(request):
     if exam not in {'CIA', 'CIA1', 'CIA2', 'MODEL'}:
         return Response({'detail': 'exam must be CIA, CIA1, CIA2, or MODEL'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if question_paper_type not in {'QP1', 'QP2'}:
-        question_paper_type = ''
+    # Allow any non-empty QP type code (QP1, QP2, ASPR, etc.) as a pattern discriminator.
+    # Empty/null means: generic pattern with no QP type filter.
     qp_type_val = question_paper_type if question_paper_type else None
 
     # Accept legacy list-only shape OR new object shape with CO mapping.

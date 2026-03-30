@@ -39,14 +39,18 @@ export type DeptRow = {
   course_code?: string | null;
   course_name?: string | null;
   class_type?: string | null;
+  // Note: Backend uses different field names for QP type:
+  // - CurriculumMaster.qp_type (legacy)
+  // - CurriculumDepartment.question_paper_type (current)
+  // Both fields may be present depending on the API endpoint
   qp_type?: string | null;
+  question_paper_type?: string | null;
   enabled_assessments?: string[];
   l?: number; t?: number; p?: number; s?: number; c?: number;
   internal_mark?: number | null;
   external_mark?: number | null;
   total_mark?: number | null;
   total_hours?: number | null;
-  question_paper_type?: string | null;
   editable?: boolean;
   overridden?: boolean;
   is_elective?: boolean;
