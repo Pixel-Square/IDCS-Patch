@@ -13,10 +13,10 @@ const DEFAULT_INTERNAL_MARK_WEIGHTS_17 = [1.5, 3.0, 2.5, 1.5, 3.0, 2.5, 1.5, 3.0
 // CO4: SSA, CIA, LAB, CIA Exam
 // ME: CO1..CO5
 const DEFAULT_INTERNAL_MARK_WEIGHTS_TCPL_21 = [
-  1.0, 3.25, 3.5, 0,
-  1.0, 3.25, 3.5, 0,
-  1.0, 3.25, 3.5, 0,
-  1.0, 3.25, 3.5, 0,
+  1.0, 3.25, 2.0, 1.5,
+  1.0, 3.25, 2.0, 1.5,
+  1.0, 3.25, 2.0, 1.5,
+  1.0, 3.25, 2.0, 1.5,
   3.0, 3.0, 3.0, 3.0, 7.0,
 ];
 
@@ -72,6 +72,17 @@ function splitCycleWeight(total: unknown, ssaW: unknown, ciaW: unknown, faW: unk
   const b = Math.round(((t * (c || 0)) / sum) * 100) / 100;
   const d = Math.round(((t * (f || 0)) / sum) * 100) / 100;
   return [a, b, d];
+}
+
+function splitLegacyTcplCombinedWeight(total: unknown): [number, number] {
+  const labDefault = Number(DEFAULT_INTERNAL_MARK_WEIGHTS_TCPL_21[2] ?? 2);
+  const ciaExamDefault = Number(DEFAULT_INTERNAL_MARK_WEIGHTS_TCPL_21[3] ?? 1.5);
+  const totalDefault = labDefault + ciaExamDefault;
+  const n = Number(total);
+  if (!Number.isFinite(n) || n <= 0) return [labDefault, ciaExamDefault];
+  const lab = Math.round(((n * labDefault) / totalDefault) * 100) / 100;
+  const ciaExam = Math.round((n - lab) * 100) / 100;
+  return [lab, ciaExam];
 }
 
 function normalizeInternalWeights(
@@ -133,7 +144,8 @@ function normalizeInternalWeights(
     const out: Array<number | string> = [];
     for (let co = 0; co < 4; co++) {
       const baseIdx = co * 3;
-      out.push(next[baseIdx] ?? '', next[baseIdx + 1] ?? '', next[baseIdx + 2] ?? '', '');
+      const [labWeight, ciaExamWeight] = splitLegacyTcplCombinedWeight(next[baseIdx + 2]);
+      out.push(next[baseIdx] ?? '', next[baseIdx + 1] ?? '', labWeight, ciaExamWeight);
     }
     out.push(...next.slice(12, 17));
     next = out;
@@ -501,7 +513,9 @@ export default function AcademicControllerWeightsPage() {
               <tbody>
                 {CLASS_TYPES.map((ctLabel) => {
                   const key = normalizeClassType(typeof ctLabel === "string" ? ctLabel : (ctLabel as any).value);
-                  const label = typeof ctLabel === "string" ? ctLabel.charAt(0).toUpperCase() + ctLabel.slice(1) : (ctLabel as any).label;
+                  const label = typeof ctLabel === "string"
+                    ? String(ctLabel).charAt(0).toUpperCase() + String(ctLabel).slice(1)
+                    : (ctLabel as any).label;
                   return (
                     <tr key={key}>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{label}</td>

@@ -178,6 +178,20 @@ export async function fetchCurriculumPendingCount(): Promise<CurriculumPendingCo
   return aggregateFromRows(rows);
 }
 
+export type QuestionPaperTypeItem = {
+  code: string;
+  label: string;
+  sort_order?: number;
+  is_active?: boolean;
+};
+
+export async function fetchQpTypes(): Promise<QuestionPaperTypeItem[]> {
+  const res = await fetchWithAuth('/api/curriculum/qp-types/');
+  if (!res.ok) throw new Error('Failed to fetch QP types');
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.results || []);
+}
+
 export async function fetchElectives(params?: { department_id?: number; regulation?: string; semester?: number }) {
   const qs = new URLSearchParams();
   if (params?.department_id) qs.set('department_id', String(params.department_id));

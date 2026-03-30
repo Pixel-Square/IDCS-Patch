@@ -1533,6 +1533,66 @@ class AttendanceAssignmentRequest(models.Model):
         return f"{self.requested_by} → {self.requested_to} for {self.section} on {self.date} [{self.status}]"
 
 
+# ---------------------------------------------------------------------------
+# External Staff Profile
+# ---------------------------------------------------------------------------
+import secrets
+import string as _string
+
+def _generate_ext_uid():
+    """Generate a unique 16-character alphanumeric ID (uppercase A-Z + digits)."""
+    alphabet = _string.ascii_uppercase + _string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(16))
+
+
+class ExtStaffProfile(models.Model):
+    """
+    Tracks external / visiting staff who do not have a full StaffProfile.
+    Each record links to an existing User account and holds a randomly generated
+    16-character alphanumeric unique identifier (ext_uid).
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ext_staff_profile',
+        help_text='The user account this external staff profile belongs to.',
+    )
+    ext_uid = models.CharField(
+        max_length=16,
+        unique=True,
+        db_index=True,
+        editable=False,
+        help_text='Auto-generated 16-character alphanumeric unique ID.',
+    )
+    designation = models.CharField(max_length=128, blank=True, default='')
+    organisation = models.CharField(max_length=255, blank=True, default='')
+    notes = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'External Staff Profile'
+        verbose_name_plural = 'External Staff Profiles'
+        ordering = ('-created_at',)
+
+    def save(self, *args, **kwargs):
+        if not self.ext_uid:
+            # Keep regenerating until we find a unique value
+            uid = _generate_ext_uid()
+            while ExtStaffProfile.objects.filter(ext_uid=uid).exists():
+                uid = _generate_ext_uid()
+            self.ext_uid = uid
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        try:
+            uname = self.user.username if self.user else '?'
+        except Exception:
+            uname = '?'
+        return f"{uname} [{self.ext_uid}]"
+
+
 # Historically the code deleted users when profiles were removed.
 # That behavior is unsafe for audit/history. Do NOT delete users when
 # profiles are removed; prefer deactivation via accounts.services.deactivate_user.

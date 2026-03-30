@@ -1932,7 +1932,36 @@ def cqi_published(request, subject_id: str):
         return Response({'published': None})
 
     snapshot = _extract_cqi_page_state(obj.entries, page_key, assessment_type, requested_co_numbers, legacy_co_numbers=obj.co_numbers)
+
+    def _build_pages_info(raw_entries):
+        """Return list of published page summaries from paged entries."""
+        _, pgs = _split_cqi_entries_payload(raw_entries or {})
+        return [
+            {
+                'key': str(pk),
+                'assessmentType': snap.get('assessmentType'),
+                'coNumbers': _normalize_cqi_co_numbers(snap.get('coNumbers', snap.get('co_numbers'))),
+                'publishedAt': snap.get('publishedAt'),
+            }
+            for pk, snap in pgs.items()
+            if isinstance(snap, dict) and snap.get('publishedAt')
+        ]
+
     if snapshot is None:
+        # When no specific page params requested and the record uses the new paged format,
+        # merge entries across all published pages so the Internal Mark view can consume them.
+        if not page_key and not assessment_type and not requested_co_numbers:
+            _, pages = _split_cqi_entries_payload(obj.entries or {})
+            if pages:
+                all_merged, merged_co_nums = _merge_cqi_page_entries(pages)
+                pub_dates = [s.get('publishedAt', '') for s in pages.values() if isinstance(s, dict) and s.get('publishedAt')]
+                latest_pub = max(pub_dates) if pub_dates else (obj.published_at.isoformat() if getattr(obj, 'published_at', None) else None)
+                return Response({'published': {
+                    'publishedAt': latest_pub,
+                    'coNumbers': merged_co_nums,
+                    'entries': all_merged,
+                    'pages': _build_pages_info(obj.entries),
+                }})
         return Response({'published': None})
 
     return Response(
@@ -1941,6 +1970,7 @@ def cqi_published(request, subject_id: str):
                 'publishedAt': snapshot.get('published_at') or (obj.published_at.isoformat() if getattr(obj, 'published_at', None) else None),
                 'coNumbers': snapshot.get('co_numbers') or obj.co_numbers or [],
                 'entries': snapshot.get('entries') or {},
+                'pages': _build_pages_info(obj.entries),
             }
         }
     )

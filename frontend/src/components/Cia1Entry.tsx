@@ -305,12 +305,12 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
   }, [classType]);
 
   const qpTypeKey = useMemo(() => {
+    // Return the code as-is; do not restrict to only QP1/QP2 so DB-managed
+    // types (ASPR, QP1 FINAL YEAR, etc.) are passed through to the API.
     const s = String(questionPaperType ?? '')
       .trim()
       .toUpperCase();
-    if (s === 'QP2') return 'QP2';
-    if (s === 'QP1') return 'QP1';
-    return '';
+    return s; // empty string means "no type" (non-THEORY classes)
   }, [questionPaperType]);
 
   useEffect(() => {

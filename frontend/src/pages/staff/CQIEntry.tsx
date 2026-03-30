@@ -20,6 +20,7 @@ import {
   fetchDraft,
   fetchIqacCqiConfig,
   fetchIqacQpPattern,
+  fetchClassTypeWeights,
   formatApiErrorMessage,
   formatEditRequestSentMessage,
 } from '../../services/obe';
@@ -29,6 +30,7 @@ import { useMarkEntryEditRequestsEnabled } from '../../utils/requestControl';
 import { useEditRequestPending } from '../../hooks/useEditRequestPending';
 import { useMarkTableLock } from '../../hooks/useMarkTableLock';
 import { useEditWindow } from '../../hooks/useEditWindow';
+import { getInternalMarkWeightSlotsForCo } from '../../utils/internalMarkWeights';
 
 interface CQIEntryProps {
   subjectId?: string;
@@ -1017,12 +1019,22 @@ export default function CQIEntry({
 
         if (!mounted) return;
 
-        // Get weights from config or use defaults (weight units match Internal Marks style)
-        const DEFAULT_WEIGHTS = { ssa: 1.5, cia: 3.0, fa: 2.5 };
-        const weights = {
-          ssa: DEFAULT_WEIGHTS.ssa,
-          cia: DEFAULT_WEIGHTS.cia,
-          fa: DEFAULT_WEIGHTS.fa,
+        const remoteClassTypeWeights = await fetchClassTypeWeights().catch(() => null);
+        const classTypeWeights = remoteClassTypeWeights && typeof remoteClassTypeWeights === 'object'
+          ? remoteClassTypeWeights
+          : (lsGet<any>('iqac_class_type_weights') || null);
+        const currentClassTypeWeights = classTypeWeights && typeof classTypeWeights === 'object'
+          ? (classTypeWeights as any)[ct] || null
+          : null;
+        const weightsForCo = (coNum: number) => {
+          const slots = getInternalMarkWeightSlotsForCo(ct, currentClassTypeWeights, coNum);
+          return {
+            ssa: slots.ssa,
+            cia: slots.cia,
+            fa: slots.fa,
+            ciaExam: slots.ciaExam,
+            me: slots.me,
+          };
         };
 
         // Get max values from master config
@@ -1044,6 +1056,27 @@ export default function CQIEntry({
           f2: { co3: Number(f2Cfg?.maxCo) || 10, co4: Number(f2Cfg?.maxCo) || 10 },
           review1: { co1: Number(review1Cfg?.coMax?.co1) || 15, co2: Number(review1Cfg?.coMax?.co2) || 15 },
           review2: { co3: Number(review2Cfg?.coMax?.co3 ?? review2Cfg?.coMax?.co1) || 15, co4: Number(review2Cfg?.coMax?.co4 ?? review2Cfg?.coMax?.co2) || 15 },
+        };
+
+        const readReviewMarkByCo = (reviewRes: any, studentId: number, coKey: 'co1' | 'co2' | 'co3' | 'co4'): number | null => {
+          const draftRows: any[] = reviewRes?.draft?.rows || reviewRes?.draft?.sheet?.rows || [];
+          const draftRow = draftRows.find((r) => String(r?.studentId) === String(studentId));
+          if (draftRow) {
+            const rawReviewCoMarks = (draftRow as any)?.reviewCoMarks?.[coKey];
+            if (Array.isArray(rawReviewCoMarks)) {
+              const total = rawReviewCoMarks.reduce<number>((sum, val) => {
+                const n = toNumOrNull(val);
+                return sum + (n == null ? 0 : n);
+              }, 0);
+              return total;
+            }
+
+            const directVal = toNumOrNull((draftRow as any)?.[coKey]);
+            if (directVal != null) return directVal;
+          }
+
+          const total = toNumOrNull(reviewRes?.marks?.[String(studentId)]);
+          return total == null ? null : Number(total) / 2;
         };
 
         const readLabAssessmentByCo = (
@@ -1167,6 +1200,23 @@ export default function CQIEntry({
               const coMax = expWeight + ciaMaxPerCo;
               const hasAny = hasExperimentMarks || (ciaPortion != null && Number.isFinite(ciaPortion));
               if (!hasAny || coMax <= 0) return null;
+              return {
+                value: clamp(expContribution + ciaContribution, 0, coMax),
+                max: coMax,
+              };
+            }
+
+            if (isTcpl) {
+              const tcplWeights = weightsForCo(coNumber);
+              const labWeight = Math.max(0, Number(tcplWeights.fa || 0));
+              const ciaExamWeight = Math.max(0, Number(tcplWeights.ciaExam || 0));
+              const ciaMaxPerCo = ciaEnabled ? defaultCiaMax / coShareCount : 0;
+              const expContribution = avgMark != null ? normalizedContribution(avgMark, Math.max(0, cfg.expMax), labWeight) : 0;
+              const ciaContribution = ciaEnabled ? normalizedContribution(ciaPortion ?? 0, ciaMaxPerCo, ciaExamWeight) : 0;
+              const coMax = labWeight + ciaExamWeight;
+              const hasAny = hasExperimentMarks || ciaPortion != null;
+              if (!hasAny || coMax <= 0) return null;
+
               return {
                 value: clamp(expContribution + ciaContribution, 0, coMax),
                 max: coMax,
@@ -1316,10 +1366,9 @@ export default function CQIEntry({
 
                 // TCPR: Review1 replaces Formative1
                 if (isTcpr) {
-                  const review1Total = toNumOrNull((review1Res as any).marks[String(student.id)]);
-                  const review1Half = review1Total == null ? null : Number(review1Total) / 2;
-                  if (review1Half != null) {
-                    reviewMark = review1Half;
+                  const review1Mark = readReviewMarkByCo(review1Res as any, student.id, coNum === 1 ? 'co1' : 'co2');
+                  if (review1Mark != null) {
+                    reviewMark = review1Mark;
                     reviewMax = coNum === 1 ? maxes.review1.co1 : maxes.review1.co2;
                   }
                 }
@@ -1403,10 +1452,9 @@ export default function CQIEntry({
 
                 // TCPR: Review2 replaces Formative2
                 if (isTcpr) {
-                  const review2Total = toNumOrNull((review2Res as any).marks[String(student.id)]);
-                  const review2Half = review2Total == null ? null : Number(review2Total) / 2;
-                  if (review2Half != null) {
-                    reviewMark = review2Half;
+                  const review2Mark = readReviewMarkByCo(review2Res as any, student.id, coNum === 3 ? 'co3' : 'co4');
+                  if (review2Mark != null) {
+                    reviewMark = review2Mark;
                     reviewMax = coNum === 3 ? maxes.review2.co3 : maxes.review2.co4;
                   }
                 }
@@ -1454,6 +1502,7 @@ export default function CQIEntry({
             }
 
             // Build component list and breakdown (only include components present)
+            const weights = weightsForCo(coNum);
             const components: Array<{ key: string; mark: number; max: number; w: number; }> = [];
             if (ssaMark !== null && ssaMax > 0) components.push({ key: 'ssa', mark: ssaMark, max: ssaMax, w: weights.ssa });
             if (ciaMark !== null && ciaMax > 0) components.push({ key: 'cia', mark: ciaMark, max: ciaMax, w: weights.cia });
@@ -1465,13 +1514,14 @@ export default function CQIEntry({
 
             if (faMark !== null && faMax > 0) {
               const key = isTcpl ? (coNum === 1 || coNum === 2 ? 'lab1' : coNum === 3 || coNum === 4 ? 'lab2' : 'fa') : 'fa';
-              components.push({ key, mark: faMark, max: faMax, w: weights.fa });
+              const tcplFaWeight = isTcpl ? Math.max(0, Number(weights.fa || 0) + Number(weights.ciaExam || 0)) : weights.fa;
+              components.push({ key, mark: faMark, max: faMax, w: tcplFaWeight });
             }
 
             if (meMark !== null && meMax > 0) {
               // For local model sheets: meMax is already 2/4 and mark is scaled to that; set w=meMax so contrib==mark.
               // For lab-like: meMax is the CO_MAX; treat it like a regular component with weight equal to meMax.
-              const meWeight = (!isLabLike && modelScaled) ? (coNum === 5 ? 4 : 2) : meMax;
+              const meWeight = weights.me > 0 ? weights.me : ((!isLabLike && modelScaled) ? (coNum === 5 ? 4 : 2) : meMax);
               components.push({ key: 'me', mark: meMark, max: meMax, w: meWeight });
             }
 

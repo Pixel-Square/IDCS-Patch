@@ -1,5 +1,6 @@
 import React from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
+import BuildingInfo from './BuildingInfo'
 
 type User = any
 
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export default function ProtectedRoute({ user, element, requiredRoles, requiredPermissions, requiredProfile }: Props){
+  const location = useLocation()
   // not authenticated -> redirect to login
   if(!user) return <Navigate to="/login" replace />
 
@@ -42,5 +44,21 @@ export default function ProtectedRoute({ user, element, requiredRoles, requiredP
   }
 
   if(!allowed) return <Navigate to="/dashboard" replace />
+
+  // Under-construction gate — checked after access is confirmed
+  try {
+    const ucState = JSON.parse(localStorage.getItem('idcs_uc_state') || '{}') as Record<string, string[]>
+    const ucRoles = ucState[location.pathname] || []
+    if (ucRoles.length > 0) {
+      const effectiveRoles = [...roles]
+      if (profile) effectiveRoles.push(profile)
+      if (ucRoles.some((r) => effectiveRoles.includes(r.toUpperCase()))) {
+        return <BuildingInfo />
+      }
+    }
+  } catch {
+    // ignore any UC state errors gracefully
+  }
+
   return element
 }

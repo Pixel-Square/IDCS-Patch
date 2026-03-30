@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, MessageCircle, Bell, ArrowRight } from 'lucide-react';
+import { Settings, MessageCircle, Bell, ArrowRight, HardHat } from 'lucide-react';
 import DashboardLayout from '../../components/layout/DashboardLayout';
 
 export default function SettingsPage() {
@@ -62,6 +62,29 @@ export default function SettingsPage() {
                 <button
                   onClick={() => navigate('/settings/notification-templates')}
                   className="mt-4 inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-md text-sm hover:bg-indigo-700 transition-colors"
+                >
+                  Open
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+          {/* Under Construction Manager */}
+          <div className="bg-white rounded-lg p-5 shadow-md hover:shadow-lg transition-shadow">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <HardHat className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-gray-500 mb-1">Under Construction Manager</div>
+                <div className="text-gray-900 font-medium">Control page availability per role</div>
+                <p className="text-sm text-gray-600 mt-2">
+                  Toggle any page into "Under Construction" mode for specific roles. Affected users
+                  will see the construction screen instead of the page.
+                </p>
+                <button
+                  onClick={() => navigate('/settings/under-construction')}
+                  className="mt-4 inline-flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-md text-sm hover:bg-amber-700 transition-colors"
                 >
                   Open
                   <ArrowRight className="w-4 h-4" />

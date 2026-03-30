@@ -1,4 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import newBannerSrc from '../assets/new_banner.png';
+import krLogoSrc from '../assets/krlogo.png';
+import idcsLogoSrc from '../assets/idcs-logo.png';
 
 import {
   fetchClassTypeWeights,
@@ -38,10 +43,18 @@ type QuestionDef34 = { key: string; max: number; co: 3 | 4 | '3&4' };
 
 type IqacPattern = { marks: number[]; cos?: Array<number | string> };
 
+type CqiPublishedPage = {
+  key: string;
+  assessmentType?: string | null;
+  coNumbers?: number[];
+  publishedAt?: string | null;
+};
+
 type CqiPublishedSnapshot = {
   publishedAt?: string;
   coNumbers?: number[];
   entries?: Record<number, Record<string, number | null>>;
+  pages?: CqiPublishedPage[];
 };
 
 const DEFAULT_INTERNAL_MAPPING = {
@@ -420,6 +433,17 @@ function tcplCoMarks(labSheet: any, co: 1 | 2, maxMarks: number) {
   return { total: averageCoTotal, attainment };
 }
 
+function splitLegacyTcplCombinedWeight(total: unknown): [number, number] {
+  const labDefault = 2;
+  const ciaExamDefault = 1.5;
+  const totalDefault = labDefault + ciaExamDefault;
+  const n = Number(total);
+  if (!Number.isFinite(n) || n <= 0) return [labDefault, ciaExamDefault];
+  const lab = Math.round(((n * labDefault) / totalDefault) * 100) / 100;
+  const ciaExam = Math.round((n - lab) * 100) / 100;
+  return [lab, ciaExam];
+}
+
 export default function InternalMarkCoursePage({ courseId, enabledAssessments, classType: classTypeProp }: Props): JSX.Element {
   const enabledSet = useMemo(() => new Set((enabledAssessments || []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean)), [enabledAssessments]);
 
@@ -471,6 +495,7 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments, c
 
   const [cqiPublished, setCqiPublished] = useState<CqiPublishedSnapshot | null>(null);
   const [cqiGlobalCfg, setCqiGlobalCfg] = useState<{ divider: number; multiplier: number } | null>(null);
+  const [activeTab, setActiveTab] = useState<'actual' | 'after-cqi'>('actual');
 
   useEffect(() => {
     let mounted = true;
@@ -693,7 +718,8 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments, c
               const upgraded: number[] = [];
               for (let co = 0; co < 4; co++) {
                 const base = co * 3;
-                upgraded.push(arr[base] ?? 0, arr[base + 1] ?? 0, arr[base + 2] ?? 0, 0);
+                const [labWeight, ciaExamWeight] = splitLegacyTcplCombinedWeight(arr[base + 2]);
+                upgraded.push(arr[base] ?? 0, arr[base + 1] ?? 0, labWeight, ciaExamWeight);
               }
               upgraded.push(...arr.slice(12, 17));
               arr = upgraded;
@@ -706,7 +732,9 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments, c
             }
             setInternalMarkWeights(arr.slice(0, slotLen));
           } else {
-            setInternalMarkWeights([...DEFAULT_INTERNAL_MAPPING.weights]);
+            setInternalMarkWeights(ct === 'TCPL'
+              ? [1, 3.25, 2, 1.5, 1, 3.25, 2, 1.5, 1, 3.25, 2, 1.5, 1, 3.25, 2, 1.5, 3, 3, 3, 3, 7]
+              : [...DEFAULT_INTERNAL_MAPPING.weights]);
           }
           return true;
         };
@@ -1932,6 +1960,285 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments, c
   const cycles = displayCols.map((c) => c.cycle);
   const weightsRow = displayCols.map((c) => c.weight);
 
+  // ── Export state ──────────────────────────────────────────
+  type ExportStep = 'closed' | 'type' | 'columns';
+  const [exportStep, setExportStep] = useState<ExportStep>('closed');
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  // Each selectable column: fixed ones + all display cols
+  type ExportCol = { key: string; label: string; enabled: boolean };
+  const allExportCols: ExportCol[] = useMemo(() => [
+    { key: '__sno', label: 'S.No', enabled: true },
+    { key: '__reg', label: 'Register No.', enabled: true },
+    { key: '__name', label: 'Name', enabled: true },
+    ...displayCols.map((c, i) => ({
+      key: c.key || `col-${i}`,
+      label: c.header + (c.cycle ? ` (${c.cycle})` : ''),
+      enabled: true,
+    })),
+    { key: '__total', label: `Total (${round2(maxTotal)})`, enabled: true },
+    { key: '__pct', label: '% (100)', enabled: true },
+  ], [displayCols, maxTotal]);
+
+  const [exportCols, setExportCols] = useState<ExportCol[]>([]);
+  // Sync when displayCols change
+  const exportColsRef = useRef<ExportCol[]>([]);
+  useMemo(() => {
+    exportColsRef.current = allExportCols;
+    setExportCols(allExportCols.map((c) => ({ ...c })));
+  }, [allExportCols]);
+
+  const toggleExportCol = (key: string) => {
+    setExportCols((prev) => prev.map((c) => c.key === key ? { ...c, enabled: !c.enabled } : c));
+  };
+  const toggleAllExportCols = (val: boolean) => {
+    setExportCols((prev) => prev.map((c) => ({ ...c, enabled: val })));
+  };
+
+  // ── PDF generation helpers (same pattern as CardsDataPage) ──
+  async function toBase64Img(src: string): Promise<string> {
+    const res = await fetch(src);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function imgNaturalSize(b64: string): Promise<{ w: number; h: number }> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.src = b64;
+    });
+  }
+
+  // Compute effective row values respecting the active tab / CQI
+  const computeEffectiveRows = () => {
+    const entries = (cqiPublished?.entries && typeof cqiPublished.entries === 'object') ? cqiPublished.entries : {};
+    return computedRows.map((r: any) => {
+      const studentEntry: any = (entries as any)?.[r.id] || {};
+      const mergedColsForRule = displayCols.filter((c) => c.isMerged && c.co != null && publishedCoSet.has(Number(c.co)));
+      let tv = 0, tm = 0;
+      for (const c of mergedColsForRule) {
+        const base = getDisplayValue(r.cells, c as any);
+        const mx = Number((c as any).weight) || 0;
+        if (base != null && Number.isFinite(base)) tv += Number(base);
+        if (Number.isFinite(mx) && mx > 0) tm += mx;
+      }
+      const totalPct = tm ? (tv / tm) * 100 : 0;
+      let cqiAdded = 0;
+      if (activeTab === 'after-cqi') {
+        for (const col of displayCols) {
+          if (col.isMerged && col.co != null && publishedCoSet.has(Number(col.co))) {
+            const base = getDisplayValue(r.cells, col);
+            const coMax = Number(col.weight) || 0;
+            const input = studentEntry?.[`co${col.co}`];
+            if (base != null && Number.isFinite(base) && coMax > 0) {
+              const add = computeCqiAdd({ coValue: Number(base), coMax, totalPct, input: input == null ? null : Number(input) });
+              if (add > 0) cqiAdded = round2(cqiAdded + add);
+            }
+          }
+        }
+      }
+      const colVals = displayCols.map((col) => {
+        let val = getDisplayValue(r.cells, col);
+        if (activeTab === 'after-cqi' && col.isMerged && col.co != null && publishedCoSet.has(Number(col.co))) {
+          const base = val;
+          const coMax = Number(col.weight) || 0;
+          const input = studentEntry?.[`co${col.co}`];
+          if (base != null && Number.isFinite(base) && coMax > 0) {
+            const add = computeCqiAdd({ coValue: Number(base), coMax, totalPct, input: input == null ? null : Number(input) });
+            if (add > 0) val = clamp(round2(Number(base) + add), 0, coMax);
+          }
+        }
+        return val;
+      });
+      const effTotal = r.total != null && cqiAdded > 0 ? clamp(round2(r.total + cqiAdded), 0, maxTotal) : r.total;
+      const effPct = effTotal != null && maxTotal ? round2((effTotal / maxTotal) * 100) : r.pct;
+      return { ...r, colVals, effTotal, effPct };
+    });
+  };
+
+  const handleExportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const selectedKeys = new Set(exportCols.filter((c) => c.enabled).map((c) => c.key));
+      const showSno = selectedKeys.has('__sno');
+      const showReg = selectedKeys.has('__reg');
+      const showName = selectedKeys.has('__name');
+      const showTotal = selectedKeys.has('__total');
+      const showPct = selectedKeys.has('__pct');
+      const colIdxEnabled = displayCols.map((c, i) => selectedKeys.has(c.key || `col-${i}`));
+
+      const sectionLabel = (() => {
+        const ta = tas.find((t) => t.id === selectedTaId);
+        if (!ta) return '';
+        const dept = (ta as any).department;
+        const deptLabel = dept?.short_name || dept?.code || dept?.name || (ta as any).department_name || '';
+        const sem = (ta as any).semester;
+        return `${ta.section_name || `TA ${ta.id}`}${sem ? ` · Sem ${sem}` : ''}${deptLabel ? ` · ${deptLabel}` : ''}`;
+      })();
+
+      const [b64Banner, b64Kr, b64Idcs] = await Promise.all([
+        toBase64Img(newBannerSrc).catch(() => ''),
+        toBase64Img(krLogoSrc).catch(() => ''),
+        toBase64Img(idcsLogoSrc).catch(() => ''),
+      ]);
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const PW = 297;
+      const PH = 210;
+      const ML = 10;
+      const MR = 10;
+      const UW = PW - ML - MR;
+      const HEADER_H = 24;
+      let curY = 10;
+
+      const wm = await (async () => {
+        if (!b64Kr) return null;
+        const { w, h } = await imgNaturalSize(b64Kr);
+        const wmW = 120;
+        const wmH = (h / w) * wmW;
+        return { wmW, wmH };
+      })();
+
+      const applyWatermark = () => {
+        if (!b64Kr || !wm) return;
+        const pageCount = doc.getNumberOfPages();
+        for (let page = 1; page <= pageCount; page++) {
+          doc.setPage(page);
+          const cx = (PW - wm.wmW) / 2;
+          const cy = (PH - wm.wmH) / 2;
+          doc.setGState(new (doc as any).GState({ opacity: 0.07 }));
+          doc.addImage(b64Kr, 'PNG', cx, cy, wm.wmW, wm.wmH);
+          doc.setGState(new (doc as any).GState({ opacity: 1 }));
+        }
+      };
+
+      const drawHeader = async () => {
+        let maxY = curY;
+        if (b64Banner) {
+          const { w, h } = await imgNaturalSize(b64Banner);
+          let bh = HEADER_H;
+          let bw = (w / h) * bh;
+          if (bw > UW - 35) { bw = UW - 35; bh = (h / w) * bw; }
+          doc.addImage(b64Banner, 'PNG', ML, curY, bw, bh);
+          maxY = Math.max(maxY, curY + bh);
+        }
+        if (b64Kr) {
+          const krWg = 16;
+          const { w, h } = await imgNaturalSize(b64Kr);
+          const krHg = (h / w) * krWg;
+          doc.addImage(b64Kr, 'PNG', PW - MR - krWg - 13, curY, krWg, krHg);
+        }
+        if (b64Idcs) {
+          doc.addImage(b64Idcs, 'PNG', PW - MR - 11, curY + 2, 11, 11);
+        }
+        curY = maxY + 4;
+        doc.setLineWidth(0.3);
+        doc.setDrawColor(200, 200, 200);
+        doc.line(ML, curY, PW - MR, curY);
+        curY += 6;
+      };
+
+      await drawHeader();
+
+      // Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.text('INTERNAL MARK REPORT', PW / 2, curY, { align: 'center' });
+      curY += 7;
+
+      // Meta row
+      autoTable(doc, {
+        startY: curY,
+        theme: 'plain',
+        tableWidth: 140,
+        margin: { left: PW / 2 - 70 },
+        styles: { fontSize: 9, cellPadding: 1, textColor: [50, 50, 50] },
+        columnStyles: { 0: { fontStyle: 'bold', minCellWidth: 35 }, 1: { minCellWidth: 105 } },
+        body: [
+          ['Course:', courseId],
+          ['Section:', sectionLabel],
+          ['View:', activeTab === 'after-cqi' ? 'After CQI' : 'Actual'],
+          ['Date:', new Date().toLocaleDateString('en-GB')],
+        ],
+      });
+      curY = (doc as any).lastAutoTable.finalY + 6;
+
+      // Build table columns & rows
+      // Three header rows: CO label, weightage, cycle
+      const headRow1: string[] = [];
+      const headRow2: string[] = [];
+      const headRow3: string[] = [];
+
+      if (showSno) { headRow1.push('S.No'); headRow2.push(''); headRow3.push(''); }
+      if (showReg) { headRow1.push('Register No.'); headRow2.push(''); headRow3.push(''); }
+      if (showName) { headRow1.push('Name'); headRow2.push(''); headRow3.push(''); }
+      displayCols.forEach((c, i) => {
+        if (!colIdxEnabled[i]) return;
+        headRow1.push(c.header);
+        headRow2.push(Number(c.weight).toFixed(1));
+        headRow3.push(c.cycle);
+      });
+      if (showTotal) { headRow1.push(String(round2(maxTotal))); headRow2.push(''); headRow3.push(''); }
+      if (showPct) { headRow1.push('100'); headRow2.push(''); headRow3.push(''); }
+
+      const effRows = computeEffectiveRows();
+      const tableBody = effRows.map((r: any) => {
+        const row: string[] = [];
+        if (showSno) row.push(String(r.sno));
+        if (showReg) row.push(String(r.reg_no));
+        if (showName) row.push(String(r.name));
+        displayCols.forEach((_, i) => {
+          if (!colIdxEnabled[i]) return;
+          const v = r.colVals[i];
+          row.push(v == null ? '' : Number(v).toFixed(2));
+        });
+        if (showTotal) row.push(r.effTotal == null ? '' : Number(r.effTotal).toFixed(2));
+        if (showPct) row.push(r.effPct == null ? '' : Number(r.effPct).toFixed(2));
+        return row;
+      });
+
+      autoTable(doc, {
+        startY: curY,
+        head: [headRow1, headRow2, headRow3],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: { fillColor: [29, 78, 216], textColor: 255, fontStyle: 'bold', fontSize: 7, halign: 'center' },
+        styles: { fontSize: 7, cellPadding: 2, halign: 'center' },
+        columnStyles: showName ? { [showSno ? 2 : showReg ? 1 : 0]: { halign: 'left', minCellWidth: 30 } } : {},
+        alternateRowStyles: { fillColor: [249, 250, 251] },
+        didParseCell: (data) => {
+          if (data.section === 'head' && data.row.index === 0) {
+            data.cell.styles.fillColor = [29, 78, 216];
+          } else if (data.section === 'head' && data.row.index === 1) {
+            data.cell.styles.fillColor = [99, 102, 241];
+            data.cell.styles.fontSize = 6;
+          } else if (data.section === 'head' && data.row.index === 2) {
+            data.cell.styles.fillColor = [165, 180, 252];
+            data.cell.styles.textColor = [30, 27, 75];
+            data.cell.styles.fontSize = 6;
+          }
+        },
+      });
+
+      applyWatermark();
+
+      const filename = `InternalMark_${courseId}_${sectionLabel.replace(/[^a-zA-Z0-9]/g, '_')}_${activeTab === 'after-cqi' ? 'AfterCQI_' : ''}${new Date().toISOString().slice(0, 10)}.pdf`;
+      doc.save(filename);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to generate PDF');
+    } finally {
+      setExportingPdf(false);
+      setExportStep('closed');
+    }
+  };
+
   return (
     <div style={{ padding: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -1940,6 +2247,12 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments, c
           <div style={{ color: '#6b7280', marginTop: 4 }}>Summative + Formative (based on IQAC mapping)</div>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            onClick={() => setExportStep('type')}
+            style={{ padding: '8px 16px', background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            ↓ Export
+          </button>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ color: '#374151', fontWeight: 700 }}>Section</span>
             <select value={selectedTaId ?? ''} onChange={(e) => setSelectedTaId(e.target.value ? Number(e.target.value) : null)} style={{ padding: 8, borderRadius: 8, border: '1px solid #d1d5db' }}>
@@ -1958,10 +2271,86 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments, c
         </div>
       </div>
 
+      {/* Slider Tab Bar */}
+      <div style={{ position: 'relative', display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, marginBottom: 16, width: 'fit-content' }}>
+        <div
+          style={{
+            position: 'absolute',
+            top: 4,
+            left: activeTab === 'actual' ? 4 : 'calc(50% + 2px)',
+            width: 'calc(50% - 6px)',
+            height: 'calc(100% - 8px)',
+            background: '#fff',
+            borderRadius: 8,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+            transition: 'left 0.25s cubic-bezier(.4,0,.2,1)',
+          }}
+        />
+        <button
+          onClick={() => setActiveTab('actual')}
+          style={{
+            position: 'relative', zIndex: 1, padding: '8px 28px', border: 'none',
+            background: 'transparent', cursor: 'pointer',
+            fontWeight: activeTab === 'actual' ? 600 : 400,
+            color: activeTab === 'actual' ? '#1d4ed8' : '#6b7280',
+            borderRadius: 8, fontSize: 14, transition: 'color 0.2s', whiteSpace: 'nowrap',
+          }}
+        >
+          Actual
+        </button>
+        <button
+          onClick={() => setActiveTab('after-cqi')}
+          style={{
+            position: 'relative', zIndex: 1, padding: '8px 28px', border: 'none',
+            background: 'transparent', cursor: 'pointer',
+            fontWeight: activeTab === 'after-cqi' ? 600 : 400,
+            color: activeTab === 'after-cqi' ? '#1d4ed8' : '#6b7280',
+            borderRadius: 8, fontSize: 14, transition: 'color 0.2s', whiteSpace: 'nowrap',
+          }}
+        >
+          After CQI
+        </button>
+      </div>
+
       {taError ? <div style={{ color: '#b91c1c', marginBottom: 8 }}>{taError}</div> : null}
       {rosterError ? <div style={{ color: '#b91c1c', marginBottom: 8 }}>{rosterError}</div> : null}
       {dataError ? <div style={{ color: '#b91c1c', marginBottom: 8 }}>{dataError}</div> : null}
       {loadingRoster || loadingData ? <div style={{ color: '#6b7280', marginBottom: 8 }}>Loading…</div> : null}
+
+      {activeTab === 'after-cqi' && !cqiPublished && (
+        <div style={{ padding: '12px 16px', background: '#f0f9ff', borderRadius: 8, border: '1px solid #bae6fd', color: '#0c4a6e', marginBottom: 12, fontSize: 13 }}>
+          CQI has not been published yet for this section. Once CQI is published, the combined marks will appear here.
+        </div>
+      )}
+      {activeTab === 'after-cqi' && cqiPublished && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          {(cqiPublished.pages && cqiPublished.pages.length > 0)
+            ? cqiPublished.pages.map((pg) => {
+                const coLabel = (pg.coNumbers || []).map((n) => `CO${n}`).join(', ');
+                const typeLabel = pg.assessmentType ? pg.assessmentType.toUpperCase() : '';
+                const label = typeLabel && coLabel ? `${typeLabel} (${coLabel})` : coLabel || typeLabel || pg.key;
+                return (
+                  <span key={pg.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#dcfce7', color: '#166534', borderRadius: 20, padding: '4px 14px', fontWeight: 600, fontSize: 12, border: '1px solid #86efac' }}>
+                    ✓ {label} Published
+                    {pg.publishedAt && (
+                      <span style={{ fontWeight: 400, color: '#4b5563', fontSize: 11 }}>
+                        · {new Date(pg.publishedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </span>
+                );
+              })
+            : (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#dcfce7', color: '#166534', borderRadius: 20, padding: '4px 14px', fontWeight: 600, fontSize: 12, border: '1px solid #86efac' }}>
+                ✓ CQI Published
+                {cqiPublished.publishedAt && (
+                  <span style={{ fontWeight: 400, color: '#4b5563', fontSize: 11 }}>· {new Date(cqiPublished.publishedAt).toLocaleDateString()}</span>
+                )}
+              </span>
+            )
+          }
+        </div>
+      )}
 
       <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
         <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
@@ -2042,47 +2431,139 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments, c
                   }
                   const totalPct = totalMax ? (totalValue / totalMax) * 100 : 0;
 
-                  return displayCols.map((col, i) => {
-                    let val = getDisplayValue(r.cells, col);
-                    let changed = false;
-
-                    if (col.isMerged && col.co != null && publishedCoSet.has(Number(col.co))) {
-                      const base = val;
-                      const coMax = Number(col.weight) || 0;
-                      const input = studentEntry?.[`co${col.co}`];
-                      if (base != null && Number.isFinite(base) && coMax > 0) {
-                        const add = computeCqiAdd({ coValue: Number(base), coMax, totalPct, input: input == null ? null : Number(input) });
-                        if (add > 0) {
-                          changed = true;
-                          val = clamp(round2(Number(base) + add), 0, coMax);
+                  // Pre-compute total CQI addition for this row (so total/pct cols can reflect it).
+                  let cqiTotalAdded = 0;
+                  if (activeTab === 'after-cqi') {
+                    for (const col of displayCols) {
+                      if (col.isMerged && col.co != null && publishedCoSet.has(Number(col.co))) {
+                        const base = getDisplayValue(r.cells, col);
+                        const coMax = Number(col.weight) || 0;
+                        const input = studentEntry?.[`co${col.co}`];
+                        if (base != null && Number.isFinite(base) && coMax > 0) {
+                          const add = computeCqiAdd({ coValue: Number(base), coMax, totalPct, input: input == null ? null : Number(input) });
+                          if (add > 0) cqiTotalAdded = round2(cqiTotalAdded + add);
                         }
                       }
                     }
+                  }
 
-                    return (
-                      <td
-                        key={col.key || i}
-                        style={{
-                          border: '1px solid #e5e7eb',
-                          padding: 6,
-                          textAlign: 'center',
-                          fontWeight: changed ? 900 : undefined,
-                          color: changed ? '#16a34a' : undefined,
-                          background: changed ? '#f0fdf4' : undefined,
-                        }}
-                      >
-                        {val == null ? '' : Number(val).toFixed(2)}
+                  const effectiveTotal = (r.total != null && cqiTotalAdded > 0)
+                    ? clamp(round2(r.total + cqiTotalAdded), 0, maxTotal)
+                    : r.total;
+                  const effectivePct = (effectiveTotal != null && maxTotal)
+                    ? round2((effectiveTotal / maxTotal) * 100)
+                    : r.pct;
+                  const totalChanged = cqiTotalAdded > 0;
+
+                  return (
+                    <>
+                      {displayCols.map((col, i) => {
+                        let val = getDisplayValue(r.cells, col);
+                        let changed = false;
+
+                        if (activeTab === 'after-cqi' && col.isMerged && col.co != null && publishedCoSet.has(Number(col.co))) {
+                          const base = val;
+                          const coMax = Number(col.weight) || 0;
+                          const input = studentEntry?.[`co${col.co}`];
+                          if (base != null && Number.isFinite(base) && coMax > 0) {
+                            const add = computeCqiAdd({ coValue: Number(base), coMax, totalPct, input: input == null ? null : Number(input) });
+                            if (add > 0) {
+                              changed = true;
+                              val = clamp(round2(Number(base) + add), 0, coMax);
+                            }
+                          }
+                        }
+
+                        return (
+                          <td
+                            key={col.key || i}
+                            style={{
+                              border: '1px solid #e5e7eb',
+                              padding: 6,
+                              textAlign: 'center',
+                              fontWeight: changed ? 900 : undefined,
+                              color: changed ? '#16a34a' : undefined,
+                              background: changed ? '#f0fdf4' : undefined,
+                            }}
+                          >
+                            {val == null ? '' : Number(val).toFixed(2)}
+                          </td>
+                        );
+                      })}
+                      <td style={{ border: '1px solid #e5e7eb', padding: 6, textAlign: 'center', fontWeight: 800, color: totalChanged ? '#16a34a' : undefined, background: totalChanged ? '#f0fdf4' : undefined }}>
+                        {effectiveTotal == null ? '' : Number(effectiveTotal).toFixed(2)}
                       </td>
-                    );
-                  });
+                      <td style={{ border: '1px solid #e5e7eb', padding: 6, textAlign: 'center', color: totalChanged ? '#16a34a' : undefined, background: totalChanged ? '#f0fdf4' : undefined }}>
+                        {effectivePct == null ? '' : Number(effectivePct).toFixed(2)}
+                      </td>
+                    </>
+                  );
                 })()}
-                <td style={{ border: '1px solid #e5e7eb', padding: 6, textAlign: 'center', fontWeight: 800 }}>{r.total == null ? '' : Number(r.total).toFixed(2)}</td>
-                <td style={{ border: '1px solid #e5e7eb', padding: 6, textAlign: 'center' }}>{r.pct == null ? '' : Number(r.pct).toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* ── Export Modal ── */}
+      {exportStep !== 'closed' && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 28, minWidth: 360, maxWidth: 480, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', position: 'relative' }}>
+            <button onClick={() => setExportStep('closed')} style={{ position: 'absolute', top: 12, right: 14, border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>×</button>
+
+            {exportStep === 'type' && (
+              <>
+                <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Export As</h3>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <button
+                    onClick={() => setExportStep('columns')}
+                    style={{ flex: 1, padding: '14px 0', background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 14 }}
+                  >
+                    📄 PDF
+                  </button>
+                  <button
+                    disabled
+                    title="Coming soon"
+                    style={{ flex: 1, padding: '14px 0', background: '#f3f4f6', color: '#9ca3af', border: '1px solid #e5e7eb', borderRadius: 8, cursor: 'not-allowed', fontWeight: 700, fontSize: 14 }}
+                  >
+                    📊 Excel
+                    <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2 }}>Coming Soon</div>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {exportStep === 'columns' && (
+              <>
+                <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>Select Columns</h3>
+                <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 12 }}>Choose which columns to include in the PDF</div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                  <button onClick={() => toggleAllExportCols(true)} style={{ fontSize: 12, padding: '4px 10px', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', background: '#f9fafb' }}>Select All</button>
+                  <button onClick={() => toggleAllExportCols(false)} style={{ fontSize: 12, padding: '4px 10px', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', background: '#f9fafb' }}>Deselect All</button>
+                </div>
+                <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 12px', marginBottom: 16 }}>
+                  {exportCols.map((col) => (
+                    <label key={col.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', cursor: 'pointer', fontSize: 13 }}>
+                      <input type="checkbox" checked={col.enabled} onChange={() => toggleExportCol(col.key)} />
+                      {col.label}
+                    </label>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setExportStep('type')} style={{ padding: '8px 18px', border: '1px solid #d1d5db', borderRadius: 8, cursor: 'pointer', background: '#fff', fontSize: 13 }}>Back</button>
+                  <button
+                    onClick={handleExportPdf}
+                    disabled={exportingPdf || exportCols.every((c) => !c.enabled)}
+                    style={{ padding: '8px 20px', background: exportingPdf ? '#93c5fd' : '#1d4ed8', color: '#fff', border: 'none', borderRadius: 8, cursor: exportingPdf ? 'default' : 'pointer', fontWeight: 700, fontSize: 13 }}
+                  >
+                    {exportingPdf ? 'Generating…' : '↓ Download PDF'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

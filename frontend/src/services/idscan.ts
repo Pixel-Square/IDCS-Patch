@@ -110,6 +110,9 @@ export type CardDataRow = {
   username: string
   name?: string
   department: string | null
+  section?: string | null
+  batch?: string | null
+  semester?: number | null
   profile_image_url?: string | null
   rfid_uid: string | null
   status: 'Connected' | 'Not Connected'

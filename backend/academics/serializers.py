@@ -1370,3 +1370,66 @@ class StaffProfileSerializer(serializers.ModelSerializer):
                     logger.info(f"Deactivating department role {dept_role_type} for staff {staff_instance.staff_id} in {staff_department.code}")
                     deactivated_roles.update(is_active=False)
  
+
+
+# ---------------------------------------------------------------------------
+# ExtStaffProfile serializer
+# ---------------------------------------------------------------------------
+from .models import ExtStaffProfile as _ExtStaffProfile  # noqa: E402
+from django.contrib.auth import get_user_model as _get_user_model
+
+
+class ExtStaffProfileSerializer(serializers.ModelSerializer):
+    user_id = serializers.PrimaryKeyRelatedField(
+        source='user',
+        queryset=_get_user_model().objects.all(),
+        write_only=True,
+    )
+    username = serializers.SerializerMethodField(read_only=True)
+    email = serializers.SerializerMethodField(read_only=True)
+    full_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = _ExtStaffProfile
+        fields = [
+            'id',
+            'user_id',
+            'ext_uid',
+            'username',
+            'email',
+            'full_name',
+            'designation',
+            'organisation',
+            'notes',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'ext_uid', 'username', 'email', 'full_name', 'created_at', 'updated_at']
+
+    def get_username(self, obj):
+        try:
+            return obj.user.username
+        except Exception:
+            return ''
+
+    def get_email(self, obj):
+        try:
+            return obj.user.email
+        except Exception:
+            return ''
+
+    def get_full_name(self, obj):
+        try:
+            return obj.user.get_full_name() or obj.user.username
+        except Exception:
+            return ''
+
+    def validate(self, attrs):
+        user = attrs.get('user')
+        if user is None:
+            return attrs
+        if self.instance is None:
+            if _ExtStaffProfile.objects.filter(user=user).exists():
+                raise serializers.ValidationError({'user_id': 'This user already has an External Staff Profile.'})
+        return attrs

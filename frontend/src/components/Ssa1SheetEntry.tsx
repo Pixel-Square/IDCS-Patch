@@ -218,6 +218,8 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
     co2: Number.isFinite(Number(ssa1Cfg?.coMax?.co2)) ? Number(ssa1Cfg.coMax.co2) : DEFAULT_CO_MAX.co2,
   };
   const CO_MAX = isReview ? { co1: 15, co2: 15 } : CO_MAX_BASE;
+  const reviewCfg = isReview ? ((((masterCfg as any)?.review_config || {}).TCPR || {})[assessmentKey] || {}) : null;
+  const reviewSplitEnabled = Boolean(isReview && (reviewCfg as any)?.split_enabled);
   const BTL_MAX = {
     btl1: getBtlMaxFromCfg(ssa1Cfg, 1, DEFAULT_BTL_MAX.btl1),
     btl2: getBtlMaxFromCfg(ssa1Cfg, 2, DEFAULT_BTL_MAX.btl2),
@@ -418,13 +420,13 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
   }, [visibleBtlIndices.length, showTotalColumn]);
 
   const totalTableCols = useMemo(() => {
-    if (!isReview) return publishedTableCols;
+    if (!isReview || !reviewSplitEnabled) return publishedTableCols;
     const raw = ((sheet as any)?.coSplitMax || {}) as { co1?: Array<number | ''>; co2?: Array<number | ''> };
     const co1Cols = Math.max(1, Array.isArray(raw.co1) ? Math.min(raw.co1.length, 15) : 0);
     const co2Cols = Math.max(1, Array.isArray(raw.co2) ? Math.min(raw.co2.length, 15) : 0);
     const fixed = showTotalColumn ? 5 : 4; // SNo, RegNo, Name, SSA(+optional Total)
     return fixed + (co1Cols + co2Cols) * 2 + visibleBtlIndices.length * 2;
-  }, [isReview, publishedTableCols, sheet, showTotalColumn, visibleBtlIndices.length]);
+  }, [isReview, publishedTableCols, reviewSplitEnabled, sheet, showTotalColumn, visibleBtlIndices.length]);
 
   const hasAbsentees = useMemo(() => {
     try {
@@ -1570,7 +1572,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
             if (rawMark == null) return null;
             const coMax = coKey === 'co1' ? CO_MAX.co1 : CO_MAX.co2;
             const n0 = clamp(Math.trunc(rawMark), 0, coMax);
-            const splitCfgRaw = ((sheet as any)?.coSplitMax || {}) as { co1?: Array<number | ''>; co2?: Array<number | ''> };
+            const splitCfgRaw = reviewSplitEnabled ? (((sheet as any)?.coSplitMax || {}) as { co1?: Array<number | ''>; co2?: Array<number | ''> }) : {};
             const capsRaw = (coKey === 'co1' ? splitCfgRaw.co1 : splitCfgRaw.co2) || [];
             const count = Math.max(1, Array.isArray(capsRaw) ? capsRaw.length : 0);
             const caps = Array.from({ length: count }).map((_, i) => {
@@ -1782,8 +1784,8 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
   // Split config is a header-level setting; keep it editable even if the
   // student mark table is blocked by Mark Manager gating.
   const splitEditDisabled = Boolean(globalLocked || publishedEditLocked);
-  const co1Splits = isReview ? safeSplitArr((coSplitMax as any)?.co1, CO_MAX.co1) : ([] as Array<number | ''>);
-  const co2Splits = isReview ? safeSplitArr((coSplitMax as any)?.co2, CO_MAX.co2) : ([] as Array<number | ''>);
+  const co1Splits = isReview && reviewSplitEnabled ? safeSplitArr((coSplitMax as any)?.co1, CO_MAX.co1) : ([] as Array<number | ''>);
+  const co2Splits = isReview && reviewSplitEnabled ? safeSplitArr((coSplitMax as any)?.co2, CO_MAX.co2) : ([] as Array<number | ''>);
   const co1SplitRowCount = isReview ? co1Splits.length : 0;
   const co2SplitRowCount = isReview ? co2Splits.length : 0;
   const reviewCo1ColumnCount = isReview ? Math.max(1, co1SplitRowCount) : 1;
@@ -1794,6 +1796,14 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
   const reviewSplitsOk = !isReview || (co1TotalSplit <= CO_MAX.co1 + 1e-6 && co2TotalSplit <= CO_MAX.co2 + 1e-6);
 
   const normalizeReviewMarks = (raw: any, count: number, coMax: number): Array<number | ''> => {
+    if (!reviewSplitEnabled) {
+      const total = (Array.isArray(raw) ? raw : []).reduce<number>((acc, v) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? acc + Math.trunc(n) : acc;
+      }, 0);
+      return [clamp(total, 0, coMax)];
+    }
+
     const arr = padTo(
       (Array.isArray(raw) ? raw.slice(0, count) : []).map((v) => {
         if (v === '') return '';
@@ -1940,6 +1950,10 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
   };
 
   const renderCoSplitHeaderCell = (coKey: 'co1' | 'co2', coMax: number, total: number) => {
+    if (!reviewSplitEnabled) {
+      return <div style={{ fontWeight: 900, fontSize: 12 }}>{coMax}</div>;
+    }
+
     const arr = coKey === 'co1' ? co1Splits : co2Splits;
     const rowCount = coKey === 'co1' ? reviewCo1ColumnCount : reviewCo2ColumnCount;
     const last = arr.length ? arr[arr.length - 1] : '';
@@ -2173,7 +2187,9 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
                       </ul>
                       {isReview ? (
                         <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
-                          For TCPR Review sheets, Q1/Q2 are imported into the Review CO columns (split rows are auto-filled from left to right).
+                          {reviewSplitEnabled
+                            ? 'For TCPR Review sheets, Q1/Q2 are imported into the Review CO columns (split rows are auto-filled from left to right).'
+                            : 'For TCPR Review sheets, Q1/Q2 are imported directly into the Review CO columns.'}
                         </div>
                       ) : null}
                       <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
@@ -2600,7 +2616,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
                     <th style={cellTh}>Name / Max Marks</th>
                     <th style={cellTh}>{MAX_ASMT1}</th>
                     {showTotalColumn ? <th style={cellTh}>{MAX_ASMT1}</th> : null}
-                    {isReview
+                    {isReview && reviewSplitEnabled
                       ? Array.from({ length: reviewCo1ColumnCount }).flatMap((_, i) => {
                           const v = i < co1Splits.length ? co1Splits[i] : CO_MAX.co1;
                           return [
@@ -2624,7 +2640,7 @@ export default function Ssa1SheetEntry({ subjectId, teachingAssignmentId, label,
                           <th key="co1-max" style={cellTh}>{CO_MAX.co1}</th>,
                           <th key="co1-pct" style={cellTh}>%</th>,
                         ]}
-                    {isReview
+                    {isReview && reviewSplitEnabled
                       ? Array.from({ length: reviewCo2ColumnCount }).flatMap((_, i) => {
                           const v = i < co2Splits.length ? co2Splits[i] : CO_MAX.co2;
                           return [

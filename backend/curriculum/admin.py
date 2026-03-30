@@ -10,6 +10,7 @@ from .models import (
     DepartmentGroup,
     DepartmentGroupMapping,
     SPECIAL_ASSESSMENT_CHOICES,
+    QuestionPaperType,
 )
 from django.urls import path
 from django.template.response import TemplateResponse
@@ -55,9 +56,21 @@ class CurriculumMasterAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Populate question_paper_type choices dynamically from the QuestionPaperType table
+        try:
+            qp_choices = [('', '---------')] + [
+                (qt.code, qt.label)
+                for qt in QuestionPaperType.objects.filter(is_active=True).order_by('sort_order', 'code')
+            ]
+            self.fields['question_paper_type'].widget = forms.Select(choices=qp_choices)
+            self.fields['question_paper_type'].widget.attrs.update({'class': 'vTextField'})
+        except Exception:
+            pass
         inst = getattr(self, 'instance', None)
         if inst and getattr(inst, 'enabled_assessments', None):
             self.fields['enabled_assessments'].initial = list(inst.enabled_assessments or [])
+
+
 
     def clean_enabled_assessments(self):
         vals = self.cleaned_data.get('enabled_assessments') or []
@@ -302,10 +315,29 @@ class RegulationFilter(SimpleListFilter):
         return queryset
 
 
+class CurriculumDepartmentAdminForm(forms.ModelForm):
+    class Meta:
+        model = CurriculumDepartment
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        try:
+            qp_choices = [('', '---------')] + [
+                (qt.code, qt.label)
+                for qt in QuestionPaperType.objects.filter(is_active=True).order_by('sort_order', 'code')
+            ]
+            self.fields['question_paper_type'].widget = forms.Select(choices=qp_choices)
+            self.fields['question_paper_type'].widget.attrs.update({'class': 'vTextField'})
+        except Exception:
+            pass
+
+
 @admin.register(CurriculumDepartment)
 class CurriculumDepartmentAdmin(admin.ModelAdmin):
-    list_display = ('department', 'regulation', 'semester', 'batch', 'course_code', 'mnemonic', 'course_name', 'is_elective', 'is_dept_core', 'editable', 'overridden')
-    list_filter = ('department', RegulationFilter, 'semester', 'batch', 'is_elective', 'is_dept_core', 'editable', 'overridden')
+    form = CurriculumDepartmentAdminForm
+    list_display = ('department', 'regulation', 'semester', 'batch', 'course_code', 'mnemonic', 'course_name', 'question_paper_type', 'is_elective', 'is_dept_core', 'editable', 'overridden')
+    list_filter = ('department', RegulationFilter, 'semester', 'batch', 'question_paper_type', 'is_elective', 'is_dept_core', 'editable', 'overridden')
     search_fields = ('course_code', 'course_name', 'mnemonic')
 
     def get_readonly_fields(self, request, obj=None):
@@ -371,3 +403,10 @@ class DepartmentGroupMappingAdmin(admin.ModelAdmin):
     search_fields = ('group__code', 'group__name', 'department__code', 'department__name')
     ordering = ('group', 'department')
     search_fields = ('code', 'name')
+
+
+@admin.register(QuestionPaperType)
+class QuestionPaperTypeAdmin(admin.ModelAdmin):
+    list_display = ('code', 'label', 'is_active', 'sort_order')
+    list_editable = ('label', 'is_active', 'sort_order')
+    ordering = ('sort_order', 'code')

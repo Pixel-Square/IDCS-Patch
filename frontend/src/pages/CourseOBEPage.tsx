@@ -10,7 +10,7 @@ import LCAPage from './lca/LCAPage';
 import InternalMarkCoursePage from './InternalMarkCoursePage';
 import ResultAnalysisPage from './obe/ResultAnalysisPage';
 import { fetchMyTeachingAssignments } from '../services/obe';
-import { fetchDeptRows, fetchElectives } from '../services/curriculum';
+import { fetchDeptRows, fetchElectives, fetchQpTypes, type QuestionPaperTypeItem } from '../services/curriculum';
 import { fetchSpecialCourseEnabledAssessments } from '../services/obe';
 import { normalizeClassType } from '../constants/classTypes';
 import '../styles/obe-theme.css';
@@ -30,18 +30,44 @@ export default function CourseOBEPage(): JSX.Element {
     return 'marks';
   });
   const [courseName, setCourseName] = React.useState<string | null>(null);
-  const [courseClassType, setCourseClassType] = React.useState<string | null>(null);
+  const [courseClassType, setCourseClassType] = React.useState<string | null>(() => {
+    // Cache-first: show stored value immediately while DB loads
+    if (!courseId) return null;
+    try {
+      const v = localStorage.getItem(`obe_class_type_${courseId}`);
+      return v ? String(v).trim() : null;
+    } catch { return null; }
+  });
   const [classTypeLockedFromTA, setClassTypeLockedFromTA] = React.useState(false);
+  // courseMetaLoaded becomes true once the dept-rows DB fetch completes (success or error).
+  const [courseMetaLoaded, setCourseMetaLoaded] = React.useState(false);
   const [courseQpType, setCourseQpType] = React.useState<string>(() => {
     if (!courseId) return 'QP1';
     try {
       const stored = localStorage.getItem(`obe_course_qp_${courseId}`);
       const v = String(stored || '').trim().toUpperCase();
-      return v === 'QP2' || v === 'TCPR' ? v : 'QP1';
+      // Accept any non-empty stored value; fall back to QP1 for legacy 'TCPR'
+      // (TCPR is a class_type, not a QP type — if stored, convert to QP1)
+      return v && v !== 'TCPR' ? v : 'QP1';
     } catch {
       return 'QP1';
     }
   });
+
+  // DB-driven QP type list from QuestionPaperType master table.
+  const [qpTypes, setQpTypes] = React.useState<QuestionPaperTypeItem[]>([]);
+  React.useEffect(() => {
+    fetchQpTypes()
+      .then((types) => {
+        setQpTypes(types);
+        // If current selection is no longer in the list, fall back to first available.
+        if (types.length && !types.some((t) => t.code === courseQpType)) {
+          setCourseQpType(types[0].code);
+        }
+      })
+      .catch(() => setQpTypes([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [courseEnabledAssessments, setCourseEnabledAssessments] = React.useState<string[] | null>(null);
 
   React.useEffect(() => {
@@ -98,6 +124,7 @@ export default function CourseOBEPage(): JSX.Element {
         if (taCt) {
           setCourseClassType(taCt);
           setClassTypeLockedFromTA(true);
+          try { localStorage.setItem(`obe_class_type_${courseId}`, taCt); } catch {}
         }
       } catch {
         // ignore
@@ -134,6 +161,7 @@ export default function CourseOBEPage(): JSX.Element {
         if (!classTypeLockedFromTA && pick && (pick as any).class_type) {
           const ct = String((pick as any).class_type || '').trim();
           setCourseClassType(ct || null);
+          if (ct) { try { localStorage.setItem(`obe_class_type_${courseId}`, ct); } catch {} }
         } else if (!classTypeLockedFromTA) {
           // If we couldn't find class_type on the curriculum row, check elective subjects
           try {
@@ -141,7 +169,9 @@ export default function CourseOBEPage(): JSX.Element {
             if (!mounted) return;
             const match = (Array.isArray(electives) ? electives : (electives.results || [])).find((e: any) => String(e.course_code || '').trim().toUpperCase() === codeU);
             if (match && match.class_type) {
-              setCourseClassType(String(match.class_type || '').trim() || null);
+              const ect = String(match.class_type || '').trim();
+              setCourseClassType(ect || null);
+              if (ect) { try { localStorage.setItem(`obe_class_type_${courseId}`, ect); } catch {} }
               // If elective provides enabled assessments, use them for SPECIAL handling
               if (Array.isArray(match.enabled_assessments) && match.enabled_assessments.length) {
                 setCourseEnabledAssessments(match.enabled_assessments.map((x: any) => String(x).trim().toLowerCase()).filter(Boolean));
@@ -151,19 +181,13 @@ export default function CourseOBEPage(): JSX.Element {
             // ignore elective fetch errors
           }
         }
-        // Respect any user-selected override from localStorage.
-        let override: string | null = null;
-        try {
-          override = localStorage.getItem(`obe_course_qp_${courseId}`);
-        } catch {
-          override = null;
-        }
-        const ov = String(override || '').trim().toUpperCase();
-        if (ov === 'QP1' || ov === 'QP2' || ov === 'TCPR') {
-          setCourseQpType(ov);
-        } else {
+        // DB always wins for QP type — save back to localStorage as updated cache.
+        {
           const qp = String((pick as any)?.question_paper_type || '').trim().toUpperCase();
-          setCourseQpType(qp === 'QP2' || qp === 'TCPR' ? qp : 'QP1');
+          // For backward compat: TCPR stored as QP type means class_type=TCPR — use QP1 pattern.
+          const finalQp = qp && qp !== 'TCPR' ? qp : 'QP1';
+          setCourseQpType(finalQp);
+          try { localStorage.setItem(`obe_course_qp_${courseId}`, finalQp); } catch {}
         }
 
         if (normalizeClassType((pick as any)?.class_type) === 'SPECIAL') {
@@ -179,8 +203,10 @@ export default function CourseOBEPage(): JSX.Element {
         } else {
           setCourseEnabledAssessments(null);
         }
+        if (mounted) setCourseMetaLoaded(true);
       } catch (e) {
         // ignore
+        if (mounted) setCourseMetaLoaded(true);
       }
     })();
     return () => { mounted = false; };
@@ -219,39 +245,41 @@ export default function CourseOBEPage(): JSX.Element {
                   <div className="mt-2 text-lg font-bold text-gray-900 truncate">{courseName}</div>
                 ) : null}
 
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  {courseClassType ? (
-                    <span className="obe-pill obe-neutral-pill">
-                      Class type: <span className="ml-1 font-extrabold">{classTypeLabel}</span>
-                    </span>
+                <div className="mt-5 flex flex-wrap items-stretch gap-3">
+                  {/* Class Type card */}
+                  {!courseMetaLoaded && !courseClassType ? (
+                    <div className="obe-meta-skeleton" style={{ width: 160, height: 64 }} aria-label="Loading class type…" />
+                  ) : courseClassType ? (
+                    <div className="obe-meta-card obe-meta-card-type">
+                      <span className="obe-meta-card-label">
+                        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ display: 'inline', marginRight: 4, verticalAlign: '-1px' }}>
+                          <path d="M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1H2V3zm0 3h12v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6z"/>
+                        </svg>
+                        Course Type
+                      </span>
+                      <span className="obe-meta-card-value">{classTypeLabel}</span>
+                    </div>
                   ) : null}
 
-                  <span className="obe-pill obe-neutral-pill">
-                    QP Type:
-                    <select
-                      className="ml-2 obe-input"
-                      value={(() => {
-                        const current = String(courseQpType || 'QP1').trim().toUpperCase();
-                        return current === 'QP2' || current === 'TCPR' ? current : 'QP1';
-                      })()}
-                      onChange={(e) => {
-                        const v = String(e.target.value || '').trim().toUpperCase();
-                        const next = v === 'QP2' || v === 'TCPR' ? v : 'QP1';
-                        setCourseQpType(next);
-                        try {
-                          localStorage.setItem(`obe_course_qp_${courseId}`, next);
-                        } catch {
-                          // ignore
-                        }
-                      }}
-                      style={{ width: 84, paddingTop: 6, paddingBottom: 6 }}
-                      aria-label="Question paper type"
-                    >
-                      <option value="QP1">QP1</option>
-                      <option value="QP2">QP2</option>
-                      <option value="TCPR">TCPR</option>
-                    </select>
-                  </span>
+                  {/* QP Type card */}
+                  {!courseMetaLoaded && !courseQpType ? (
+                    <div className="obe-meta-skeleton" style={{ width: 160, height: 64 }} aria-label="Loading QP type…" />
+                  ) : courseQpType ? (
+                    <div className="obe-meta-card obe-meta-card-qp">
+                      <span className="obe-meta-card-label">
+                        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ display: 'inline', marginRight: 4, verticalAlign: '-1px' }}>
+                          <path d="M4 0h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm0 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H4zm1 3h6v1H5V4zm0 2h6v1H5V6zm0 2h4v1H5V8z"/>
+                        </svg>
+                        Question Paper Type
+                      </span>
+                      <span className="obe-meta-card-value">
+                        {String(courseQpType).trim().toUpperCase()}
+                        {!courseMetaLoaded && (
+                          <span className="obe-meta-card-syncing" title="Syncing from database…" />
+                        )}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 

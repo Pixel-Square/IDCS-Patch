@@ -406,3 +406,35 @@ class UserNotification(models.Model):
 
     def __str__(self):
         return f"{self.user.username}: {self.title} ({'read' if self.read else 'unread'})"
+
+
+class SiteConfiguration(models.Model):
+    """Singleton model for site-wide settings managed by IQAC.
+
+    Only one row is ever created (id=1). All code should use
+    ``SiteConfiguration.get()`` to retrieve it.
+
+    ``under_construction`` shape:
+        { "<path>": ["ROLE1", "ROLE2", ...], ... }
+    e.g. { "/student/attendance": ["STUDENT"], "/applications": ["STUDENT", "HOD"] }
+    """
+
+    under_construction = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Map of {path: [roles]} that should show the Under Construction screen.',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Site Configuration'
+        verbose_name_plural = 'Site Configuration'
+
+    def __str__(self):
+        return 'Site Configuration'
+
+    @classmethod
+    def get(cls) -> 'SiteConfiguration':
+        """Return the singleton row, creating it if it does not exist."""
+        obj, _ = cls.objects.get_or_create(id=1, defaults={'under_construction': {}})
+        return obj

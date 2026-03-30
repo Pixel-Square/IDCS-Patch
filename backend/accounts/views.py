@@ -1273,3 +1273,35 @@ class QueryUpdateView(APIView):
         query.save()
         serializer = UserQuerySerializer(query)
         return Response(serializer.data)
+
+
+class UCStateView(APIView):
+    """GET  /api/accounts/uc-state/  → return under_construction map (any authenticated user)
+    PUT  /api/accounts/uc-state/  → update under_construction map (IQAC only)
+    """
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def _is_iqac(self, request):
+        from .serializers import _compute_effective_role_names
+        return 'IQAC' in _compute_effective_role_names(request.user)
+
+    def get(self, request):
+        from .models import SiteConfiguration
+        cfg = SiteConfiguration.get()
+        return Response({'under_construction': cfg.under_construction or {}})
+
+    def put(self, request):
+        if not self._is_iqac(request):
+            return Response({'detail': 'Only IQAC users can update this.'}, status=status.HTTP_403_FORBIDDEN)
+        data = request.data.get('under_construction')
+        if not isinstance(data, dict):
+            return Response({'detail': 'under_construction must be an object.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Validate shape: values must be lists of strings
+        for k, v in data.items():
+            if not isinstance(k, str) or not isinstance(v, list):
+                return Response({'detail': 'Invalid shape. Expected {path: [roles]}'}, status=status.HTTP_400_BAD_REQUEST)
+        from .models import SiteConfiguration
+        cfg = SiteConfiguration.get()
+        cfg.under_construction = data
+        cfg.save(update_fields=['under_construction', 'updated_at'])
+        return Response({'under_construction': cfg.under_construction})

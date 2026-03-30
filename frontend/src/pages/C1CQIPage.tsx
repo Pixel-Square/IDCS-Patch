@@ -17,6 +17,7 @@ import { lsGet, lsSet } from '../utils/localStorage';
 import { isLabClassType, normalizeClassType } from '../constants/classTypes';
 import { exportCqiPdf } from '../utils/cqiExportPdf';
 import { getCachedMe } from '../services/auth';
+import { getCycleOneWeightsFromInternal } from '../utils/internalMarkWeights';
 
 type Props = {
   courseId: string;
@@ -259,12 +260,7 @@ export default function C1CQIPage({ courseId }: Props): JSX.Element {
   const configKey = useMemo(() => `co_attainment_cfg_${courseId}`, [courseId]);
   const [weights, setWeights] = useState(() => {
     const stored = lsGet<any>(`co_attainment_cfg_${courseId}`);
-    const w = stored?.weights;
-    return {
-      ssa1: Number.isFinite(Number(w?.ssa1)) ? Number(w.ssa1) : DEFAULT_WEIGHTS.ssa1,
-      cia1: Number.isFinite(Number(w?.cia1)) ? Number(w.cia1) : DEFAULT_WEIGHTS.cia1,
-      formative1: Number.isFinite(Number(w?.formative1)) ? Number(w.formative1) : DEFAULT_WEIGHTS.formative1,
-    };
+    return getCycleOneWeightsFromInternal(classType, stored);
   });
   const [weightsSource, setWeightsSource] = useState<'default' | 'local' | 'server'>('default');
   const [lastWeightsDebug, setLastWeightsDebug] = useState<string | null>(null);
@@ -362,11 +358,7 @@ export default function C1CQIPage({ courseId }: Props): JSX.Element {
           const k = normalizeClassType(classType);
           const gw = remote[k];
           if (gw && typeof gw === 'object') {
-            const newW = {
-              ssa1: Number.isFinite(Number(gw.ssa1)) ? Number(gw.ssa1) : DEFAULT_WEIGHTS.ssa1,
-              cia1: Number.isFinite(Number(gw.cia1)) ? Number(gw.cia1) : DEFAULT_WEIGHTS.cia1,
-              formative1: Number.isFinite(Number(gw.formative1)) ? Number(gw.formative1) : DEFAULT_WEIGHTS.formative1,
-            };
+            const newW = getCycleOneWeightsFromInternal(classType, gw as any);
             setWeights(newW);
             setWeightsSource('server');
             setLastWeightsDebug(`Applied server weights for ${k}`);
@@ -386,11 +378,7 @@ export default function C1CQIPage({ courseId }: Props): JSX.Element {
           const k = normalizeClassType(classType);
           const gw = global[k];
           if (gw && typeof gw === 'object') {
-            const newW = {
-              ssa1: Number.isFinite(Number(gw.ssa1)) ? Number(gw.ssa1) : DEFAULT_WEIGHTS.ssa1,
-              cia1: Number.isFinite(Number(gw.cia1)) ? Number(gw.cia1) : DEFAULT_WEIGHTS.cia1,
-              formative1: Number.isFinite(Number(gw.formative1)) ? Number(gw.formative1) : DEFAULT_WEIGHTS.formative1,
-            };
+            const newW = getCycleOneWeightsFromInternal(classType, gw as any);
             setWeights(newW);
             setWeightsSource('local');
             setLastWeightsDebug(`Applied local weights for ${k}`);

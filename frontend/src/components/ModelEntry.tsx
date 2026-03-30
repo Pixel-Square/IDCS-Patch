@@ -274,10 +274,10 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
   useEffect(() => {
     const norm = (v: any) => {
       const s = String(v ?? '').trim().toUpperCase();
+      // TCPR is a class_type used as a legacy QP type marker — keep the guard.
       if (s === 'TCPR') return 'TCPR';
-      if (s === 'QP2') return 'QP2';
-      if (s === 'QP1') return 'QP1';
-      return '';
+      // Pass through any non-empty code so DB-managed types work correctly.
+      return s || '';
     };
 
     // Prefer the course/header-provided QP (so changes in the header reflect here).
@@ -308,7 +308,9 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
         return;
       }
 
-      const qpKey = normalizedQpType === 'QP2' ? 'QP2' : normalizedQpType === 'QP1' ? 'QP1' : '';
+      // Pass through any non-empty QP code so DB-managed types work.
+      // Use empty string only for null/non-THEORY contexts (qpForApi null-coalesces it).
+      const qpKey = String(normalizedQpType || '').trim();
       const qpForApi = classKey === 'THEORY' ? (qpKey ? qpKey : null) : null;
 
       try {
@@ -441,8 +443,9 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
 
     const nextQpType = typeof raw.qpType === 'string' ? raw.qpType : null;
     if (nextQpType != null) {
+      // Accept any code from draft payload; do not clamp to QP1/QP2 only.
       const v = String(nextQpType || '').trim().toUpperCase();
-      const next = v === 'QP2' ? 'QP2' : 'QP1';
+      const next = v || 'QP1';
       setQpType(next);
       try {
         lsSet(qpTypeStorageKey, next);
@@ -933,7 +936,6 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     ];
   }, [iqacPattern, isTheory]);
 
-  const theoryCoCount = 5;
   const theoryTotalMax = useMemo(() => theoryQuestions.reduce((sum, q) => sum + q.max, 0), [theoryQuestions]);
 
   // CO mapping row under Q1..Q16.
@@ -943,13 +945,19 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     if (isTheory && Array.isArray(cos) && cos.length === theoryQuestions.length) {
       return cos.map((v: any) => {
         const n = Number(v);
-        if (Number.isFinite(n)) return Math.max(1, Math.min(5, Math.trunc(n)));
+        if (Number.isFinite(n)) return Math.max(1, Math.trunc(n));
         return 1;
       });
     }
     if (theoryQuestions.length === defaultRow.length) return defaultRow;
     return Array.from({ length: theoryQuestions.length }, (_, i) => defaultRow[i % defaultRow.length]);
   }, [iqacPattern, isTheory, theoryQuestions.length]);
+
+  // Derived from actual COs used so unused CO columns are hidden automatically.
+  const theoryCoCount = useMemo(() => {
+    if (!theoryCosRow.length) return 1;
+    return Math.max(1, Math.max(...theoryCosRow));
+  }, [theoryCosRow]);
 
   // BTL mapping row under Q1..Q16.
   // Default derived from screenshot: BTL2=8, BTL3=54, BTL4=28, BTL5=10.
@@ -966,7 +974,7 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
       if (co >= 1 && co <= theoryCoCount) coMax[co - 1] += q.max;
     });
     return coMax;
-  }, [theoryQuestions, theoryCosRow]);
+  }, [theoryQuestions, theoryCosRow, theoryCoCount]);
 
   const theoryCoMaxRow = useMemo(() => {
     // THEORY: CO max is based on question max only (no LAB/REVIEW column).
@@ -2279,7 +2287,22 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                                 const onCellKeyDown = (colKey: string) => (e: React.KeyboardEvent<HTMLInputElement>) => {
                                   if (e.key === 'Tab') {
                                     e.preventDefault();
-                                    moveFocus(colKey, e.shiftKey ? 'left' : 'right');
+                                    const colIndex = colOrder.indexOf(colKey);
+                                    if (!e.shiftKey) {
+                                      if (colIndex === colOrder.length - 1) {
+                                        const nextRowIndex = Math.min(renderRows.length - 1, idx + 1);
+                                        focusRef(`${getRowKey(renderRows[nextRowIndex] as any, nextRowIndex)}|${colOrder[0]}`);
+                                      } else {
+                                        moveFocus(colKey, 'right');
+                                      }
+                                    } else {
+                                      if (colIndex === 0) {
+                                        const prevRowIndex = Math.max(0, idx - 1);
+                                        focusRef(`${getRowKey(renderRows[prevRowIndex] as any, prevRowIndex)}|${colOrder[colOrder.length - 1]}`);
+                                      } else {
+                                        moveFocus(colKey, 'left');
+                                      }
+                                    }
                                   } else if (e.key === 'ArrowLeft') {
                                     e.preventDefault();
                                     moveFocus(colKey, 'left');
@@ -2530,7 +2553,22 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                             const onCellKeyDown = (colKey: string) => (e: React.KeyboardEvent<HTMLInputElement>) => {
                               if (e.key === 'Tab') {
                                 e.preventDefault();
-                                moveFocus(colKey, e.shiftKey ? 'left' : 'right');
+                                const colIndex = colOrder.indexOf(colKey);
+                                if (!e.shiftKey) {
+                                  if (colIndex === colOrder.length - 1) {
+                                    const nextRowIndex = Math.min(renderRows.length - 1, idx + 1);
+                                    focusRef(`${getRowKey(renderRows[nextRowIndex] as any, nextRowIndex)}|${colOrder[0]}`);
+                                  } else {
+                                    moveFocus(colKey, 'right');
+                                  }
+                                } else {
+                                  if (colIndex === 0) {
+                                    const prevRowIndex = Math.max(0, idx - 1);
+                                    focusRef(`${getRowKey(renderRows[prevRowIndex] as any, prevRowIndex)}|${colOrder[colOrder.length - 1]}`);
+                                  } else {
+                                    moveFocus(colKey, 'left');
+                                  }
+                                }
                               } else if (e.key === 'ArrowLeft') {
                                 e.preventDefault();
                                 moveFocus(colKey, 'left');
@@ -2918,7 +2956,22 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                       const onCellKeyDown = (colKey: string) => (e: React.KeyboardEvent<HTMLInputElement>) => {
                         if (e.key === 'Tab') {
                           e.preventDefault();
-                          moveFocus(colKey, e.shiftKey ? 'left' : 'right');
+                          const colIndex = colOrder.indexOf(colKey);
+                          if (!e.shiftKey) {
+                            if (colIndex === colOrder.length - 1) {
+                              const nextRowIndex = Math.min(renderRows.length - 1, idx + 1);
+                              focusRef(`${getRowKey(renderRows[nextRowIndex] as any, nextRowIndex)}|${colOrder[0]}`);
+                            } else {
+                              moveFocus(colKey, 'right');
+                            }
+                          } else {
+                            if (colIndex === 0) {
+                              const prevRowIndex = Math.max(0, idx - 1);
+                              focusRef(`${getRowKey(renderRows[prevRowIndex] as any, prevRowIndex)}|${colOrder[colOrder.length - 1]}`);
+                            } else {
+                              moveFocus(colKey, 'left');
+                            }
+                          }
                         } else if (e.key === 'ArrowLeft') {
                           e.preventDefault();
                           moveFocus(colKey, 'left');
