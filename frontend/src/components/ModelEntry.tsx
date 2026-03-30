@@ -452,7 +452,15 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     suppressAutosaveRef.current = true;
 
     const nextQpType = typeof raw.qpType === 'string' ? raw.qpType : null;
-    if (nextQpType != null) {
+    // IMPORTANT:
+    // The course/header-provided QP type (from DB) must be the source of truth.
+    // Previously, loading an old draft could override the header QP (e.g. header shows QP1FINAL
+    // but draft had qpType=QP1), causing the wrong IQAC pattern/questions to be used.
+    // Only hydrate qpType from the draft when the course did NOT provide any QP type.
+    const courseQpRaw = String(questionPaperType ?? '').trim().toUpperCase();
+    const courseQp = courseQpRaw === 'TCPR' ? 'TCPR' : courseQpRaw;
+    const canHydrateQpFromDraft = !courseQp;
+    if (canHydrateQpFromDraft && nextQpType != null) {
       // Accept any code from draft payload; do not clamp to QP1/QP2 only.
       const v = String(nextQpType || '').trim().toUpperCase();
       const next = v || 'QP1';
