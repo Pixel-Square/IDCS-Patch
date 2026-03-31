@@ -114,6 +114,7 @@ const DEFAULT_EXPERIMENTS = 5;
 const DEFAULT_EXPERIMENT_MAX = 25;
 const DEFAULT_CIA_EXAM_MAX = 30;
 const REVIEW_TOTAL_MAX = 50;
+const PROJECT_REVIEW_COMPONENT_ID = 'co1';
 const LAB_REVIEW_EXPERIMENT_WEIGHT: Record<number, number> = { 1: 9, 2: 9, 3: 4.5, 4: 9, 5: 9 };
 const LAB_REVIEW_CAA_WEIGHT: Record<number, number> = { 1: 3, 2: 3, 3: 1.5, 4: 3, 5: 3 };
 const LAB_REVIEW_CAA_RAW_MAX: Record<number, number> = { 1: 20, 2: 20, 3: 10, 4: 20, 5: 20 };
@@ -260,7 +261,10 @@ function makeReviewComponentId() {
   return `rc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function normalizeReviewComponents(raw: unknown): ReviewComponent[] {
+function normalizeReviewComponents(raw: unknown, projectMode = false): ReviewComponent[] {
+  if (projectMode) {
+    return [{ id: PROJECT_REVIEW_COMPONENT_ID, title: 'CO1', max: REVIEW_TOTAL_MAX }];
+  }
   const src = Array.isArray(raw) ? raw : [];
   const out: ReviewComponent[] = [];
   for (let i = 0; i < src.length; i++) {
@@ -272,6 +276,43 @@ function normalizeReviewComponents(raw: unknown): ReviewComponent[] {
   }
   if (!out.length) {
     out.push({ id: makeReviewComponentId(), title: 'Title 1', max: REVIEW_TOTAL_MAX });
+  }
+  return out;
+}
+
+function normalizeReviewComponentMarks(
+  raw: unknown,
+  reviewComponents: ReviewComponent[],
+  projectMode = false,
+  fallbackTotal?: unknown,
+): Record<string, number | ''> {
+  if (projectMode) {
+    const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    let total = Object.values(src).reduce<number>((sum, value) => {
+      const n = typeof value === 'number' ? value : Number(value);
+      return Number.isFinite(n) ? sum + n : sum;
+    }, 0);
+    if (!(total > 0)) {
+      const fb = fallbackTotal === '' || fallbackTotal == null ? NaN : Number(fallbackTotal);
+      total = Number.isFinite(fb) ? fb : NaN;
+    }
+    return {
+      [PROJECT_REVIEW_COMPONENT_ID]: Number.isFinite(total) ? clampInt(total, 0, REVIEW_TOTAL_MAX) : '',
+    };
+  }
+
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const out: Record<string, number | ''> = {};
+  for (const component of reviewComponents) {
+    const rawComponentMark = src[component.id];
+    if (rawComponentMark === '' || rawComponentMark == null) {
+      out[component.id] = '';
+    } else {
+      const parsedComponentMark = Number(rawComponentMark);
+      out[component.id] = Number.isFinite(parsedComponentMark)
+        ? clampInt(parsedComponentMark, 0, component.max)
+        : '';
+    }
   }
   return out;
 }
@@ -418,7 +459,7 @@ export default function LabEntry({
       expCountB: DEFAULT_EXPERIMENTS,
       btlsA: Array.from({ length: DEFAULT_EXPERIMENTS }, () => 1),
       btlsB: Array.from({ length: DEFAULT_EXPERIMENTS }, () => 1),
-      reviewComponents: constrainReviewComponentsTotal(normalizeReviewComponents(null)),
+      reviewComponents: constrainReviewComponentsTotal(normalizeReviewComponents(null, isProjectReviewMode)),
       rowsByStudentId: {},
           expMaxA: DEFAULT_EXPERIMENT_MAX,
           expMaxB: DEFAULT_EXPERIMENT_MAX,
@@ -578,7 +619,7 @@ export default function LabEntry({
           const expMaxB = clampInt(Number(cfgB?.expMax ?? expMaxBLegacy), 0, 100);
           const btlsA = normalizeBtlArray(cfgA?.btl ?? btlsALegacy, expCountA);
           const btlsB = normalizeBtlArray(cfgB?.btl ?? btlsBLegacy, expCountB);
-          const reviewComponents = constrainReviewComponentsTotal(normalizeReviewComponents((d.sheet as any).reviewComponents));
+          const reviewComponents = constrainReviewComponentsTotal(normalizeReviewComponents((d.sheet as any).reviewComponents, isProjectReviewMode));
           const normalizedRows: Record<string, LabRowState> = {};
           const rawRows = (d.sheet as any).rowsByStudentId && typeof (d.sheet as any).rowsByStudentId === 'object' ? (d.sheet as any).rowsByStudentId : {};
           for (const [sid, row0] of Object.entries(rawRows)) {
@@ -589,25 +630,19 @@ export default function LabEntry({
             const ciaParsed = rawCia === '' || rawCia == null ? '' : Number(rawCia);
             const ciaExam = ciaParsed === '' ? '' : Number.isFinite(ciaParsed) ? ciaParsed : '';
             const rawComponentMarks = row.reviewComponentMarks && typeof row.reviewComponentMarks === 'object' ? row.reviewComponentMarks : {};
-            const reviewComponentMarks: Record<string, number | ''> = {};
-            for (const component of reviewComponents) {
-              const rawComponentMark = (rawComponentMarks as any)[component.id];
-              if (rawComponentMark === '' || rawComponentMark == null) {
-                reviewComponentMarks[component.id] = '';
-              } else {
-                const parsedComponentMark = Number(rawComponentMark);
-                reviewComponentMarks[component.id] = Number.isFinite(parsedComponentMark)
-                  ? clampInt(parsedComponentMark, 0, component.max)
-                  : '';
-              }
-            }
+            const reviewComponentMarks = normalizeReviewComponentMarks(rawComponentMarks, reviewComponents, isProjectReviewMode, row.ciaExam);
             normalizedRows[String(sid)] = {
               ...row,
               studentId: Number.isFinite(Number(row.studentId)) ? Number(row.studentId) : Number(sid),
               marksA,
               marksB,
               reviewComponentMarks,
-              ciaExam,
+              ciaExam: isProjectReviewMode
+                ? (() => {
+                    const total = reviewComponentMarks[PROJECT_REVIEW_COMPONENT_ID];
+                    return typeof total === 'number' && Number.isFinite(total) ? total : '';
+                  })()
+                : ciaExam,
               caaExamByCo: normalizeCaaByCo(row.caaExamByCo),
             };
           }
@@ -687,7 +722,7 @@ export default function LabEntry({
           const rowsByStudentId = stored?.rowsByStudentId && typeof stored.rowsByStudentId === 'object' ? stored.rowsByStudentId : {};
           setDraft((p) => ({
             ...p,
-            sheet: { ...p.sheet, batchLabel: String(subjectId), reviewComponents: constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents)), rowsByStudentId },
+            sheet: { ...p.sheet, batchLabel: String(subjectId), reviewComponents: constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents, isProjectReviewMode)), rowsByStudentId },
           }));
         }
       } catch {
@@ -698,7 +733,7 @@ export default function LabEntry({
     return () => {
       mounted = false;
     };
-  }, [assessmentKey, subjectId, key, masterCfg, teachingAssignmentId, selectableCosArr, coA, coB]);
+  }, [assessmentKey, subjectId, key, masterCfg, teachingAssignmentId, selectableCosArr, coA, coB, isProjectReviewMode]);
 
   // Fetch roster
   useEffect(() => {
@@ -739,15 +774,14 @@ export default function LabEntry({
       const expCountB = clampInt(Number(p.sheet.expCountB ?? DEFAULT_EXPERIMENTS), 0, 12);
       const btlsA = normalizeBtlArray((p.sheet as any).btlsA, expCountA);
       const btlsB = normalizeBtlArray((p.sheet as any).btlsB, expCountB);
-      const reviewComponents = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents));
+      const reviewComponents = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents, isProjectReviewMode));
       const rowsByStudentId: Record<string, LabRowState> = { ...(p.sheet.rowsByStudentId || {}) };
 
       for (const s of students) {
         const k = String(s.id);
         const existing = rowsByStudentId[k];
         if (!existing) {
-          const reviewComponentMarks: Record<string, number | ''> = {};
-          for (const component of reviewComponents) reviewComponentMarks[component.id] = '';
+          const reviewComponentMarks = normalizeReviewComponentMarks({}, reviewComponents, isProjectReviewMode, '');
           rowsByStudentId[k] = {
             studentId: s.id,
             marksA: Array.from({ length: expCountA }, () => ''),
@@ -765,20 +799,21 @@ export default function LabEntry({
           const rawComponentMarks = (existing as any).reviewComponentMarks && typeof (existing as any).reviewComponentMarks === 'object'
             ? (existing as any).reviewComponentMarks
             : {};
-          const reviewComponentMarks: Record<string, number | ''> = {};
-          for (const component of reviewComponents) {
-            const rawComponentMark = rawComponentMarks[component.id];
-            if (rawComponentMark === '' || rawComponentMark == null) {
-              reviewComponentMarks[component.id] = '';
-            } else {
-              const parsedComponentMark = Number(rawComponentMark);
-              reviewComponentMarks[component.id] = Number.isFinite(parsedComponentMark)
-                ? clampInt(parsedComponentMark, 0, component.max)
-                : '';
-            }
-          }
+          const reviewComponentMarks = normalizeReviewComponentMarks(rawComponentMarks, reviewComponents, isProjectReviewMode, ciaExam);
           const caaExamByCo = normalizeCaaByCo((existing as any).caaExamByCo);
-          rowsByStudentId[k] = { ...existing, marksA, marksB, reviewComponentMarks, ciaExam, caaExamByCo };
+          rowsByStudentId[k] = {
+            ...existing,
+            marksA,
+            marksB,
+            reviewComponentMarks,
+            ciaExam: isProjectReviewMode
+              ? (() => {
+                  const total = reviewComponentMarks[PROJECT_REVIEW_COMPONENT_ID];
+                  return typeof total === 'number' && Number.isFinite(total) ? total : '';
+                })()
+              : ciaExam,
+            caaExamByCo,
+          };
         }
       }
 
@@ -796,15 +831,28 @@ export default function LabEntry({
         },
       };
     });
-  }, [students, subjectId]);
+  }, [students, subjectId, isProjectReviewMode]);
 
   useEffect(() => {
     if (!isProjectReviewMode) return;
-    const nextComponents = constrainReviewComponentsTotal(normalizeReviewComponents((draft.sheet as any).reviewComponents));
-    const current = JSON.stringify((draft.sheet as any).reviewComponents || []);
-    const next = JSON.stringify(nextComponents);
+    const nextComponents = constrainReviewComponentsTotal(normalizeReviewComponents((draft.sheet as any).reviewComponents, true));
+    const nextRowsByStudentId: Record<string, LabRowState> = {};
+    for (const [sid, row] of Object.entries(draft.sheet.rowsByStudentId || {})) {
+      const nextMarks = normalizeReviewComponentMarks((row as any)?.reviewComponentMarks, nextComponents, true, (row as any)?.ciaExam);
+      const total = nextMarks[PROJECT_REVIEW_COMPONENT_ID];
+      nextRowsByStudentId[sid] = {
+        ...(row as LabRowState),
+        reviewComponentMarks: nextMarks,
+        ciaExam: typeof total === 'number' && Number.isFinite(total) ? total : '',
+      };
+    }
+    const current = JSON.stringify({
+      reviewComponents: (draft.sheet as any).reviewComponents || [],
+      rowsByStudentId: draft.sheet.rowsByStudentId || {},
+    });
+    const next = JSON.stringify({ reviewComponents: nextComponents, rowsByStudentId: nextRowsByStudentId });
     if (current === next) return;
-    setDraft((p) => ({ ...p, sheet: { ...p.sheet, reviewComponents: nextComponents } }));
+    setDraft((p) => ({ ...p, sheet: { ...p.sheet, reviewComponents: nextComponents, rowsByStudentId: nextRowsByStudentId } }));
   }, [isProjectReviewMode, draft.sheet.reviewComponents]);
 
   // Persist local mirror for counts/dashboard
@@ -956,15 +1004,15 @@ export default function LabEntry({
   const tableBlocked = Boolean(globalLocked || (isPublished ? (editRequestsEnabled && !entryOpen) : false));
 
   const reviewComponents = useMemo(
-    () => constrainReviewComponentsTotal(normalizeReviewComponents((draft.sheet as any).reviewComponents)),
-    [draft.sheet.reviewComponents],
+    () => constrainReviewComponentsTotal(normalizeReviewComponents((draft.sheet as any).reviewComponents, isProjectReviewMode)),
+    [draft.sheet.reviewComponents, isProjectReviewMode],
   );
   const reviewSplitTotal = useMemo(
     () => reviewComponents.reduce((sum, component) => sum + clampInt(Number(component.max), 0, REVIEW_TOTAL_MAX), 0),
     [reviewComponents],
   );
   const reviewSplitRemaining = Math.max(0, REVIEW_TOTAL_MAX - reviewSplitTotal);
-  const hasEmptyProjectReviewTitle = isProjectReviewMode && reviewComponents.some((component) => {
+  const hasEmptyProjectReviewTitle = !isProjectReviewMode ? false : reviewComponents.some((component) => {
     const titleValue = Object.prototype.hasOwnProperty.call(reviewComponentTitleInputs, component.id)
       ? reviewComponentTitleInputs[component.id]
       : component.title;
@@ -999,9 +1047,10 @@ export default function LabEntry({
   }, [isProjectReviewMode, hasEmptyProjectReviewTitle, projectReviewValidationError]);
 
   function setReviewComponentTitle(componentId: string, title: string) {
+    if (isProjectReviewMode) return;
     setDraft((p) => {
       if (p.sheet.markManagerLocked) return p;
-      const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents)).map((component) =>
+      const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents, false)).map((component) =>
         component.id === componentId ? { ...component, title: String(title || '').slice(0, 60) } : component,
       );
       return { ...p, sheet: { ...p.sheet, reviewComponents: components } };
@@ -1081,6 +1130,7 @@ export default function LabEntry({
   }
 
   function addReviewComponent() {
+    if (isProjectReviewMode) return;
     setDraft((p) => {
       if (p.sheet.markManagerLocked) return p;
       const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents));
@@ -1101,6 +1151,7 @@ export default function LabEntry({
   }
 
   function removeReviewComponent(componentId: string) {
+    if (isProjectReviewMode) return;
     setDraft((p) => {
       if (p.sheet.markManagerLocked) return p;
       const components = constrainReviewComponentsTotal(normalizeReviewComponents((p.sheet as any).reviewComponents));
@@ -1529,9 +1580,9 @@ export default function LabEntry({
 
   function markManagerSnapshotOf(sheet: LabSheet): string {
     if (isProjectReviewMode) {
-      const components = constrainReviewComponentsTotal(normalizeReviewComponents((sheet as any).reviewComponents)).map((component) => ({
+      const components = constrainReviewComponentsTotal(normalizeReviewComponents((sheet as any).reviewComponents, true)).map((component) => ({
         id: component.id,
-        title: String(component.title || '').trim() || 'Title',
+        title: 'CO1',
         max: clampInt(Number(component.max), 0, REVIEW_TOTAL_MAX),
       }));
       return JSON.stringify({ total: REVIEW_TOTAL_MAX, components });
@@ -2232,63 +2283,32 @@ export default function LabEntry({
               <div style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
                 <div style={{ fontWeight: 800, color: '#111827' }}>Total Marks</div>
                 <input type="number" className="obe-input" value={REVIEW_TOTAL_MAX} disabled style={{ width: 90 }} />
-                <button
-                  type="button"
-                  className="obe-btn obe-btn-secondary"
-                  onClick={addReviewComponent}
-                  disabled={markManagerLocked || reviewSplitRemaining <= 0}
-                  title={reviewSplitRemaining <= 0 ? `Total split reached ${REVIEW_TOTAL_MAX}` : 'Add split component'}
-                  style={{ padding: '4px 10px', minWidth: 36 }}
-                >
-                  +
-                </button>
                 <div style={{ fontSize: 12, color: '#6b7280' }}>
                   Used: <strong>{reviewSplitTotal}</strong> / {REVIEW_TOTAL_MAX}
                 </div>
               </div>
 
-              <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1.5fr 120px 40px', gap: 8, marginTop: 8 }}>
-                {reviewComponents.map((component, idx) => {
-                  const othersTotal = reviewComponents.reduce((sum, item) => sum + (item.id === component.id ? 0 : item.max), 0);
-                  const maxAllowed = Math.max(0, REVIEW_TOTAL_MAX - othersTotal);
-                  return (
-                    <React.Fragment key={component.id}>
-                      <input
-                        type="text"
-                        className="obe-input"
-                        value={reviewComponentTitleInputs[component.id] ?? component.title}
-                        onChange={(e) => handleReviewComponentTitleInput(component.id, e.target.value)}
-                        onBlur={() => commitReviewComponentTitle(component.id, component.title)}
-                        disabled={markManagerLocked}
-                        placeholder={`Title ${idx + 1}`}
-                      />
-                      <input
-                        type="number"
-                        className="obe-input"
-                        value={reviewComponentMaxInputs[component.id] ?? String(component.max)}
-                        onChange={(e) => handleReviewComponentMaxInput(component.id, e.target.value)}
-                        onBlur={() => commitReviewComponentMax(component.id, component.max)}
-                        min={0}
-                        max={maxAllowed}
-                        disabled={markManagerLocked}
-                      />
-                      <button
-                        type="button"
-                        className="obe-btn obe-btn-danger"
-                        onClick={() => removeReviewComponent(component.id)}
-                        disabled={markManagerLocked || reviewComponents.length <= 1}
-                        title={reviewComponents.length <= 1 ? 'At least one component is required' : 'Remove component'}
-                        style={{ padding: '4px 8px' }}
-                      >
-                        -
-                      </button>
-                    </React.Fragment>
-                  );
-                })}
+              <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1.5fr 120px', gap: 8, marginTop: 8 }}>
+                {reviewComponents.map((component) => (
+                  <React.Fragment key={component.id}>
+                    <input
+                      type="text"
+                      className="obe-input"
+                      value={'CO1'}
+                      disabled
+                    />
+                    <input
+                      type="number"
+                      className="obe-input"
+                      value={String(component.max)}
+                      disabled
+                    />
+                  </React.Fragment>
+                ))}
               </div>
 
               <div style={{ width: '100%', fontSize: 12, color: reviewSplitTotal > REVIEW_TOTAL_MAX ? '#b91c1c' : '#6b7280', marginTop: 8 }}>
-                Split total cannot exceed {REVIEW_TOTAL_MAX}.
+                PROJECT reviews always use a fixed single component mapped to CO1.
               </div>
               {projectReviewValidationError ? (
                 <div style={{ width: '100%', fontSize: 12, color: '#b91c1c', marginTop: 4 }}>
@@ -2472,7 +2492,7 @@ export default function LabEntry({
                       <th style={cellTh}>Register No.</th>
                       <th style={cellTh}>Name of the Students</th>
                       {reviewComponents.map((component, idx) => (
-                        <th key={`pr_title_${component.id}`} style={cellTh}>{component.title || `Title ${idx + 1}`}</th>
+                        <th key={`pr_title_${component.id}`} style={cellTh}>{isProjectReviewMode ? 'CO1' : component.title || `Title ${idx + 1}`}</th>
                       ))}
                       <th style={cellTh}>Total</th>
                     </tr>
@@ -3102,7 +3122,7 @@ export default function LabEntry({
                         reviewComponents.map((component, idx) => (
                           <tr key={component.id}>
                             <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', fontWeight: 800 }}>Component {idx + 1}</td>
-                            <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 600 }}>{component.title || `Title ${idx + 1}`}</td>
+                            <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 600 }}>{isProjectReviewMode ? 'CO1' : component.title || `Title ${idx + 1}`}</td>
                             <td style={{ padding: 10, borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 600 }}>{component.max}</td>
                           </tr>
                         ))

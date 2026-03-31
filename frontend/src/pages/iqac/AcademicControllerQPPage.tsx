@@ -80,9 +80,21 @@ export default function AcademicControllerQPPage(): JSX.Element {
   const [reviewCfgMsg, setReviewCfgMsg] = useState<string | null>(null);
   const [reviewCfgErr, setReviewCfgErr] = useState<string | null>(null);
 
+  // Question-wise pattern for CIA/MODEL
   type PatternRow = { marks: string; co: string };
+  
+  // CO-wise pattern for SSA/FA
+  type CoWisePatternRow = { 
+    description: string; 
+    co1?: string; 
+    co2?: string; 
+    co3?: string; 
+    co4?: string; 
+    co5?: string; 
+  };
 
   const [patternRows, setPatternRows] = useState<PatternRow[]>([]);
+  const [coWiseRows, setCoWiseRows] = useState<CoWisePatternRow[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -111,6 +123,12 @@ export default function AcademicControllerQPPage(): JSX.Element {
   );
   const [selectedCustomExam, setSelectedCustomExam] = useState<string>('SSA1');
   const [customIsOverride, setCustomIsOverride] = useState<boolean>(false);
+
+  // Determine if current exam uses CO-wise pattern (SSA/FA) or question-wise pattern (CIA/MODEL)
+  const isCoWisePattern = useMemo(() => {
+    const exam = tab === 'custom' ? selectedCustomExam : selectedExam;
+    return exam === 'SSA1' || exam === 'SSA2' || exam === 'FORMATIVE1' || exam === 'FORMATIVE2';
+  }, [tab, selectedExam, selectedCustomExam]);
 
   const backendKey = useMemo(() => {
     const class_type = selectedClassType;
@@ -147,38 +165,51 @@ export default function AcademicControllerQPPage(): JSX.Element {
         const marks = Array.isArray((data as any)?.pattern?.marks) ? (data as any).pattern.marks : [];
         const cos = Array.isArray((data as any)?.pattern?.cos) ? (data as any).pattern.cos : [];
 
-        const storedCoToUi = (stored: any): string => {
-          // Backend commonly stores split as 12/34 or sometimes as 'both'.
-          // UI select expects '1&2' for CIA1 and '3&4' for CIA2.
-          const s = String(stored ?? '').trim();
-          if (!s) return '';
+        if (isCoWisePattern) {
+          // For SSA/FA: Convert from backend format to CO-wise rows
+          // Backend stores: marks[0]=CO1 marks, marks[1]=CO2 marks, etc.
+          const coWise: CoWisePatternRow[] = marks.length > 0 ? [{
+            description: 'Assessment Component',
+            co1: marks[0] != null ? String(marks[0]) : '',
+            co2: marks[1] != null ? String(marks[1]) : '',
+            co3: marks[2] != null ? String(marks[2]) : '',
+            co4: marks[3] != null ? String(marks[3]) : '',
+            co5: marks[4] != null ? String(marks[4]) : '',
+          }] : [{ description: 'Assessment Component', co1: '', co2: '', co3: '', co4: '', co5: '' }];
+          setCoWiseRows(coWise);
+          setPatternRows([]);
+        } else {
+          // For CIA/MODEL: Question-wise pattern
+          const storedCoToUi = (stored: any): string => {
+            const s = String(stored ?? '').trim();
+            if (!s) return '';
+            const n = Number(s);
+            if (Number.isFinite(n)) {
+              if (n === 12) return '1&2';
+              if (n === 34) return '3&4';
+              return String(Math.trunc(n));
+            }
+            const upper = s.toUpperCase();
+            if (upper === 'BOTH') {
+              return backendKey.exam === 'CIA2' ? '3&4' : '1&2';
+            }
+            if (upper === '1&2' || upper === '3&4') return upper;
+            return s;
+          };
 
-          // Normalize numeric encodings.
-          const n = Number(s);
-          if (Number.isFinite(n)) {
-            if (n === 12) return '1&2';
-            if (n === 34) return '3&4';
-            return String(Math.trunc(n));
-          }
-
-          const upper = s.toUpperCase();
-          if (upper === 'BOTH') {
-            return backendKey.exam === 'CIA2' ? '3&4' : '1&2';
-          }
-          if (upper === '1&2' || upper === '3&4') return upper;
-          return s;
-        };
-
-        const normalized: PatternRow[] = marks.map((m: any, idx: number) => ({
-          marks: String(m),
-          co: cos[idx] == null ? '' : storedCoToUi(cos[idx]),
-        }));
-        setPatternRows(normalized);
+          const normalized: PatternRow[] = marks.map((m: any, idx: number) => ({
+            marks: String(m),
+            co: cos[idx] == null ? '' : storedCoToUi(cos[idx]),
+          }));
+          setPatternRows(normalized);
+          setCoWiseRows([]);
+        }
         setLastSavedAt(data?.updated_at ?? null);
       } catch (e: any) {
         if (cancelled) return;
         setError(String(e?.message || e || 'Failed to load pattern.'));
         setPatternRows([]);
+        setCoWiseRows([]);
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -187,7 +218,7 @@ export default function AcademicControllerQPPage(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [backendKey, tab]);
+  }, [backendKey, tab, isCoWisePattern]);
 
   useEffect(() => {
     let cancelled = false;
@@ -276,32 +307,49 @@ export default function AcademicControllerQPPage(): JSX.Element {
         const marks = Array.isArray((data as any)?.pattern?.marks) ? (data as any).pattern.marks : [];
         const cos = Array.isArray((data as any)?.pattern?.cos) ? (data as any).pattern.cos : [];
 
-        const storedCoToUi = (stored: any): string => {
-          const s = String(stored ?? '').trim();
-          if (!s) return '';
-          const n = Number(s);
-          if (Number.isFinite(n)) {
-            if (n === 12) return '1&2';
-            if (n === 34) return '3&4';
-            return String(Math.trunc(n));
-          }
-          const upper = s.toUpperCase();
-          if (upper === 'BOTH') return 'both';
-          if (upper === '1&2' || upper === '3&4' || upper === 'BOTH') return upper;
-          return s;
-        };
+        if (isCoWisePattern) {
+          // For SSA/FA: Convert from backend format to CO-wise rows
+          const coWise: CoWisePatternRow[] = marks.length > 0 ? [{
+            description: 'Assessment Component',
+            co1: marks[0] != null ? String(marks[0]) : '',
+            co2: marks[1] != null ? String(marks[1]) : '',
+            co3: marks[2] != null ? String(marks[2]) : '',
+            co4: marks[3] != null ? String(marks[3]) : '',
+            co5: marks[4] != null ? String(marks[4]) : '',
+          }] : [{ description: 'Assessment Component', co1: '', co2: '', co3: '', co4: '', co5: '' }];
+          setCoWiseRows(coWise);
+          setPatternRows([]);
+        } else {
+          // For CIA/MODEL: Question-wise pattern
+          const storedCoToUi = (stored: any): string => {
+            const s = String(stored ?? '').trim();
+            if (!s) return '';
+            const n = Number(s);
+            if (Number.isFinite(n)) {
+              if (n === 12) return '1&2';
+              if (n === 34) return '3&4';
+              return String(Math.trunc(n));
+            }
+            const upper = s.toUpperCase();
+            if (upper === 'BOTH') return 'both';
+            if (upper === '1&2' || upper === '3&4' || upper === 'BOTH') return upper;
+            return s;
+          };
 
-        const normalized: PatternRow[] = marks.map((m: any, idx: number) => ({
-          marks: String(m),
-          co: cos[idx] == null ? '' : storedCoToUi(cos[idx]),
-        }));
-        setPatternRows(normalized);
+          const normalized: PatternRow[] = marks.map((m: any, idx: number) => ({
+            marks: String(m),
+            co: cos[idx] == null ? '' : storedCoToUi(cos[idx]),
+          }));
+          setPatternRows(normalized);
+          setCoWiseRows([]);
+        }
         setLastSavedAt((data as any)?.updated_at ?? null);
         setCustomIsOverride(Boolean((data as any)?.is_override));
       } catch (e: any) {
         if (cancelled) return;
         setError(String(e?.message || e || 'Failed to load pattern.'));
         setPatternRows([]);
+        setCoWiseRows([]);
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -310,7 +358,7 @@ export default function AcademicControllerQPPage(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [customBackendKey, tab]);
+  }, [customBackendKey, tab, isCoWisePattern]);
 
   useEffect(() => {
     let cancelled = false;
@@ -390,13 +438,21 @@ export default function AcademicControllerQPPage(): JSX.Element {
   };
 
   const addRow = () => {
-    const examKey = tab === 'custom' ? String(selectedCustomExam || '') : String(selectedExam || '');
-    const defaultCo = examKey === 'CIA2' || examKey === 'SSA2' || examKey === 'FORMATIVE2' ? '3' : '1';
-    setPatternRows((prev) => [...prev, { marks: '', co: defaultCo }]);
+    if (isCoWisePattern) {
+      setCoWiseRows((prev) => [...prev, { description: '', co1: '', co2: '', co3: '', co4: '', co5: '' }]);
+    } else {
+      const examKey = tab === 'custom' ? String(selectedCustomExam || '') : String(selectedExam || '');
+      const defaultCo = examKey === 'CIA2' || examKey === 'SSA2' || examKey === 'FORMATIVE2' ? '3' : '1';
+      setPatternRows((prev) => [...prev, { marks: '', co: defaultCo }]);
+    }
   };
 
   const deleteRow = (idx: number) => {
-    setPatternRows((prev) => prev.filter((_, i) => i !== idx));
+    if (isCoWisePattern) {
+      setCoWiseRows((prev) => prev.filter((_, i) => i !== idx));
+    } else {
+      setPatternRows((prev) => prev.filter((_, i) => i !== idx));
+    }
   };
 
   const updateMarks = (idx: number, value: string) => {
@@ -417,43 +473,89 @@ export default function AcademicControllerQPPage(): JSX.Element {
     });
   };
 
+  // CO-wise row update functions
+  const updateCoWiseDescription = (idx: number, value: string) => {
+    setCoWiseRows((prev) => {
+      const copy = [...prev];
+      copy[idx] = { ...copy[idx], description: value };
+      return copy;
+    });
+  };
+
+  const updateCoWiseMarks = (idx: number, coField: 'co1' | 'co2' | 'co3' | 'co4' | 'co5', value: string) => {
+    setCoWiseRows((prev) => {
+      const copy = [...prev];
+      copy[idx] = { ...copy[idx], [coField]: value };
+      return copy;
+    });
+  };
+
   const savePattern = async () => {
     setMessage(null);
     setError(null);
     try {
-      const cleaned = patternRows.map((r) => ({ marks: String(r.marks ?? '').trim(), co: String((r as any)?.co ?? '').trim() }));
-      // Basic validation: allow empty rows? -> disallow empty when any rows exist.
-      if (cleaned.length && cleaned.some((r) => !r.marks || !r.co)) {
-        setError('Enter marks and CO for all rows (or delete empty rows).');
-        return;
-      }
-      // Numeric validation
-      for (const r of cleaned) {
-        const n = Number(r.marks);
-        if (!Number.isFinite(n) || n < 0) {
-          setError('Marks must be a non-negative number.');
+      let marks: number[] = [];
+      let cos: (number | string)[] = [];
+
+      if (isCoWisePattern) {
+        // For SSA/FA: Convert CO-wise format to backend format
+        // We'll store marks for each CO (CO1-CO5) in the marks array
+        if (coWiseRows.length === 0) {
+          setError('Add at least one row.');
+          return;
+        }
+        
+        // Take the first row and extract CO marks
+        const row = coWiseRows[0];
+        const co1 = Number((row.co1 || '0').trim());
+        const co2 = Number((row.co2 || '0').trim());
+        const co3 = Number((row.co3 || '0').trim());
+        const co4 = Number((row.co4 || '0').trim());
+        const co5 = Number((row.co5 || '0').trim());
+
+        if (![co1, co2, co3, co4, co5].every((v) => Number.isFinite(v) && v >= 0)) {
+          setError('All CO marks must be non-negative numbers.');
+          return;
+        }
+
+        marks = [co1, co2, co3, co4, co5];
+        cos = [1, 2, 3, 4, 5]; // CO labels
+      } else {
+        // For CIA/MODEL: Question-wise format
+        const cleaned = patternRows.map((r) => ({ marks: String(r.marks ?? '').trim(), co: String((r as any)?.co ?? '').trim() }));
+        if (cleaned.length && cleaned.some((r) => !r.marks || !r.co)) {
+          setError('Enter marks and CO for all rows (or delete empty rows).');
+          return;
+        }
+        
+        for (const r of cleaned) {
+          const n = Number(r.marks);
+          if (!Number.isFinite(n) || n < 0) {
+            setError('Marks must be a non-negative number.');
+            return;
+          }
+        }
+
+        const coToStored = (raw: string): number | string => {
+          const s = String(raw || '').trim();
+          if (!s) return '';
+          if (s === 'both') return 'both';
+          if (s === '1&2') return 12;
+          if (s === '3&4') return 34;
+          const n = Number(s);
+          if (!Number.isFinite(n)) return '';
+          return Math.trunc(n);
+        };
+
+        marks = cleaned.map((r) => Number(r.marks));
+        cos = cleaned.map((r) => coToStored(r.co));
+        if (cos.some((v) => v === '')) {
+          setError('CO values must be valid for all rows.');
           return;
         }
       }
 
-      const coToStored = (raw: string): number | string => {
-        const s = String(raw || '').trim();
-        if (!s) return '';
-        if (s === 'both') return 'both';
-        if (s === '1&2') return 12;
-        if (s === '3&4') return 34;
-        const n = Number(s);
-        if (!Number.isFinite(n)) return '';
-        return Math.trunc(n);
-      };
-
       setIsSaving(true);
-      const marks = cleaned.map((r) => Number(r.marks));
-      const cos = cleaned.map((r) => coToStored(r.co));
-      if (cos.some((v) => v === '')) {
-        setError('CO values must be valid for all rows.');
-        return;
-      }
       if (tab === 'custom') {
         if (!customBackendKey.batch_id) {
           setError('Select a batch.');
@@ -715,77 +817,182 @@ export default function AcademicControllerQPPage(): JSX.Element {
         ) : null}
 
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb' }}>S.No</th>
-                <th style={{ textAlign: 'left', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb' }}>Marks</th>
-                <th style={{ textAlign: 'left', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb' }}>CO</th>
-                <th style={{ width: 120, borderBottom: '1px solid #e5e7eb' }} />
-              </tr>
-            </thead>
-            <tbody>
-              {patternRows.length === 0 ? (
+          {isCoWisePattern ? (
+            // CO-wise pattern table for SSA/FA
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
                 <tr>
-                  <td colSpan={4} style={{ padding: 10, color: '#6b7280' }}>No questions yet. Click + to add.</td>
+                  <th style={{ textAlign: 'left', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>Component</th>
+                  <th style={{ textAlign: 'center', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>CO1<br/>Marks</th>
+                  <th style={{ textAlign: 'center', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>CO2<br/>Marks</th>
+                  <th style={{ textAlign: 'center', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>CO3<br/>Marks</th>
+                  <th style={{ textAlign: 'center', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>CO4<br/>Marks</th>
+                  <th style={{ textAlign: 'center', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>CO5<br/>Marks</th>
+                  <th style={{ width: 120, borderBottom: '1px solid #e5e7eb' }} />
                 </tr>
-              ) : (
-                patternRows.map((r, idx) => (
-                  <tr key={idx}>
-                    <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6', fontWeight: 800 }}>{idx + 1}</td>
-                    <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6' }}>
-                      <input
-                        className="obe-input"
-                        type="number"
-                        min={0}
-                        step="0.5"
-                        value={r.marks}
-                        onChange={(e) => updateMarks(idx, e.target.value)}
-                        placeholder="Marks"
-                        style={{ maxWidth: 160 }}
-                      />
-                    </td>
-                    <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6' }}>
-                      <select
-                        className="obe-input"
-                        value={String((r as any)?.co ?? '')}
-                        onChange={(e) => updateCo(idx, e.target.value)}
-                        style={{ maxWidth: 160 }}
-                      >
-                        <option value="">Select</option>
-                        {(tab === 'custom' ? selectedCustomExam : selectedExam) === 'MODEL' ? (
-                          <>
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                            <option value="5">5</option>
-                          </>
-                        ) : (tab === 'custom' ? selectedCustomExam : selectedExam) === 'CIA2' || (tab === 'custom' ? selectedCustomExam : selectedExam) === 'SSA2' || (tab === 'custom' ? selectedCustomExam : selectedExam) === 'FORMATIVE2' ? (
-                          <>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                            <option value="3&4">3&4</option>
-                          </>
-                        ) : (
-                          <>
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="1&2">1&2</option>
-                          </>
-                        )}
-                      </select>
-                    </td>
-                    <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6' }}>
-                      <button type="button" className="obe-btn obe-btn-danger" onClick={() => deleteRow(idx)}>
-                        Delete
-                      </button>
-                    </td>
+              </thead>
+              <tbody>
+                {coWiseRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ padding: 10, color: '#6b7280', textAlign: 'center' }}>No components yet. Click + to add.</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  coWiseRows.map((r, idx) => (
+                    <tr key={idx}>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6' }}>
+                        <input
+                          className="obe-input"
+                          type="text"
+                          value={r.description}
+                          onChange={(e) => updateCoWiseDescription(idx, e.target.value)}
+                          placeholder="Component name"
+                          style={{ minWidth: 150 }}
+                        />
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6', textAlign: 'center' }}>
+                        <input
+                          className="obe-input"
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={r.co1 || ''}
+                          onChange={(e) => updateCoWiseMarks(idx, 'co1', e.target.value)}
+                          placeholder="0"
+                          style={{ maxWidth: 80, textAlign: 'center' }}
+                        />
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6', textAlign: 'center' }}>
+                        <input
+                          className="obe-input"
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={r.co2 || ''}
+                          onChange={(e) => updateCoWiseMarks(idx, 'co2', e.target.value)}
+                          placeholder="0"
+                          style={{ maxWidth: 80, textAlign: 'center' }}
+                        />
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6', textAlign: 'center' }}>
+                        <input
+                          className="obe-input"
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={r.co3 || ''}
+                          onChange={(e) => updateCoWiseMarks(idx, 'co3', e.target.value)}
+                          placeholder="0"
+                          style={{ maxWidth: 80, textAlign: 'center' }}
+                        />
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6', textAlign: 'center' }}>
+                        <input
+                          className="obe-input"
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={r.co4 || ''}
+                          onChange={(e) => updateCoWiseMarks(idx, 'co4', e.target.value)}
+                          placeholder="0"
+                          style={{ maxWidth: 80, textAlign: 'center' }}
+                        />
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6', textAlign: 'center' }}>
+                        <input
+                          className="obe-input"
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={r.co5 || ''}
+                          onChange={(e) => updateCoWiseMarks(idx, 'co5', e.target.value)}
+                          placeholder="0"
+                          style={{ maxWidth: 80, textAlign: 'center' }}
+                        />
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6' }}>
+                        <button type="button" className="obe-btn obe-btn-danger" onClick={() => deleteRow(idx)}>
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          ) : (
+            // Question-wise pattern table for CIA/MODEL
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>Q.No</th>
+                  <th style={{ textAlign: 'left', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>Marks</th>
+                  <th style={{ textAlign: 'left', fontSize: 12, color: '#6b7280', padding: '8px 6px', borderBottom: '1px solid #e5e7eb', fontWeight: 800 }}>CO</th>
+                  <th style={{ width: 120, borderBottom: '1px solid #e5e7eb' }} />
+                </tr>
+              </thead>
+              <tbody>
+                {patternRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} style={{ padding: 10, color: '#6b7280' }}>No questions yet. Click + to add.</td>
+                  </tr>
+                ) : (
+                  patternRows.map((r, idx) => (
+                    <tr key={idx}>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6', fontWeight: 800 }}>{idx + 1}</td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6' }}>
+                        <input
+                          className="obe-input"
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={r.marks}
+                          onChange={(e) => updateMarks(idx, e.target.value)}
+                          placeholder="Marks"
+                          style={{ maxWidth: 160 }}
+                        />
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6' }}>
+                        <select
+                          className="obe-input"
+                          value={String((r as any)?.co ?? '')}
+                          onChange={(e) => updateCo(idx, e.target.value)}
+                          style={{ maxWidth: 160 }}
+                        >
+                          <option value="">Select</option>
+                          {(tab === 'custom' ? selectedCustomExam : selectedExam) === 'MODEL' ? (
+                            <>
+                              <option value="1">1</option>
+                              <option value="2">2</option>
+                              <option value="3">3</option>
+                              <option value="4">4</option>
+                              <option value="5">5</option>
+                            </>
+                          ) : (tab === 'custom' ? selectedCustomExam : selectedExam) === 'CIA2' || (tab === 'custom' ? selectedCustomExam : selectedExam) === 'SSA2' || (tab === 'custom' ? selectedCustomExam : selectedExam) === 'FORMATIVE2' ? (
+                            <>
+                              <option value="3">3</option>
+                              <option value="4">4</option>
+                              <option value="3&4">3&4</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="1">1</option>
+                              <option value="2">2</option>
+                              <option value="1&2">1&2</option>
+                            </>
+                          )}
+                        </select>
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #f3f4f6' }}>
+                        <button type="button" className="obe-btn obe-btn-danger" onClick={() => deleteRow(idx)}>
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>

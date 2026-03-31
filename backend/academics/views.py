@@ -1096,8 +1096,10 @@ class TeachingAssignmentViewSet(viewsets.ModelViewSet):
             except Exception:
                 return False
 
-        def _clean_keys(vals):
+        def _clean_keys(vals, *, include_model=False):
             allowed = {'ssa1', 'formative1', 'ssa2', 'formative2', 'cia1', 'cia2'}
+            if include_model:
+                allowed.add('model')
             cleaned = []
             for v in (vals or []):
                 try:
@@ -1237,7 +1239,7 @@ class TeachingAssignmentViewSet(viewsets.ModelViewSet):
         if not isinstance(vals, (list, tuple)):
             return Response({'detail': 'enabled_assessments must be a list'}, status=400)
 
-        cleaned = _clean_keys(vals)
+        cleaned = _clean_keys(vals, include_model=not _is_special_course_row(row))
         if _is_special_course_row(row):
             if not cleaned:
                 return Response({'detail': 'At least one assessment is required for SPECIAL courses.'}, status=400)

@@ -18,8 +18,8 @@ export default function Review1Entry({ subjectId, teachingAssignmentId, label, c
       assessmentKey="review1"
       label={label || 'Review 1'}
       coA={1}
-      coB={2}
-      allCos={[1, 2, 3, 4, 5]}
+      coB={1}
+      allCos={[1]}
       useSsaPublishedLockUi={isProjectClass}
       projectReviewMode={isProjectClass}
     />

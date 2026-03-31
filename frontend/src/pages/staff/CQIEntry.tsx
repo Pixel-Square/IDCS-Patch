@@ -7,6 +7,7 @@ import { getCachedMe } from '../../services/auth';
 import { fetchWithAuth } from '../../services/fetchAuth';
 import { 
   createEditRequest,
+  createPublishRequest,
   fetchPublishedSsa1, 
   fetchPublishedSsa2, 
   fetchPublishedFormative1, 
@@ -26,10 +27,13 @@ import {
 } from '../../services/obe';
 import { fetchAssessmentMasterConfig } from '../../services/cdapDb';
 import { normalizeClassType } from '../../constants/classTypes';
+import { ensureMobileVerified } from '../../services/auth';
 import { useMarkEntryEditRequestsEnabled } from '../../utils/requestControl';
 import { useEditRequestPending } from '../../hooks/useEditRequestPending';
 import { useMarkTableLock } from '../../hooks/useMarkTableLock';
 import { useEditWindow } from '../../hooks/useEditWindow';
+import { formatRemaining, usePublishWindow } from '../../hooks/usePublishWindow';
+import { useLockBodyScroll } from '../../hooks/useLockBodyScroll';
 import { getInternalMarkWeightSlotsForCo } from '../../utils/internalMarkWeights';
 
 interface CQIEntryProps {
@@ -38,7 +42,7 @@ interface CQIEntryProps {
   classType?: string | null;
   questionPaperType?: string | null;
   enabledAssessments?: string[] | null;
-  assessmentType?: 'cia1' | 'cia2' | 'model';
+  assessmentType?: 'cia1' | 'cia2' | 'model' | 'review1' | 'review2';
   cos?: string[];
   cqiDivider?: number;
   cqiMultiplier?: number;
@@ -338,7 +342,7 @@ export default function CQIEntry({
     return '';
   }, [questionPaperType]);
 
-  const THRESHOLD_PERCENT = 58;
+  const THRESHOLD_PERCENT = classTypeKey === 'PROJECT' ? 60 : 58;
   const effectiveDivider = useMemo(() => {
     const dProp = Number(cqiDivider);
     if (Number.isFinite(dProp) && dProp > 0) return dProp;
@@ -365,6 +369,9 @@ export default function CQIEntry({
   const [requestEditOpen, setRequestEditOpen] = useState(false);
   const [editRequestReason, setEditRequestReason] = useState('');
   const [editRequestBusy, setEditRequestBusy] = useState(false);
+  const [requestReason, setRequestReason] = useState('');
+  const [requesting, setRequesting] = useState(false);
+  const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Parse COs from the cos array (e.g., ["CO1", "CO2"] => [1, 2])
@@ -413,6 +420,14 @@ export default function CQIEntry({
   }, [assessmentType, coNumbers]);
 
   const editRequestsEnabled = useMarkEntryEditRequestsEnabled();
+  const {
+    data: publishWindow,
+    publishAllowed,
+    remainingSeconds,
+    loading: publishWindowLoading,
+    error: publishWindowError,
+    refresh: refreshPublishWindow,
+  } = usePublishWindow({ assessment: cqiAssessmentKey, subjectCode: String(subjectId || ''), teachingAssignmentId });
   const { data: markLock, refresh: refreshMarkLock } = useMarkTableLock({
     assessment: cqiAssessmentKey,
     subjectCode: String(subjectId || ''),
@@ -437,6 +452,8 @@ export default function CQIEntry({
   const publishButtonIsRequestEdit = Boolean(publishedEditLocked && editRequestsEnabled);
   const editRequestsBlocked = Boolean(publishedEditLocked && !editRequestsEnabled);
   const readOnly = publishedEditLocked;
+  const globalLocked = Boolean(publishWindow?.global_override_active && publishWindow?.global_is_open === false);
+  const tableBlocked = Boolean(globalLocked || publishedEditLocked);
   const {
     pending: markEntryReqPending,
     setPendingUntilMs: setMarkEntryReqPendingUntilMs,
@@ -448,6 +465,8 @@ export default function CQIEntry({
     scope: 'MARK_ENTRY',
     teachingAssignmentId,
   });
+
+  useLockBodyScroll(Boolean(requestEditOpen));
 
   // Load published snapshot (if present) and lock editing.
   useEffect(() => {
@@ -723,6 +742,7 @@ export default function CQIEntry({
         const isSpecial = ct === 'SPECIAL' && enabledSet.size;
         const allow = (k: string) => (!isSpecial ? true : enabledSet.has(String(k).toLowerCase()));
         const isTcpr = ct === 'TCPR';
+        const isProject = ct === 'PROJECT';
         const isTcpl = ct === 'TCPL';
         const isLabLike = ct === 'LAB' || ct === 'PRACTICAL';
 
@@ -769,7 +789,7 @@ export default function CQIEntry({
 
         // Read MODEL (ME-COx) marks from the saved model sheet in localStorage (theory/tcpl/tcpr only).
         // SPECIAL courses do not include MODEL in Internal Marks.
-        const canUseLocalModel = !isLabLike && ct !== 'SPECIAL';
+        const canUseLocalModel = !isLabLike && ct !== 'SPECIAL' && !isProject;
         const needsMe = canUseLocalModel && coNumbers.some((co) => co >= 1 && co <= 5);
         const modelSheet: any = (() => {
           if (!needsMe) return null;
@@ -951,21 +971,24 @@ export default function CQIEntry({
         const cia1CoByKey = coOverrideByKey(iqacCia1Pattern);
         const cia2CoByKey = coOverrideByKey(iqacCia2Pattern);
 
+        const needProjectReview1 = isProject && String(assessmentType || '').toLowerCase() === 'review1';
+        const needProjectReview2 = isProject && String(assessmentType || '').toLowerCase() === 'review2';
+
         const [ssa1Res, ssa2Res, f1Res, f2Res, cia1Res, cia2Res, review1Res, review2Res, labF1Res, labF2Res, labCia1Res, labCia2Res, labModelRes] =
           await Promise.all([
             needs12 && allow('ssa1') && !isLabLike ? (async () => { try { const p = await fetchPublishedSsa1(subjectId, teachingAssignmentId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('ssa1', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
             needs34 && allow('ssa2') && !isLabLike ? (async () => { try { const p = await fetchPublishedSsa2(subjectId, teachingAssignmentId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('ssa2', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
 
             // THEORY/SPECIAL only: formative (skill+att)
-            needs12 && allow('formative1') && !isLabLike && !isTcpr && !isTcpl ? fetchPublishedFormative1(subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
-            needs34 && allow('formative2') && !isLabLike && !isTcpr && !isTcpl ? fetchPublishedFormative('formative2', subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
+            needs12 && allow('formative1') && !isLabLike && !isTcpr && !isTcpl && !isProject ? fetchPublishedFormative1(subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
+            needs34 && allow('formative2') && !isLabLike && !isTcpr && !isTcpl && !isProject ? fetchPublishedFormative('formative2', subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
 
             needs12 && allow('cia1') && !isLabLike ? fetchPublishedCia1Sheet(subjectId, teachingAssignmentId).catch(() => ({ data: null })) : { data: null },
             needs34 && allow('cia2') && !isLabLike ? fetchPublishedCiaSheet('cia2', subjectId, teachingAssignmentId).catch(() => ({ data: null })) : { data: null },
 
-            // TCPR: review replaces formative
-            needs12 && allow('review1') && isTcpr ? (async () => { try { const p = await fetchPublishedReview1(subjectId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('review1', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
-            needs34 && allow('review2') && isTcpr ? (async () => { try { const p = await fetchPublishedReview2(subjectId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('review2', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
+            // TCPR / PROJECT: review replaces formative
+            (allow('review1') && ((isTcpr && needs12) || needProjectReview1)) ? (async () => { try { const p = await fetchPublishedReview1(subjectId, teachingAssignmentId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('review1', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
+            (allow('review2') && ((isTcpr && needs34) || needProjectReview2)) ? (async () => { try { const p = await fetchPublishedReview2(subjectId, teachingAssignmentId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('review2', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
 
             // TCPL: LAB1/LAB2 stored under formative1/formative2 (lab-style)
             needs12 && allow('formative1') && isTcpl
@@ -1054,11 +1077,34 @@ export default function CQIEntry({
           cia2: { co3: Number(cia2Cfg?.coMax?.co3 ?? cia2Cfg?.coMax?.co1) || 30, co4: Number(cia2Cfg?.coMax?.co4 ?? cia2Cfg?.coMax?.co2) || 30 },
           f1: { co1: Number(f1Cfg?.maxCo) || 10, co2: Number(f1Cfg?.maxCo) || 10 },
           f2: { co3: Number(f2Cfg?.maxCo) || 10, co4: Number(f2Cfg?.maxCo) || 10 },
-          review1: { co1: Number(review1Cfg?.coMax?.co1) || 15, co2: Number(review1Cfg?.coMax?.co2) || 15 },
-          review2: { co3: Number(review2Cfg?.coMax?.co3 ?? review2Cfg?.coMax?.co1) || 15, co4: Number(review2Cfg?.coMax?.co4 ?? review2Cfg?.coMax?.co2) || 15 },
+          review1: isProject ? { co1: 50, co2: 0 } : { co1: Number(review1Cfg?.coMax?.co1) || 15, co2: Number(review1Cfg?.coMax?.co2) || 15 },
+          review2: isProject ? { co3: 50, co4: 0 } : { co3: Number(review2Cfg?.coMax?.co3 ?? review2Cfg?.coMax?.co1) || 15, co4: Number(review2Cfg?.coMax?.co4 ?? review2Cfg?.coMax?.co2) || 15 },
         };
 
         const readReviewMarkByCo = (reviewRes: any, studentId: number, coKey: 'co1' | 'co2' | 'co3' | 'co4'): number | null => {
+          if (isProject) {
+            const draftSheet = reviewRes?.draft?.sheet && typeof reviewRes.draft.sheet === 'object'
+              ? reviewRes.draft.sheet
+              : reviewRes?.draft && typeof reviewRes.draft === 'object' && reviewRes.draft?.rowsByStudentId
+                ? reviewRes.draft
+                : null;
+            const draftRow = draftSheet?.rowsByStudentId?.[String(studentId)];
+            if (draftRow && typeof draftRow === 'object') {
+              const ciaExamTotal = toNumOrNull((draftRow as any)?.ciaExam);
+              if (ciaExamTotal != null) return clamp(ciaExamTotal, 0, 50);
+              const componentMarks = (draftRow as any)?.reviewComponentMarks && typeof (draftRow as any).reviewComponentMarks === 'object'
+                ? Object.values((draftRow as any).reviewComponentMarks)
+                : [];
+              const sum = componentMarks.reduce<number>((acc, raw) => {
+                const n = toNumOrNull(raw);
+                return acc + (n == null ? 0 : n);
+              }, 0);
+              if (sum > 0) return clamp(sum, 0, 50);
+            }
+            const total = toNumOrNull(reviewRes?.marks?.[String(studentId)]);
+            return total == null ? null : clamp(Number(total), 0, 50);
+          }
+
           const draftRows: any[] = reviewRes?.draft?.rows || reviewRes?.draft?.sheet?.rows || [];
           const draftRow = draftRows.find((r) => String(r?.studentId) === String(studentId));
           if (draftRow) {
@@ -1317,7 +1363,25 @@ export default function CQIEntry({
               }
             }
 
-            if (coNum === 1 || coNum === 2) {
+            if (isProject) {
+              const reviewAssessment = String(assessmentType || '').toLowerCase();
+              if (coNum === 1 && reviewAssessment === 'review1') {
+                const review1Mark = readReviewMarkByCo(review1Res as any, student.id, 'co1');
+                if (review1Mark != null) {
+                  reviewMark = review1Mark;
+                  reviewMax = 50;
+                }
+              }
+              if (coNum === 1 && reviewAssessment === 'review2') {
+                const review2Mark = readReviewMarkByCo(review2Res as any, student.id, 'co3');
+                if (review2Mark != null) {
+                  reviewMark = review2Mark;
+                  reviewMax = 50;
+                }
+              }
+            }
+
+            if (!isProject && (coNum === 1 || coNum === 2)) {
               // THEORY/TCPL/TCPR: SSA1 and CIA1. LAB/PRACTICAL: CIA comes from lab sheet.
               if (!isLabLike) {
                 const ssa1Total = toNumOrNull((ssa1Res as any).marks[String(student.id)]);
@@ -1404,7 +1468,7 @@ export default function CQIEntry({
                   }
                 }
               }
-            } else if (coNum === 3 || coNum === 4) {
+            } else if (!isProject && (coNum === 3 || coNum === 4)) {
               if (!isLabLike) {
                 const ssa2Total = toNumOrNull((ssa2Res as any).marks[String(student.id)]);
                 let ssaMarkVal: number | null = null;
@@ -1509,7 +1573,7 @@ export default function CQIEntry({
 
             if (reviewMark !== null && reviewMax > 0) {
               // TCPR review replaces formative weight
-              components.push({ key: 'review', mark: reviewMark, max: reviewMax, w: weights.fa });
+              components.push({ key: 'review', mark: reviewMark, max: reviewMax, w: isProject ? reviewMax : weights.fa });
             }
 
             if (faMark !== null && faMax > 0) {
@@ -1563,7 +1627,7 @@ export default function CQIEntry({
   }, [subjectId, teachingAssignmentId, classType, enabledAssessments, students, coNumbers, masterCfg]);
 
   const handleCQIChange = (studentId: number, coKey: string, value: string) => {
-    if (readOnly) return;
+    if (tableBlocked) return;
     // allow empty to clear
     if (value === '') {
       setCqiErrors(prev => {
@@ -1628,6 +1692,13 @@ export default function CQIEntry({
       return;
     }
 
+    const mobileOk = await ensureMobileVerified();
+    if (!mobileOk) {
+      setActionError('Please verify your mobile number in Profile before requesting edits.');
+      window.location.href = '/profile';
+      return;
+    }
+
     setEditRequestBusy(true);
     setActionError(null);
     try {
@@ -1654,9 +1725,39 @@ export default function CQIEntry({
     }
   };
 
+  const requestApproval = async () => {
+    if (!subjectId) return;
+    const reason = String(requestReason || '').trim();
+    if (!reason) {
+      setRequestMessage('Reason is required.');
+      return;
+    }
+
+    setRequesting(true);
+    setRequestMessage(null);
+    try {
+      const created = await createPublishRequest({
+        assessment: cqiAssessmentKey,
+        subject_code: String(subjectId),
+        reason,
+        teaching_assignment_id: teachingAssignmentId,
+      });
+      const routed = String((created as any)?.routed_to || '').trim().toUpperCase();
+      const warn = String((created as any)?.routing_warning || '').trim();
+      const baseMsg = routed === 'HOD' ? 'Request sent to HOD successfully.' : 'Request sent to IQAC successfully.';
+      setRequestMessage(warn ? `${baseMsg} ${warn}` : baseMsg);
+      setRequestReason('');
+      refreshPublishWindow();
+    } catch (e: any) {
+      setRequestMessage(e?.message || 'Failed to send request.');
+    } finally {
+      setRequesting(false);
+    }
+  };
+
   const handleSave = () => {
     if (!subjectId || !teachingAssignmentId) return;
-    if (readOnly) return;
+    if (tableBlocked) return;
     // validate no errors
     if (Object.keys(cqiErrors).length) {
       alert('Fix CQI input errors before saving');
@@ -1737,7 +1838,7 @@ export default function CQIEntry({
           onClick={handleSave}
           className="obe-btn obe-btn-primary"
           style={{ minWidth: 100 }}
-          disabled={readOnly}
+          disabled={tableBlocked}
         >
           Save CQI
         </button>
@@ -1772,7 +1873,7 @@ export default function CQIEntry({
             onClick={async () => {
               // Save draft to server
               if (!subjectId || !teachingAssignmentId) return alert('Missing subject/teaching assignment');
-              if (readOnly) return;
+              if (tableBlocked) return;
               try {
                 const payload = buildCqiPayload(cqiEntries);
                 const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${cqiQuery}`, {
@@ -1794,17 +1895,17 @@ export default function CQIEntry({
             }}
             className="obe-btn"
             style={{ minWidth: 110 }}
-            disabled={readOnly}
+            disabled={tableBlocked}
           >
             Save Draft
           </button>
 
-          {!readOnly ? (
+          {!publishedEditLocked ? (
             <button
               type="button"
               onClick={async () => {
                 if (!subjectId || !teachingAssignmentId) return alert('Missing subject/teaching assignment');
-                if (readOnly) return;
+                if (tableBlocked) return;
                 const ok = confirm('Reset CQI marks for all students? This clears the saved draft.');
                 if (!ok) return;
                 setResettingMarks(true);
@@ -1836,7 +1937,7 @@ export default function CQIEntry({
               }}
               className="obe-btn obe-btn-danger"
               style={{ minWidth: 120 }}
-              disabled={resettingMarks || readOnly}
+              disabled={resettingMarks || tableBlocked || !publishAllowed || globalLocked}
               title="Clears the saved draft marks"
             >
               {resettingMarks ? 'Resetting…' : 'Reset Marks'}
@@ -1846,13 +1947,31 @@ export default function CQIEntry({
           <button
             type="button"
             onClick={async () => {
+              if (globalLocked) {
+                alert('Publishing is locked by IQAC.');
+                return;
+              }
+              if (!publishAllowed) {
+                alert('Publish window is closed. Please request IQAC approval.');
+                return;
+              }
               if (publishButtonIsRequestEdit) {
+                if (markEntryReqPending) {
+                  alert('Edit request is pending. Please wait for approval.');
+                  return;
+                }
+                const mobileOk = await ensureMobileVerified();
+                if (!mobileOk) {
+                  alert('Please verify your mobile number in Profile before requesting edits.');
+                  window.location.href = '/profile';
+                  return;
+                }
                 setRequestEditOpen(true);
                 setActionError(null);
                 return;
               }
               if (!subjectId) return alert('Missing subject');
-              if (readOnly) return;
+              if (tableBlocked) return;
               if (!confirm('Publish CQI to DB? This action cannot be undone.')) return;
               setPublishing(true);
               try {
@@ -1865,6 +1984,7 @@ export default function CQIEntry({
                   setDirty(false);
                   setLocalPublished(true);
                   setPublishedLog({ published_at: j?.published_at ?? new Date().toISOString() });
+                  refreshPublishWindow();
                   refreshMarkLock({ silent: true });
                   refreshMarkEntryEditWindow({ silent: true });
                   alert('CQI published');
@@ -1880,12 +2000,69 @@ export default function CQIEntry({
             }}
             className="obe-btn obe-btn-primary"
             style={{ minWidth: 110 }}
-            disabled={editRequestsBlocked || (publishButtonIsRequestEdit ? markEntryReqPending : readOnly || publishing)}
+            disabled={editRequestsBlocked || (publishButtonIsRequestEdit ? markEntryReqPending : tableBlocked || publishing || !publishAllowed)}
           >
             {publishButtonIsRequestEdit ? (markEntryReqPending ? 'Request Pending' : 'Request Edit') : editRequestsBlocked ? 'Published & Locked' : publishing ? 'Publishing…' : 'Publish'}
           </button>
         </div>
       </div>
+
+      <div style={{ marginBottom: 10, fontSize: 12, color: publishAllowed ? '#065f46' : '#b91c1c' }}>
+        {publishWindowLoading ? (
+          'Checking publish due time…'
+        ) : publishWindowError ? (
+          publishWindowError
+        ) : publishWindow?.due_at ? (
+          <div
+            style={{
+              display: 'inline-block',
+              border: '1px solid #e5e7eb',
+              borderRadius: 12,
+              padding: '8px 10px',
+              background: '#fff',
+              maxWidth: '100%',
+            }}
+          >
+            <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 900, letterSpacing: 0.4 }}>REMAINING</div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: publishAllowed ? '#065f46' : '#b91c1c' }}>{formatRemaining(remainingSeconds)}</div>
+            <div style={{ marginTop: 2, fontSize: 11, color: '#6b7280' }}>Due: {new Date(publishWindow.due_at).toLocaleString()}</div>
+            {publishWindow.allowed_by_approval && publishWindow.approval_until ? (
+              <div style={{ marginTop: 2, fontSize: 11, color: '#6b7280' }}>Approved until {new Date(publishWindow.approval_until).toLocaleString()}</div>
+            ) : null}
+          </div>
+        ) : (
+          'Due time not set by IQAC.'
+        )}
+      </div>
+
+      {globalLocked ? (
+        <div style={{ marginBottom: 10, border: '1px solid #fde68a', background: '#fffbeb', borderRadius: 12, padding: 12 }}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Publishing disabled by IQAC</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            Global publishing is turned OFF for this CQI page. You can view the page, but editing and publishing are locked.
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
+            <button className="obe-btn" onClick={() => refreshPublishWindow()} disabled={publishWindowLoading}>Refresh</button>
+          </div>
+        </div>
+      ) : !publishAllowed ? (
+        <div style={{ marginBottom: 10, border: '1px solid #fecaca', background: '#fff7ed', borderRadius: 12, padding: 12 }}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Publish time is over</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Send a request for approval. The request follows the same HOD/IQAC flow as other OBE mark entry pages.</div>
+          <textarea
+            value={requestReason}
+            onChange={(e) => setRequestReason(e.target.value)}
+            placeholder="Reason (required)"
+            rows={3}
+            style={{ width: '100%', padding: 10, borderRadius: 10, border: '1px solid #e5e7eb', resize: 'vertical' }}
+          />
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
+            <button className="obe-btn" onClick={() => refreshPublishWindow()} disabled={requesting || publishWindowLoading}>Refresh</button>
+            <button className="obe-btn obe-btn-primary" onClick={requestApproval} disabled={requesting || !String(requestReason || '').trim()}>{requesting ? 'Requesting…' : 'Request Approval'}</button>
+          </div>
+          {requestMessage ? <div style={{ marginTop: 8, fontSize: 12, color: '#065f46' }}>{requestMessage}</div> : null}
+        </div>
+      ) : null}
 
       {actionError ? (
         <div style={{ marginBottom: 12, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', borderRadius: 10, padding: '10px 12px', fontWeight: 600 }}>
@@ -1936,19 +2113,19 @@ export default function CQIEntry({
             {publishedLog?.published_at ? ` · Published: ${new Date(String(publishedLog.published_at)).toLocaleString()}` : ''}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <label style={{ fontSize: 13, color: '#475569' }}><input type="checkbox" checked={autoSaveEnabled} onChange={() => setAutoSaveEnabled((s) => !s)} /> Auto-save</label>
+            <label style={{ fontSize: 13, color: '#475569' }}><input type="checkbox" checked={autoSaveEnabled} onChange={() => setAutoSaveEnabled((s) => !s)} disabled={tableBlocked} /> Auto-save</label>
             <button className="obe-btn" onClick={() => {
               // manual sync draft to server
               (async () => {
                 if (!subjectId || !teachingAssignmentId) return alert('Missing subject/TA');
-                if (readOnly) return;
+                if (tableBlocked) return;
                 try {
                   const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${cqiQuery}`, { method: 'PUT', body: JSON.stringify(buildCqiPayload(cqiEntries)) }).catch(() => null);
                   if (res && res.ok) { const j = await res.json().catch(() => null); setDraftLog(j || null); setDirty(false); alert('Draft synced to server'); }
                   else { alert('Server save failed'); }
                 } catch (e:any) { alert('Server save failed: ' + String(e?.message || e)); }
               })();
-            }} disabled={readOnly}>Sync Draft</button>
+            }} disabled={tableBlocked}>Sync Draft</button>
           </div>
         </div>
         <table className="cqi-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -2194,13 +2371,13 @@ export default function CQIEntry({
                               fontWeight: 600,
                               marginBottom: 4,
                             }}>
-                              CQI ATTAINED
+                              CQI NOT ATTAINED
                             </div>
                             <input
                               type="number"
                               value={cqiValue ?? ''}
                               onChange={(e) => handleCQIChange(student.id, coKey, e.target.value)}
-                              disabled={readOnly}
+                              disabled={tableBlocked}
                               placeholder="Enter CQI"
                               className="obe-input"
                               style={{

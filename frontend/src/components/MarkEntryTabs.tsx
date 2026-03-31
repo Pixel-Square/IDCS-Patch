@@ -41,8 +41,8 @@ type CqiTabKey = `cqi_${number}`;
 type TabKey = BaseTabKey | CqiTabKey;
 
 type CqiPlacement = {
-  showAfter: 'cia1' | 'cia2' | 'model';
-  assessmentType: 'cia1' | 'cia2' | 'model';
+  showAfter: 'cia1' | 'cia2' | 'model' | 'review1' | 'review2';
+  assessmentType: 'cia1' | 'cia2' | 'model' | 'review1' | 'review2';
   cos: string[];
 };
 
@@ -125,6 +125,8 @@ function parseCqiOption(optionId: string): CqiPlacement | null {
   const id = String(optionId || '').trim().toLowerCase();
   if (id === 'cia1_co1_co2') return { showAfter: 'cia1', assessmentType: 'cia1', cos: ['CO1', 'CO2'] };
   if (id === 'cia2_co3_co4') return { showAfter: 'cia2', assessmentType: 'cia2', cos: ['CO3', 'CO4'] };
+  if (id === 'review1_co1') return { showAfter: 'review1', assessmentType: 'review1', cos: ['CO1'] };
+  if (id === 'review2_co1') return { showAfter: 'review2', assessmentType: 'review2', cos: ['CO1'] };
   if (id === 'model_co1_co2_co3_co4_co5') return { showAfter: 'model', assessmentType: 'model', cos: ['CO1', 'CO2', 'CO3', 'CO4', 'CO5'] };
   if (id === 'model_co3_co4_co5') return { showAfter: 'model', assessmentType: 'model', cos: ['CO3', 'CO4', 'CO5'] };
   if (id === 'model_co5') return { showAfter: 'model', assessmentType: 'model', cos: ['CO5'] };
@@ -222,7 +224,9 @@ function getVisibleTabs(classType: string | null | undefined, enabledAssessments
 
   // LAB: only show lab assessments (no SSA/Formative)
   if (ct === 'LAB') {
-    return BASE_TABS.filter((t) => ['dashboard', 'cia1', 'cia2', 'model'].includes(t.key)).map((t) => {
+    const allowedLabTabs = new Set(['dashboard', 'cia1', 'cia2']);
+    if (enabled.has('model')) allowedLabTabs.add('model');
+    return BASE_TABS.filter((t) => allowedLabTabs.has(t.key)).map((t) => {
       if (t.key === 'cia1') return { ...t, label: 'CIA 1 LAB' };
       if (t.key === 'cia2') return { ...t, label: 'CIA 2 LAB' };
       if (t.key === 'model') return { ...t, label: 'MODEL LAB' };
@@ -610,11 +614,17 @@ export default function MarkEntryTabs({
   const baseVisibleTabs = useMemo(() => getVisibleTabs(effectiveClassTypeForTabs, effectiveEnabled), [effectiveClassTypeForTabs, enabledAssessments, facultyEnabledAssessments]);
 
   const cqiPlacements = useMemo(() => {
+    if (normalizedEffectiveClassType === 'PROJECT') {
+      return [
+        { showAfter: 'review1', assessmentType: 'review1', cos: ['CO1'] },
+        { showAfter: 'review2', assessmentType: 'review2', cos: ['CO1'] },
+      ] as CqiPlacement[];
+    }
     const options = Array.isArray(cqiConfig?.options) ? cqiConfig.options : [];
     return options
       .map((raw) => parseCqiOption(raw))
       .filter((x): x is CqiPlacement => Boolean(x));
-  }, [cqiConfig]);
+  }, [cqiConfig, normalizedEffectiveClassType]);
 
   const visibleTabs = useMemo(() => {
     const out: TabDef[] = [...baseVisibleTabs];
