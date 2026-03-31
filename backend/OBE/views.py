@@ -2186,8 +2186,8 @@ def qp_pattern_get(request):
 
     if not class_type:
         return Response({'detail': 'class_type is required'}, status=status.HTTP_400_BAD_REQUEST)
-    if exam not in {'CIA', 'CIA1', 'CIA2', 'MODEL'}:
-        return Response({'detail': 'exam must be CIA, CIA1, CIA2, or MODEL'}, status=status.HTTP_400_BAD_REQUEST)
+    if exam not in {'CIA', 'CIA1', 'CIA2', 'MODEL', 'SSA1', 'SSA2', 'FORMATIVE1', 'FORMATIVE2'}:
+        return Response({'detail': 'exam must be CIA, CIA1, CIA2, MODEL, SSA1, SSA2, FORMATIVE1, or FORMATIVE2'}, status=status.HTTP_400_BAD_REQUEST)
 
     if question_paper_type not in {'QP1', 'QP2'}:
         question_paper_type = ''
@@ -2246,8 +2246,8 @@ def qp_pattern_upsert(request):
 
     if not class_type:
         return Response({'detail': 'class_type is required'}, status=status.HTTP_400_BAD_REQUEST)
-    if exam not in {'CIA', 'CIA1', 'CIA2', 'MODEL'}:
-        return Response({'detail': 'exam must be CIA, CIA1, CIA2, or MODEL'}, status=status.HTTP_400_BAD_REQUEST)
+    if exam not in {'CIA', 'CIA1', 'CIA2', 'MODEL', 'SSA1', 'SSA2', 'FORMATIVE1', 'FORMATIVE2'}:
+        return Response({'detail': 'exam must be CIA, CIA1, CIA2, MODEL, SSA1, SSA2, FORMATIVE1, or FORMATIVE2'}, status=status.HTTP_400_BAD_REQUEST)
 
     if question_paper_type not in {'QP1', 'QP2'}:
         question_paper_type = ''
