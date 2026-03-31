@@ -446,6 +446,13 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     };
   };
 
+  // Keep a ref that always points to the latest buildPayload closure so the
+  // obe:before-tab-switch handler (which has stable deps) always sends fresh data.
+  const buildPayloadRef = useRef<() => ModelDraftPayload>(buildPayload);
+  useEffect(() => {
+    buildPayloadRef.current = buildPayload;
+  }); // no deps → runs every render
+
   const applyPayload = (raw: any) => {
     if (!raw || typeof raw !== 'object') return;
     // Avoid auto-saving immediately when hydrating from server.
@@ -657,15 +664,15 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     }
   };
 
-  // Auto-save draft when switching tabs
+  // Auto-save draft when switching tabs — uses ref so handler always has latest state
   useEffect(() => {
     const handler = () => {
       if (!subjectId || publishedEditLocked) return;
-      OBE.saveDraft('model', subjectId, buildPayload(), teachingAssignmentId).catch(() => {});
+      OBE.saveDraft('model', subjectId, buildPayloadRef.current(), teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
-  }, [subjectId, publishedEditLocked]);
+  }, [subjectId, publishedEditLocked, teachingAssignmentId]);
 
   const publish = async () => {
     if (!subjectId) return;
@@ -2365,18 +2372,21 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                                     moveFocus(colKey, 'down');
                                   }
                                 };
+                                const atMax = v !== '' && Number(v) >= q.max;
                                 return (
-                                  <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center' }}>
+                                  <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center', background: atMax ? 'rgba(251,191,36,0.12)' : undefined }}>
                                     <input
                                       ref={registerRef(inputKey)}
                                       type="text"
                                       inputMode="decimal"
                                       disabled={absent && !canEditAbsent}
                                       value={v === '' ? '' : String(v)}
+                                      placeholder={`/${q.max}`}
+                                      title={`Max mark: ${q.max}`}
                                       onChange={(e) => setQ(q.key, e.target.value, q.max)}
                                       onFocus={(e) => e.currentTarget.select()}
                                       onKeyDown={onCellKeyDown(q.key)}
-                                      style={excelInputStyle}
+                                      style={{ ...excelInputStyle, color: atMax ? '#92400e' : undefined }}
                                     />
                                   </td>
                                 );
@@ -2631,18 +2641,21 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                                 moveFocus(colKey, 'down');
                               }
                             };
+                            const atMax = v !== '' && Number(v) >= q.max;
                             return (
-                              <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center' }}>
+                              <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center', background: atMax ? 'rgba(251,191,36,0.12)' : undefined }}>
                                 <input
                                   ref={registerRef(inputKey)}
                                   type="text"
                                   inputMode="decimal"
                                   disabled={absent && !canEditAbsent}
                                   value={v === '' ? '' : String(v)}
+                                  placeholder={`/${q.max}`}
+                                  title={`Max mark: ${q.max}`}
                                   onChange={(e) => setQ(q.key, e.target.value, q.max)}
                                   onFocus={(e) => e.currentTarget.select()}
                                   onKeyDown={onCellKeyDown(q.key)}
-                                  style={excelInputStyle}
+                                  style={{ ...excelInputStyle, color: atMax ? '#92400e' : undefined }}
                                 />
                               </td>
                             );
@@ -3063,18 +3076,21 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                     {tcplQuestions.map((q) => {
                       const v = (row.q || ({} as any))[q.key] ?? '';
                       const inputKey = `${rowKey}|${q.key}`;
+                      const atMax = v !== '' && Number(v) >= q.max;
                       return (
-                        <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center' }}>
+                        <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center', background: atMax ? 'rgba(251,191,36,0.12)' : undefined }}>
                           <input
                             ref={registerRef(inputKey)}
                             type="text"
                             inputMode="decimal"
                             disabled={absent && !canEditAbsent}
                             value={v === '' ? '' : String(v)}
+                            placeholder={`/${q.max}`}
+                            title={`Max mark: ${q.max}`}
                             onChange={(e) => setQ(q.key, e.target.value, q.max)}
                             onFocus={(e) => e.currentTarget.select()}
                             onKeyDown={onCellKeyDown(q.key)}
-                            style={excelInputStyle}
+                            style={{ ...excelInputStyle, color: atMax ? '#92400e' : undefined }}
                           />
                         </td>
                       );
@@ -3089,6 +3105,8 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                         inputMode="decimal"
                         disabled={absent && !canEditAbsent}
                         value={lab === '' ? '' : String(lab)}
+                        placeholder={`/${tcplLabMax}`}
+                        title={`Max mark: ${tcplLabMax}`}
                         onChange={(e) => setLab(e.target.value)}
                         onFocus={(e) => e.currentTarget.select()}
                         onKeyDown={onCellKeyDown('lab')}

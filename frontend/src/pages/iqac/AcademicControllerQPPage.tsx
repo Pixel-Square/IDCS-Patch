@@ -10,14 +10,12 @@ import {
   type CustomExamBatch,
 } from '../../services/obe';
 import { fetchAssessmentMasterConfig, saveAssessmentMasterConfig } from '../../services/cdapDb';
-import { fetchQpTypes, type QuestionPaperTypeItem } from '../../services/curriculum';
 
 type QpOption = {
   key: string;
   label: string;
   class_type: 'THEORY' | 'TCPR' | 'TCPL' | 'LAB';
-  /** True when this class type uses a QP-type sub-selector (populated from DB). */
-  supports_qp_type?: boolean;
+  question_paper_type?: 'QP1' | 'QP2';
 };
 
 export default function AcademicControllerQPPage(): JSX.Element {
@@ -25,7 +23,8 @@ export default function AcademicControllerQPPage(): JSX.Element {
 
   const options: QpOption[] = useMemo(
     () => [
-      { key: 'THEORY', label: 'Theory', class_type: 'THEORY', supports_qp_type: true },
+      { key: 'THEORY_QP1', label: 'Theory QP 1', class_type: 'THEORY', question_paper_type: 'QP1' },
+      { key: 'THEORY_QP2', label: 'Theory QP 2', class_type: 'THEORY', question_paper_type: 'QP2' },
       { key: 'TCPR', label: 'TCPR', class_type: 'TCPR' },
       { key: 'TCPL', label: 'TCPL', class_type: 'TCPL' },
       { key: 'LAB', label: 'LAB', class_type: 'LAB' },
@@ -33,12 +32,8 @@ export default function AcademicControllerQPPage(): JSX.Element {
     []
   );
 
-  const [selectedKey, setSelectedKey] = useState<string>('THEORY');
+  const [selectedKey, setSelectedKey] = useState<string>(options[0]?.key || '');
   const selected = useMemo(() => options.find((o) => o.key === selectedKey) || null, [options, selectedKey]);
-
-  // DB-driven QP type list (from QuestionPaperType table) and current selection.
-  const [qpTypes, setQpTypes] = useState<QuestionPaperTypeItem[]>([]);
-  const [selectedQpTypeCode, setSelectedQpTypeCode] = useState<string>('QP1');
 
   const [selectedExam, setSelectedExam] = useState<'CIA1' | 'CIA2' | 'MODEL'>('CIA1');
 
@@ -95,38 +90,24 @@ export default function AcademicControllerQPPage(): JSX.Element {
 
   const backendKey = useMemo(() => {
     const class_type = selected?.class_type || 'THEORY';
-    const question_paper_type = selected?.supports_qp_type ? (selectedQpTypeCode || null) : null;
+    const question_paper_type = selected?.question_paper_type || null;
     return {
       class_type,
       question_paper_type,
       exam: selectedExam,
     };
-  }, [selected, selectedExam, selectedQpTypeCode]);
+  }, [selected, selectedExam]);
 
   const customBackendKey = useMemo(() => {
     const class_type = selected?.class_type || 'THEORY';
-    const question_paper_type = selected?.supports_qp_type ? (selectedQpTypeCode || null) : null;
+    const question_paper_type = selected?.question_paper_type || null;
     return {
       batch_id: selectedBatchId,
       class_type,
       question_paper_type,
       exam: selectedCustomExam,
     };
-  }, [selected?.class_type, selected?.supports_qp_type, selectedBatchId, selectedCustomExam, selectedQpTypeCode]);
-
-  // Load QP types from the DB-managed QuestionPaperType table once on mount.
-  useEffect(() => {
-    fetchQpTypes()
-      .then((types) => {
-        setQpTypes(types);
-        // Default to the first type, but only override if current default is not in the list.
-        if (types.length && !types.some((t) => t.code === selectedQpTypeCode)) {
-          setSelectedQpTypeCode(types[0].code);
-        }
-      })
-      .catch(() => setQpTypes([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selected?.class_type, selected?.question_paper_type, selectedBatchId, selectedCustomExam]);
 
   useEffect(() => {
     let cancelled = false;
@@ -530,32 +511,6 @@ export default function AcademicControllerQPPage(): JSX.Element {
         })}
       </div>
 
-      {/* QP type selector — shown only when the selected class type supports it (e.g. Theory). */}
-      {selected?.supports_qp_type ? (
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 800 }}>QP Type:</div>
-          {qpTypes.length === 0 ? (
-            <span style={{ fontSize: 12, color: '#9ca3af' }}>Loading…</span>
-          ) : (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {qpTypes.map((qt) => {
-                const active = selectedQpTypeCode === qt.code;
-                return (
-                  <button
-                    key={qt.code}
-                    type="button"
-                    onClick={() => setSelectedQpTypeCode(qt.code)}
-                    className={active ? 'obe-btn obe-btn-primary' : 'obe-btn obe-btn-secondary'}
-                  >
-                    {qt.label || qt.code}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : null}
-
       {tab === 'qp' ? (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           {(['CIA1', 'CIA2', 'MODEL'] as const).map((k) => {
@@ -644,20 +599,12 @@ export default function AcademicControllerQPPage(): JSX.Element {
           <div style={{ fontWeight: 900, color: '#111827' }}>{selected.label}</div>
           <div style={{ marginTop: 6, fontSize: 13, color: '#374151' }}>
             Class type: <strong>{selected.class_type}</strong>
-            {selected.supports_qp_type && selectedQpTypeCode ? (
+            {selected.question_paper_type ? (
               <>
-                {' '}• QP: <strong>{selectedQpTypeCode}</strong>
+                {' '}• QP: <strong>{selected.question_paper_type}</strong>
               </>
             ) : null}
-            {tab === 'qp' ? (
-              <>
-                {' '}• Exam: <strong>{selectedExam === 'CIA1' ? 'CIA 1' : selectedExam === 'CIA2' ? 'CIA 2' : 'MODEL'}</strong>
-              </>
-            ) : (
-              <>
-                {' '}• Exam: <strong>{customExamKeys.find((k) => k.key === selectedCustomExam)?.label || selectedCustomExam}</strong>
-              </>
-            )}
+            {' '}• Exam: <strong>{selectedExam === 'CIA1' ? 'CIA 1' : selectedExam === 'CIA2' ? 'CIA 2' : 'MODEL'}</strong>
           </div>
           {isLoading ? (
             <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>Loading saved pattern…</div>

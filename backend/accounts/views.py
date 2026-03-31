@@ -117,6 +117,58 @@ def _set_verified_mobile_on_profile(user, mobile_number: str, verified_at):
     # If no profile, still allow storing on User
 
 
+def _preflight_whatsapp_gateway_for_otp() -> tuple[bool, str | None]:
+    """Best-effort gateway readiness check for OTP routes.
+
+    Returns:
+      (True, None) when the gateway looks ready enough to attempt OTP operations.
+      (False, message) when the gateway is unavailable or not paired.
+    """
+
+    bases = _whatsapp_gateway_base_url_candidates() or []
+    if not bases:
+        endpoint = str(getattr(settings, 'OBE_WHATSAPP_API_URL', '') or '').strip()
+        derived = _derive_gateway_base_from_api_url(endpoint)
+        if derived:
+            bases = [derived]
+
+    if not bases:
+        return False, 'WhatsApp OTP service not configured.'
+
+    try:
+        import requests as _requests
+    except Exception:
+        return True, None
+
+    timeout = min(float(getattr(settings, 'OBE_WHATSAPP_TIMEOUT_SECONDS', 8.0) or 8.0), 5.0)
+    last_error: str | None = None
+
+    for base in bases:
+        url = f"{base.rstrip('/')}/status"
+        try:
+            resp = _requests.get(url, timeout=timeout)
+            data = resp.json() if 'application/json' in str(resp.headers.get('Content-Type', '')).lower() else {}
+            if not resp.ok:
+                last_error = str((data or {}).get('detail') or (data or {}).get('error') or f'Gateway status check failed ({resp.status_code}).')
+                continue
+
+            status_text = str((data or {}).get('status') or '').strip().upper()
+            if status_text == 'CONNECTED':
+                return True, None
+
+            detail = str((data or {}).get('detail') or '').strip()
+            if status_text == 'QR_READY':
+                return False, detail or 'WhatsApp is not connected. Pair the device first.'
+            if status_text:
+                return False, detail or f'WhatsApp gateway is {status_text}.'
+
+            last_error = detail or 'WhatsApp gateway status is unknown.'
+        except Exception as exc:
+            last_error = _friendly_gateway_error_message(exc)
+
+    return False, last_error or 'WhatsApp gateway is unavailable.'
+
+
 class MobileOtpRequestView(APIView):
     # Allow both authenticated and unauthenticated users to request OTP
     # Bypass authentication completely to avoid 401 errors from expired tokens
@@ -138,6 +190,13 @@ class MobileOtpRequestView(APIView):
             return Response({
                 'detail': 'WhatsApp OTP service not configured'
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        ready, reason = _preflight_whatsapp_gateway_for_otp()
+        if not ready:
+            return Response(
+                {'detail': reason or 'WhatsApp is not connected. Pair the device first.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         
         # Replace '/send-whatsapp' with '/mobile/request-otp' if needed
         if endpoint.endswith('/send-whatsapp'):
@@ -242,6 +301,13 @@ class MobileOtpVerifyView(APIView):
             return Response({
                 'detail': 'WhatsApp OTP service not configured'
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        ready, reason = _preflight_whatsapp_gateway_for_otp()
+        if not ready:
+            return Response(
+                {'detail': reason or 'WhatsApp is not connected. Pair the device first.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         
         # Replace '/send-whatsapp' with '/mobile/verify-otp' if needed
         if endpoint.endswith('/send-whatsapp'):
@@ -1276,32 +1342,43 @@ class QueryUpdateView(APIView):
 
 
 class UCStateView(APIView):
-    """GET  /api/accounts/uc-state/  → return under_construction map (any authenticated user)
-    PUT  /api/accounts/uc-state/  → update under_construction map (IQAC only)
-    """
-    permission_classes = (permissions.IsAuthenticated,)
+    """Read/update the site-wide under-construction state."""
 
-    def _is_iqac(self, request):
-        from .serializers import _compute_effective_role_names
-        return 'IQAC' in _compute_effective_role_names(request.user)
+    permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
         from .models import SiteConfiguration
+
         cfg = SiteConfiguration.get()
-        return Response({'under_construction': cfg.under_construction or {}})
+        state = cfg.under_construction if isinstance(cfg.under_construction, dict) else {}
+        return Response({'under_construction': state}, status=status.HTTP_200_OK)
 
     def put(self, request):
-        if not self._is_iqac(request):
+        if not _user_is_iqac(request.user):
             return Response({'detail': 'Only IQAC users can update this.'}, status=status.HTTP_403_FORBIDDEN)
-        data = request.data.get('under_construction')
+
+        data = (request.data or {}).get('under_construction')
         if not isinstance(data, dict):
             return Response({'detail': 'under_construction must be an object.'}, status=status.HTTP_400_BAD_REQUEST)
-        # Validate shape: values must be lists of strings
-        for k, v in data.items():
-            if not isinstance(k, str) or not isinstance(v, list):
-                return Response({'detail': 'Invalid shape. Expected {path: [roles]}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        normalized: dict[str, list[str]] = {}
+        for raw_path, raw_roles in data.items():
+            if not isinstance(raw_path, str) or not isinstance(raw_roles, list):
+                return Response({'detail': 'Invalid shape. Expected {path: [roles]}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            roles: list[str] = []
+            for role in raw_roles:
+                if not isinstance(role, str):
+                    return Response({'detail': 'Each role list must contain only strings.'}, status=status.HTTP_400_BAD_REQUEST)
+                role_name = role.strip()
+                if role_name:
+                    roles.append(role_name)
+
+            normalized[raw_path] = roles
+
         from .models import SiteConfiguration
+
         cfg = SiteConfiguration.get()
-        cfg.under_construction = data
+        cfg.under_construction = normalized
         cfg.save(update_fields=['under_construction', 'updated_at'])
-        return Response({'under_construction': cfg.under_construction})
+        return Response({'under_construction': cfg.under_construction}, status=status.HTTP_200_OK)
