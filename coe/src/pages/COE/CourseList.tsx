@@ -11,6 +11,27 @@ import {
   readCourseSelectionMap,
   writeCourseSelectionMap,
 } from './courseSelectionStorage';
+import { readTTScheduleMap, setTTDateForCourse } from './ttScheduleStore';
+
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import krLogoSrc from '../../assets/krlogo.png';
+import newBannerSrc from '../../assets/new_banner.png';
+import idcsLogoSrc from '../../assets/idcs-logo.png';
+
+async function imageUrlToDataUrl(url: string): Promise<string> {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('Failed to read image as data URL.'));
+    };
+    reader.onerror = () => reject(new Error('Failed to load image.'));
+    reader.readAsDataURL(blob);
+  });
+}
 
 const DEPARTMENTS = ['ALL', 'AIDS', 'AIML', 'CSE', 'CIVIL', 'ECE', 'EEE', 'IT', 'MECH'] as const;
 const SEMESTERS = ['SEM1', 'SEM2', 'SEM3', 'SEM4', 'SEM5', 'SEM6', 'SEM7', 'SEM8'] as const;
@@ -38,6 +59,11 @@ export default function CourseList() {
   const [passwordError, setPasswordError] = useState('');
   const [validatingPassword, setValidatingPassword] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [ttScheduleMap, setTtScheduleMap] = useState<Record<string, string>>({});
+  const [showTtModal, setShowTtModal] = useState(false);
+  const [ttTargetCourseKey, setTtTargetCourseKey] = useState('');
+  const [ttDateInput, setTtDateInput] = useState('');
+  const [cdapLoadingRow, setCdapLoadingRow] = useState<string | null>(null);
 
   const getCurrentFilterKey = () => `${department}::${semester}`;
 
@@ -82,6 +108,7 @@ export default function CourseList() {
   useEffect(() => {
     setIsLocked(isFilterLocked(getCurrentFilterKey()));
     setHasUnsavedChanges(false);
+    setTtScheduleMap(readTTScheduleMap(getCurrentFilterKey()));
   }, [department, semester]);
 
   useEffect(() => {
@@ -239,6 +266,170 @@ export default function CourseList() {
     }
   };
 
+  const handleCdapClick = async (e: React.MouseEvent, row: CourseRow, action: 'preview' | 'download') => {
+    e.preventDefault();
+    if (cdapLoadingRow) return;
+    setCdapLoadingRow(row.key);
+    try {
+      const res = await fetchWithAuth(`/api/obe/cdap-revision/${encodeURIComponent(row.courseCode)}`);
+      const cdap = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(cdap.detail || 'Failed to fetch CDAP data');
+      }
+
+      if (!cdap.rows || cdap.rows.length === 0) {
+        alert(`No CDAP data uploaded for ${row.courseCode} yet.`);
+        setCdapLoadingRow(null);
+        return;
+      }
+
+      const doc = new jsPDF('portrait', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      let leftLogoDataUrl = '', krLogoDataUrl = '', idcsLogoDataUrl = '';
+      try {
+        leftLogoDataUrl = await imageUrlToDataUrl(newBannerSrc);
+        krLogoDataUrl = await imageUrlToDataUrl(krLogoSrc);
+        idcsLogoDataUrl = await imageUrlToDataUrl(idcsLogoSrc);
+        
+        const bannerHeight = 42;
+        const logoHeight = 6;
+        const startY = 0;
+        
+        if (leftLogoDataUrl) {
+          const imgProps = doc.getImageProperties(leftLogoDataUrl);
+          const pdfWidth = (imgProps.width * bannerHeight) / imgProps.height;
+          doc.addImage(leftLogoDataUrl, 'PNG', 14, startY, pdfWidth, bannerHeight);
+        }
+        
+        let currentRightX = 210 - 14; // Start from right margin
+        const logosStartY = startY + (bannerHeight - logoHeight) / 2; // Center smaller logos vertically with the banner
+        
+        if (idcsLogoDataUrl) {
+          const imgProps = doc.getImageProperties(idcsLogoDataUrl);
+          const pdfWidth = (imgProps.width * logoHeight) / imgProps.height;
+          currentRightX -= pdfWidth;
+          doc.addImage(idcsLogoDataUrl, 'PNG', currentRightX, logosStartY, pdfWidth, logoHeight);
+        }
+
+        if (krLogoDataUrl) {
+          const imgProps = doc.getImageProperties(krLogoDataUrl);
+          const pdfWidth = (imgProps.width * logoHeight) / imgProps.height;
+          currentRightX -= (pdfWidth + 4); // 8mm gap between kr logo and idcs logo
+          doc.addImage(krLogoDataUrl, 'PNG', currentRightX, logosStartY, pdfWidth, logoHeight);
+        }
+
+      } catch (err) {
+        console.error('Failed to load logos', err);
+      }
+
+      doc.setFontSize(14);
+      doc.text(`SYLLABUS - ${row.courseCode} ${row.courseName}`, pageWidth / 2, 48, { align: 'center' });
+
+      // Build rows
+      const tableBody = (cdap.rows || []).map((r: any, idx: number) => {
+        return [
+          idx + 1,
+          r.content_type || '-',
+          r.part_no || '-',
+          r.topics || '-',
+          r.sub_topics || '-',
+          r.bt_level || '-'
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 53,
+        head: [['#', 'Content type', 'PART NO.', 'TOPICS TO BE COVERED (SYLLBUS TOPICS)', 'SUB TOPICS (WHAT TO BE TAUGHT)', 'BT LEVEL']],
+        body: tableBody,
+        styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+        headStyles: { fillColor: [63, 81, 181], textColor: [255, 255, 255] },
+        columnStyles: {
+           3: { cellWidth: 50 },
+           4: { cellWidth: 50 },
+        },
+        margin: { left: 14, right: 14 }
+      });
+
+      let finalY = (doc as any).lastAutoTable.finalY || 50;
+
+      // Add References
+      if (cdap.books) {
+         if (finalY + 30 > doc.internal.pageSize.getHeight()) {
+            doc.addPage();
+            finalY = 20;
+         }
+         doc.setFontSize(12);
+         doc.setFont('helvetica', 'bold');
+         doc.text('Reference Materials', 14, finalY + 15);
+         doc.setFontSize(10);
+         doc.setFont('helvetica', 'normal');
+         let currentY = finalY + 22;
+
+         if (cdap.books.textbook) {
+            doc.setFont('helvetica', 'bold');
+            doc.text('Textbooks:', 14, currentY);
+            doc.setFont('helvetica', 'normal');
+            
+            const tbLines = doc.splitTextToSize(cdap.books.textbook || '', pageWidth - 28);
+            currentY += 6;
+            doc.text(tbLines, 14, currentY);
+            currentY += (tbLines.length * 5) + 5;
+         }
+
+         if (cdap.books.reference) {
+            if (currentY + 20 > doc.internal.pageSize.getHeight()) {
+                doc.addPage();
+                currentY = 20;
+            }
+            doc.setFont('helvetica', 'bold');
+            doc.text('References:', 14, currentY);
+            doc.setFont('helvetica', 'normal');
+            
+            const refLines = doc.splitTextToSize(cdap.books.reference || '', pageWidth - 28);
+            currentY += 6;
+            doc.text(refLines, 14, currentY);
+         }
+      }
+
+      if (action === 'download') {
+        doc.save(`${row.courseCode}_CDAP.pdf`);
+      } else {
+        window.open(doc.output('bloburl'), '_blank');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to fetch CDAP data');
+    } finally {
+      setCdapLoadingRow(null);
+    }
+  };
+
+  const openTtCalendar = (courseKey: string) => {
+    const current = ttScheduleMap[courseKey] || '';
+    setTtTargetCourseKey(courseKey);
+    setTtDateInput(current);
+    setShowTtModal(true);
+  };
+
+  const saveTtDate = () => {
+    const filterKey = getCurrentFilterKey();
+    setTTDateForCourse(filterKey, ttTargetCourseKey, ttDateInput);
+    setTtScheduleMap(readTTScheduleMap(filterKey));
+    setShowTtModal(false);
+    setTtTargetCourseKey('');
+    setTtDateInput('');
+  };
+
+  const clearTtDate = () => {
+    const filterKey = getCurrentFilterKey();
+    setTTDateForCourse(filterKey, ttTargetCourseKey, '');
+    setTtScheduleMap(readTTScheduleMap(filterKey));
+    setShowTtModal(false);
+    setTtTargetCourseKey('');
+    setTtDateInput('');
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {showPasswordModal ? (
@@ -252,6 +443,12 @@ export default function CourseList() {
               type="password"
               value={passwordInput}
               onChange={(e) => setPasswordInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handlePasswordConfirm();
+                }
+              }}
               className="w-full border border-gray-300 p-2 rounded mb-2 focus:outline-none focus:border-blue-500"
               placeholder="Password"
             />
@@ -358,13 +555,13 @@ export default function CourseList() {
 
               return (
                 <div key={row.key} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <p className="text-lg font-bold text-gray-900">{row.courseName}</p>
-                      <p className="text-xs font-medium text-gray-500">{row.courseCode || 'NO_CODE'} | {row.department} | {row.semester}</p>
-                    </div>
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-lg font-bold text-gray-900 truncate">{row.courseName}</p>
+                          <p className="text-xs font-medium text-gray-500 truncate">{row.courseCode || 'NO_CODE'} | {row.department} | {row.semester}</p>
+                        </div>
 
-                    <div className="flex flex-wrap items-center gap-4 text-sm">
+                        <div className="w-full lg:w-80 flex-shrink-0 flex flex-wrap lg:flex-nowrap items-center gap-4 text-sm justify-end">
                       <div className="inline-flex items-center gap-3 rounded-md border border-gray-200 bg-white px-2 py-1">
                         <span className="text-xs font-semibold uppercase text-gray-500">QP</span>
                         <label className="inline-flex items-center gap-1">
@@ -397,6 +594,26 @@ export default function CourseList() {
                           />
                           TCPR
                         </label>
+                        <label className="inline-flex items-center gap-1">
+                          <input
+                            type="radio"
+                            name={`qp-${row.key}`}
+                            checked={conf.qpType === 'TCPL'}
+                            disabled={isLocked || conf.eseType === 'NON_ESE'}
+                            onChange={() => updateSelection(row.key, { qpType: 'TCPL' })}
+                          />
+                          TCPL
+                        </label>
+                        <label className="inline-flex items-center gap-1">
+                          <input
+                            type="radio"
+                            name={`qp-${row.key}`}
+                            checked={conf.qpType === 'OE'}
+                            disabled={isLocked || conf.eseType === 'NON_ESE'}
+                            onChange={() => updateSelection(row.key, { qpType: 'OE' })}
+                          />
+                          OE
+                        </label>
                       </div>
 
                       <div className="inline-flex items-center gap-3 rounded-md border border-gray-200 bg-white px-2 py-1">
@@ -421,6 +638,68 @@ export default function CourseList() {
                           />
                           NON-ESE
                         </label>
+                      </div>
+
+                      <div className="relative inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 whitespace-nowrap">
+                        <span className="text-xs font-semibold uppercase text-indigo-700">TT</span>
+                        <button
+                          onClick={() => openTtCalendar(row.key)}
+                          className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                        >
+                          Calendar
+                        </button>
+                        <span className="text-xs text-indigo-700">
+                          {ttScheduleMap[row.key] || 'Not Set'}
+                        </span>
+
+                        {showTtModal && ttTargetCourseKey === row.key && (
+                          <div className="absolute right-0 top-full mt-2 z-[60] bg-white p-4 rounded-xl shadow-xl w-72 border border-gray-200">
+                            <h2 className="text-base font-bold text-gray-900 mb-1">Set TT Date</h2>
+                            <p className="text-xs text-gray-500 mb-3 whitespace-normal">Choose the attendance date for this course.</p>
+                            <input
+                              type="date"
+                              value={ttDateInput}
+                              onChange={(e) => setTtDateInput(e.target.value)}
+                              onKeyDown={(e) => e.preventDefault()}
+                              onPaste={(e) => e.preventDefault()}
+                              className="w-full border border-gray-300 p-2 text-sm rounded mb-4 focus:outline-none focus:border-indigo-500"
+                            />
+                            <div className="flex justify-end space-x-2">
+                              <button
+                                onClick={() => {
+                                  setShowTtModal(false);
+                                  setTtTargetCourseKey('');
+                                  setTtDateInput('');
+                                }}
+                                className="px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={clearTtDate}
+                                className="px-3 py-1.5 text-xs font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-md transition-colors"
+                              >
+                                Clear
+                              </button>
+                              <button
+                                onClick={saveTtDate}
+                                className="px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="relative inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 whitespace-nowrap">
+                        <button
+                          onClick={(e) => handleCdapClick(e, row, 'preview')}
+                          disabled={cdapLoadingRow === row.key}
+                          className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
+                        >
+                          {cdapLoadingRow === row.key ? 'Loading...' : 'CDAP'}
+                        </button>
                       </div>
                     </div>
                   </div>

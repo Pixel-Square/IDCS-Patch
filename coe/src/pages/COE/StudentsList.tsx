@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Barcode from 'react-barcode';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { jsPDF } from 'jspdf';
 import JsBarcode from 'jsbarcode';
+import BarScanMarkEntry from './BarScanMarkEntry';
 
 import {
   CoeCourseGroup,
@@ -17,6 +19,8 @@ import {
   getCourseKey,
   readCourseSelectionMap,
 } from './courseSelectionStorage';
+import { getAttendanceFilterKey, readCourseAbsenteesMap } from './attendanceStore';
+import { getSemesterStartSequence, generateDummyNumber } from './dummySequence';
 import {
   appendRetrivalEntry,
   clearRetrivalApplyPayload,
@@ -98,6 +102,7 @@ export default function StudentsList() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CoeStudentsMapResponse | null>(null);
+  const [startSequence, setStartSequence] = useState(0);
   const [enriched, setEnriched] = useState<EnrichedData | null>(null);
   const [selectionMap, setSelectionMap] = useState<Record<string, CourseSelection>>({});
   const [saving, setSaving] = useState(false);
@@ -107,7 +112,12 @@ export default function StudentsList() {
   const [arrearShuffleMode, setArrearShuffleMode] = useState<ArrearShuffleMode>('include');
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewFileName, setPdfPreviewFileName] = useState('');
+  const [activeEntryParams, setActiveEntryParams] = useState<any>(null);
   const processedRetrivalApplyKeyRef = useRef<string>('');
+  const absentCourseMap = useMemo(
+    () => readCourseAbsenteesMap(getAttendanceFilterKey(department, semester)),
+    [department, semester]
+  );
 
   const semesterOptions = useMemo<(typeof SEMESTERS)[number][]>(() => {
     const rawSemesters = (data as any)?.available_semesters;
@@ -227,17 +237,21 @@ export default function StudentsList() {
       .replace(/\s+/g, '_')
       .slice(0, 120);
 
+  const handleOpenMarkEntry = (e: React.MouseEvent, student: AugStudent, qpType: string, deptName: string, semName: string) => {
+    e.preventDefault();
+    setActiveEntryParams({
+      code: student.dummy ? student.dummy : (student.reg_no || ''),
+      reg_no: student.reg_no || '',
+      name: student.name || '',
+      qp_type: qpType,
+      dept: deptName,
+      sem: semName,
+      dummy_number: student.dummy || ''
+    });
+  };
+
   const getMarkEntryHref = (student: AugStudent, qpType: string, deptName: string, semName: string) => {
-    const params = new URLSearchParams();
-    if (student.dummy) params.set('code', student.dummy);
-    else params.set('code', student.reg_no || '');
-    params.set('reg_no', student.reg_no || '');
-    params.set('name', student.name || '');
-    params.set('qp_type', qpType);
-    params.set('dept', deptName);
-    params.set('sem', semName);
-    if (student.dummy) params.set('dummy_number', student.dummy);
-    return `/coe/bar-scan/entry?${params.toString()}`;
+    return '#';
   };
 
   const barcodeDataUrlForValue = (value: string): string => {
@@ -319,18 +333,6 @@ export default function StudentsList() {
       const students = [...(target.course.students || [])].sort((a, b) => {
         const ra = String(a.reg_no || '').trim();
         const rb = String(b.reg_no || '').trim();
-
-        const da = ra.replace(/\D/g, '');
-        const db = rb.replace(/\D/g, '');
-
-        if (da && db) {
-          if (da.length !== db.length) {
-            return da.length - db.length;
-          }
-          const numericOrder = da.localeCompare(db, undefined, { numeric: false, sensitivity: 'base' });
-          if (numericOrder !== 0) return numericOrder;
-        }
-
         return ra.localeCompare(rb, undefined, { numeric: true, sensitivity: 'base' });
       });
 
@@ -386,7 +388,7 @@ export default function StudentsList() {
     }
 
     const semesterDigit = getSemesterDigit(semester);
-    let globalSequence = 0;
+    let globalSequence = startSequence;
 
     const persistedByDummy = getPersistedShuffledForFilter(getCurrentFilterKey());
     const savedByDummy = new Map(
@@ -410,10 +412,23 @@ export default function StudentsList() {
           return config?.eseType === 'ESE';
         })
         .map((course) => {
-          const students: AugStudent[] = course.students.map((student) => {
+          const courseKey = getCourseKey({
+            department: deptBlock.department,
+            semester,
+            courseCode: course.course_code || '',
+            courseName: course.course_name || '',
+          });
+          const courseAbsentees = absentCourseMap.get(courseKey);
+
+          const sourceStudents = (course.students || []).filter((student) => {
+            const regNo = String(student.reg_no || '').trim();
+            return regNo ? !(courseAbsentees?.has(regNo)) : true;
+          });
+
+          const students: AugStudent[] = sourceStudents.map((student) => {
             globalSequence += 1;
             const enrollmentId = `ROW::${globalSequence}`;
-            const dummy = `KR00${deptCode}${semesterDigit}${String(globalSequence).padStart(5, '0')}`;
+            const dummy = generateDummyNumber(department, globalSequence);
             const saved = savedByDummy.get(dummy);
             const persisted = persistedByDummy[dummy];
 
@@ -428,7 +443,7 @@ export default function StudentsList() {
           });
 
           const isCourseShuffled = students.some((student, index) => {
-            const original = course.students[index];
+            const original = sourceStudents[index];
             const saved = savedByDummy.get(student.dummy);
             if (!saved || !original) return false;
             return saved.reg_no !== original.reg_no || saved.name !== original.name;
@@ -449,7 +464,7 @@ export default function StudentsList() {
       semester_filter: data.semester_filter,
       departments,
     });
-  }, [data, semester, selectionMap]);
+  }, [data, semester, selectionMap, absentCourseMap]);
 
   useEffect(() => {
     let active = true;
@@ -458,7 +473,8 @@ export default function StudentsList() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetchCoeStudentsMap({ department, semester });
+        const [res, seq] = await Promise.all([fetchCoeStudentsMap({ department, semester }), getSemesterStartSequence(department, semester)]);
+          setStartSequence(seq);
         if (!active) return;
         setData(res);
       } catch (err) {
@@ -917,7 +933,9 @@ export default function StudentsList() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      <div className="rounded-xl border border-blue-100 bg-white p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {!activeEntryParams ? (
+        <>
+          <div className="rounded-xl border border-blue-100 bg-white p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">COE StudentsList</h1>
           <p className="mt-2 text-sm text-gray-600">Filter students by department and semester.</p>
@@ -1089,10 +1107,11 @@ export default function StudentsList() {
                                     <td className="px-3 py-2">
                                       {canNavigateToMarkEntry ? (
                                         <a
-                                          href={getMarkEntryHref(student, qpType, deptBlock.department, semester)}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="font-medium text-blue-700 underline hover:text-blue-800"
+                                          href="#"
+                                          
+                                          
+                                          onClick={(e) => handleOpenMarkEntry(e, student, qpType, deptBlock.department, semester)}
+className="font-medium text-blue-700 underline hover:text-blue-800"
                                         >
                                           {dummy}
                                         </a>
@@ -1161,6 +1180,30 @@ export default function StudentsList() {
           </div>
         </div>
       ) : null}
+        </>
+      ) : (
+      <ErrorBoundary fallback={<div>Error</div>}>
+        <BarScanMarkEntry
+          key={activeEntryParams.code}
+          embeddedCode={activeEntryParams.code}
+          embeddedRegNo={activeEntryParams.reg_no}
+          embeddedName={activeEntryParams.name}
+          embeddedQpType={activeEntryParams.qp_type}
+          embeddedDept={activeEntryParams.dept}
+          embeddedSem={activeEntryParams.sem}
+          embeddedDummy={activeEntryParams.dummy_number}
+          onClose={() => setActiveEntryParams(null)}
+          onNextScan={(newCode) => {
+               // Inside StudentList, if they scan next, we might not have all the URL details mapped to variables unless we search for it.
+               // We just pass it in bare code.
+               setActiveEntryParams({
+                  code: newCode,
+                  qp_type: activeEntryParams.qp_type // retain qp type if known, or it gets looked up by BarScanMarkEntry fallback
+               });
+          }}
+        />
+      </ErrorBoundary>
+      )}
     </div>
   );
 }
