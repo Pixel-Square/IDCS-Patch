@@ -10,6 +10,7 @@ import {
   type CustomExamBatch,
 } from '../../services/obe';
 import { fetchAssessmentMasterConfig, saveAssessmentMasterConfig } from '../../services/cdapDb';
+import { fetchQpTypes, type QuestionPaperTypeItem } from '../../services/curriculum';
 
 type QpOption = {
   key: string;
@@ -20,17 +21,52 @@ type QpOption = {
 
 export default function AcademicControllerQPPage(): JSX.Element {
   const [tab, setTab] = useState<'qp' | 'custom'>('qp');
+  const [qpTypes, setQpTypes] = useState<QuestionPaperTypeItem[]>([]);
+  const [qpTypesLoading, setQpTypesLoading] = useState(false);
 
-  const options: QpOption[] = useMemo(
-    () => [
-      { key: 'THEORY_QP1', label: 'Theory QP 1', class_type: 'THEORY', question_paper_type: 'QP1' },
-      { key: 'THEORY_QP2', label: 'Theory QP 2', class_type: 'THEORY', question_paper_type: 'QP2' },
+  // Fetch QP types from database on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setQpTypesLoading(true);
+      try {
+        const types = await fetchQpTypes();
+        if (cancelled) return;
+        setQpTypes(types.filter((t) => t.is_active !== false));
+      } catch (e) {
+        console.error('Failed to load QP types:', e);
+        if (!cancelled) setQpTypes([]);
+      } finally {
+        if (!cancelled) setQpTypesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const options: QpOption[] = useMemo(() => {
+    const opts: QpOption[] = [];
+    
+    // Add Theory options with each QP type
+    qpTypes.forEach((qp) => {
+      opts.push({
+        key: `THEORY_${qp.code}`,
+        label: `Theory ${qp.label}`,
+        class_type: 'THEORY',
+        question_paper_type: qp.code as 'QP1' | 'QP2',
+      });
+    });
+    
+    // Add other class types without QP types
+    opts.push(
       { key: 'TCPR', label: 'TCPR', class_type: 'TCPR' },
       { key: 'TCPL', label: 'TCPL', class_type: 'TCPL' },
-      { key: 'LAB', label: 'LAB', class_type: 'LAB' },
-    ],
-    []
-  );
+      { key: 'LAB', label: 'LAB', class_type: 'LAB' }
+    );
+    
+    return opts;
+  }, [qpTypes]);
 
   const [selectedKey, setSelectedKey] = useState<string>(options[0]?.key || '');
   const selected = useMemo(() => options.find((o) => o.key === selectedKey) || null, [options, selectedKey]);
@@ -496,19 +532,25 @@ export default function AcademicControllerQPPage(): JSX.Element {
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        {options.map((o) => {
-          const active = o.key === selectedKey;
-          return (
-            <button
-              key={o.key}
-              onClick={() => setSelectedKey(o.key)}
-              className={active ? 'obe-btn obe-btn-primary' : 'obe-btn obe-btn-secondary'}
-              type="button"
-            >
-              {o.label}
-            </button>
-          );
-        })}
+        {qpTypesLoading ? (
+          <div style={{ fontSize: 13, color: '#6b7280', padding: '8px 0' }}>Loading class types...</div>
+        ) : options.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#6b7280', padding: '8px 0' }}>No class types available</div>
+        ) : (
+          options.map((o) => {
+            const active = o.key === selectedKey;
+            return (
+              <button
+                key={o.key}
+                onClick={() => setSelectedKey(o.key)}
+                className={active ? 'obe-btn obe-btn-primary' : 'obe-btn obe-btn-secondary'}
+                type="button"
+              >
+                {o.label}
+              </button>
+            );
+          })
+        )}
       </div>
 
       {tab === 'qp' ? (
