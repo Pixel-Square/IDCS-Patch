@@ -26,6 +26,7 @@ import {
   clearRetrivalApplyPayload,
   readRetrivalApplyPayload,
 } from '../../utils/retrivalStore';
+import { readTTScheduleMap } from './ttScheduleStore';
 
 const DEPARTMENTS = ['ALL', 'AIDS', 'AIML', 'CSE', 'CIVIL', 'ECE', 'EEE', 'IT', 'MECH'] as const;
 const SEMESTERS = ['SEM1', 'SEM2', 'SEM3', 'SEM4', 'SEM5', 'SEM6', 'SEM7', 'SEM8'] as const;
@@ -33,8 +34,8 @@ const SEMESTERS = ['SEM1', 'SEM2', 'SEM3', 'SEM4', 'SEM5', 'SEM6', 'SEM7', 'SEM8
 const DEPARTMENT_DUMMY_DIGITS: Record<string, string> = {
   AIDS: '1',
   AIML: '2',
-  CSE: '3',
-  CIVIL: '4',
+  CIVIL: '3',
+  CSE: '4',
   ECE: '5',
   EEE: '6',
   IT: '7',
@@ -113,11 +114,38 @@ export default function StudentsList() {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewFileName, setPdfPreviewFileName] = useState('');
   const [activeEntryParams, setActiveEntryParams] = useState<any>(null);
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const processedRetrivalApplyKeyRef = useRef<string>('');
   const absentCourseMap = useMemo(
     () => readCourseAbsenteesMap(getAttendanceFilterKey(department, semester)),
     [department, semester]
   );
+
+  // TT schedule: courseKey -> date string (YYYY-MM-DD)
+  const ttScheduleMap = useMemo(
+    () => readTTScheduleMap(`${department}::${semester}`),
+    [department, semester]
+  );
+
+  // Derive available exam dates from schedule
+  const availableDates = useMemo(() => {
+    const dates = new Set<string>();
+    Object.values(ttScheduleMap).forEach((date) => {
+      if (date) dates.add(date);
+    });
+    const sorted = Array.from(dates).sort();
+    return sorted;
+  }, [ttScheduleMap]);
+
+  // Set of course keys that match the selected date
+  const dateFilteredCourseKeys = useMemo(() => {
+    if (!selectedDate) return null; // null means no date filter active
+    const keys = new Set<string>();
+    Object.entries(ttScheduleMap).forEach(([courseKey, date]) => {
+      if (date === selectedDate) keys.add(courseKey);
+    });
+    return keys;
+  }, [selectedDate, ttScheduleMap]);
 
   const semesterOptions = useMemo<(typeof SEMESTERS)[number][]>(() => {
     const rawSemesters = (data as any)?.available_semesters;
@@ -494,6 +522,7 @@ export default function StudentsList() {
 
   useEffect(() => {
     setShuffleUsed(isFilterShuffled(getCurrentFilterKey()));
+    setSelectedDate('');
   }, [department, semester]);
 
   useEffect(() => {
@@ -679,6 +708,17 @@ export default function StudentsList() {
 
       next.departments.forEach((dept) => {
         dept.courses.forEach((course: AugCourse) => {
+          // Skip courses not matching the selected date filter
+          if (dateFilteredCourseKeys) {
+            const courseKey = getCourseKey({
+              department: dept.department,
+              semester,
+              courseCode: course.course_code || '',
+              courseName: course.course_name || '',
+            });
+            if (!dateFilteredCourseKeys.has(courseKey)) return;
+          }
+
           const students = course.students;
           if (!students || students.length === 0) {
             course.shuffled = true;
@@ -1041,6 +1081,38 @@ export default function StudentsList() {
         </div>
       </div>
 
+      {/* Date bar for filtering courses by exam date */}
+      <div className="rounded-xl border border-indigo-100 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold text-gray-800">Exam Date:</span>
+          {availableDates.length === 0 ? (
+            <span className="text-sm text-gray-400">No dates assigned. Set TT dates in Course List first.</span>
+          ) : (
+            <>
+              <button
+                onClick={() => setSelectedDate('')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  selectedDate === '' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                All Dates
+              </button>
+              {availableDates.map((date) => (
+                <button
+                  key={date}
+                  onClick={() => setSelectedDate(date)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    selectedDate === date ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+
       {loading ? (
         <div className="rounded-xl border border-gray-200 bg-white p-6 text-gray-600">Loading course-wise students...</div>
       ) : null}
@@ -1061,7 +1133,18 @@ export default function StudentsList() {
                 {deptBlock.courses.length === 0 ? (
                   <p className="text-sm text-gray-600">No ESE courses found for this department.</p>
                 ) : (
-                  deptBlock.courses.map((course: AugCourse, courseIndex: number) => {
+                  deptBlock.courses
+                    .filter((course: AugCourse) => {
+                      if (!dateFilteredCourseKeys) return true; // no date filter
+                      const ck = getCourseKey({
+                        department: deptBlock.department,
+                        semester: semester,
+                        courseCode: course.course_code,
+                        courseName: course.course_name,
+                      });
+                      return dateFilteredCourseKeys.has(ck);
+                    })
+                    .map((course: AugCourse, courseIndex: number) => {
                     const courseKey = getCourseKey({
                       department: deptBlock.department,
                       semester: semester,

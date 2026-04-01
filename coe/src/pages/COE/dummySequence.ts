@@ -65,8 +65,8 @@ export function generateDummyNumber(department: string, globalSequence: number):
   const DEPARTMENT_DUMMY_DIGITS: Record<string, string> = {
     AIDS: '01',
     AIML: '02',
-    CSE: '03',
-    CIVIL: '04',
+    CIVIL: '03',
+    CSE: '04',
     ECE: '05',
     EEE: '06',
     IT: '07',

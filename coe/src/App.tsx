@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import ArrearList from './pages/COE/ArrearList';
+import AssigningPage from './pages/COE/AssigningPage';
 import AttendancePage from './pages/COE/AttendancePage';
 import BarScan from './pages/COE/BarScan';
 import BarScanMarkEntry from './pages/COE/BarScanMarkEntry';
@@ -64,6 +65,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     { to: '/coe/students', label: 'Students' },
     { to: '/coe/arrears', label: 'Arrears' },
     { to: '/coe/bundle-allocation', label: 'Bundles' },
+    { to: '/coe/assigning', label: 'Assigning' },
     { to: '/coe/bar-scan', label: 'Bar Scan' },
     { to: '/coe/one-page-report', label: 'One Page Report' },
     { to: '/coe/retrival', label: 'Retrival Logs' },
@@ -275,6 +277,7 @@ export default function App() {
         <Route path="/coe/attendance" element={<RequireAuth><AttendancePage /></RequireAuth>} />
         <Route path="/coe/arrears" element={<RequireAuth><ArrearList /></RequireAuth>} />
         <Route path="/coe/bundle-allocation" element={<RequireAuth><BundleAllocation /></RequireAuth>} />
+        <Route path="/coe/assigning" element={<RequireAuth><AssigningPage /></RequireAuth>} />
         <Route path="/coe/bundle-barcodes" element={<RequireAuth><BundleBarcodeView /></RequireAuth>} />
         <Route path="/coe/bar-scan" element={<RequireAuth><BarScan /></RequireAuth>} />
         <Route path="/coe/bar-scan/entry" element={<RequireAuth><BarScanMarkEntry /></RequireAuth>} />
