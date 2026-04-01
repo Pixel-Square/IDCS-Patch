@@ -21,52 +21,29 @@ export default function MarkEntryPage({ courseId, classType, questionPaperType, 
   }, [courseId]);
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #ecfdf5 0%, #ffffff 60%)',
-      padding: '0'
-    }}>
-      <div style={{
-        background: '#ffffff',
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        <div style={{
-          background: 'linear-gradient(135deg, #10b981, #059669)',
-          color: '#ffffff',
-          padding: '20px 24px',
-          flexShrink: 0
-        }}>
-          <div style={{ fontSize: 24, fontWeight: 800 }}>Mark Entry</div>
-          <div style={{ fontSize: 14, opacity: 0.9 }}> {subject ? `Course: ${subject}` : 'No course selected'} </div>
+    <div className="pt-1">
+      {!courseId && (
+        <div className="obe-card mb-4">
+          <label className="block text-xs font-bold uppercase tracking-wide text-gray-500 mb-1.5">Course ID</label>
+          <input
+            value={subject}
+            onChange={e => setSubject(e.target.value)}
+            placeholder="Enter course id"
+            className="obe-input"
+            style={focus ? { boxShadow: '0 0 0 3px rgba(11,116,184,0.15)', borderColor: '#7dd3fc' } : {}}
+            onFocus={() => setFocus(true)}
+            onBlur={() => setFocus(false)}
+          />
         </div>
+      )}
 
-        <div style={{ padding: '20px 24px', flex: 1 }}>
-          {!courseId && (
-            <div className="obe-card" style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#065f46', textTransform: 'uppercase', letterSpacing: '0.03em' }}>Course ID</label>
-              <input
-                value={subject}
-                onChange={e => setSubject(e.target.value)}
-                placeholder="Enter course id"
-                className="obe-input"
-                style={{ marginTop: 6, ...(focus ? { boxShadow: '0 0 0 3px rgba(16,185,129,0.2)', borderColor: '#a7f3d0' } : {}) }}
-                onFocus={() => setFocus(true)}
-                onBlur={() => setFocus(false)}
-              />
-            </div>
-          )}
-
-          {!subject ? (
-            <div style={{ background: '#d1fae5', border: '1px solid #a7f3d0', color: '#065f46', fontSize: 14, padding: 12, borderRadius: 10 }}>
-              Select a course to start mark entry.
-            </div>
-          ) : (
-            <MarkEntryTabs subjectId={subject} classType={classType} questionPaperType={questionPaperType} enabledAssessments={enabledAssessments} />
-          )}
+      {!subject ? (
+        <div className="obe-card text-sm text-sky-700" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+          Select a course to start mark entry.
         </div>
-      </div>
+      ) : (
+        <MarkEntryTabs subjectId={subject} classType={classType} questionPaperType={questionPaperType} enabledAssessments={enabledAssessments} />
+      )}
     </div>
   );
 }

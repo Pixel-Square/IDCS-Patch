@@ -129,6 +129,9 @@ type Props = {
 const DEFAULT_EXPERIMENTS = 5;
 const DEFAULT_EXPERIMENT_MAX = 25;
 const DEFAULT_CIA_EXAM_MAX = 30;
+const TCPL_INTERNAL_LAB_WEIGHT = 2;
+const TCPL_INTERNAL_CIA_EXAM_WEIGHT = 1.5;
+const TCPL_INTERNAL_CO_MAX = TCPL_INTERNAL_LAB_WEIGHT + TCPL_INTERNAL_CIA_EXAM_WEIGHT;
 
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min;
@@ -1095,25 +1098,30 @@ export default function LabCourseMarksEntry({
       };
     }
 
-    if (usesLegacyTcplProfile) {
+    if (usesLegacyTcplProfile && isTcpl) {
+      const enabledCoCount = Math.max(1, marksForEnabledCos.length);
+      const ciaTotal = (() => {
+        if (!ciaExamEnabled) return 0;
+        if (ciaExamNumLegacy != null) return clampNumber(ciaExamNumLegacy, 0, ciaExamMaxEffective);
+        const sumByCo = Object.values(caaByCo).reduce<number>((acc, v) => acc + (typeof v === 'number' && Number.isFinite(v) ? v : 0), 0);
+        return clampNumber(sumByCo, 0, ciaExamMaxEffective);
+      })();
+      const ciaMaxPerCo = ciaExamEnabled ? ciaExamMaxEffective / enabledCoCount : 0;
+      const ciaPerCo = ciaExamEnabled ? ciaTotal / enabledCoCount : 0;
       let finalTotal = 0;
       let hasAnyTcplMarks = false;
       const values = marksForEnabledCos.map((m) => {
-        const totalObtained = sumMarks(m.marks);
-        const totalMax = Math.max(0, m.expCount) * Math.max(0, m.expMax);
-        const expWeight = Number(TCPL_REVIEW_EXPERIMENT_WEIGHT[m.coNumber] || 0);
-        const caaWeight = Number(TCPL_REVIEW_CAA_WEIGHT[m.coNumber] || 0);
-        const caaRawMax = Number(TCPL_REVIEW_CAA_RAW_MAX[m.coNumber] || 0);
-        const coMax = Number(TCPL_REVIEW_CO_MAX[m.coNumber] || 0);
-
-        const expContribution = normalizedContribution(totalObtained, totalMax, expWeight);
-        const rawCaa = caaByCo[String(m.coNumber)];
-        const caaRaw = typeof rawCaa === 'number' && Number.isFinite(rawCaa) ? rawCaa : 0;
-        const caaContribution = normalizedContribution(caaRaw, caaRawMax, caaWeight);
-        const mark = expContribution + caaContribution;
-        if (totalObtained > 0 || caaRaw > 0) hasAnyTcplMarks = true;
-        finalTotal += mark;
-        return { coNumber: m.coNumber, mark: hasAnyTcplMarks ? mark : null, coMax };
+        const avgMark = avgMarks(m.marks);
+        const expContribution = avgMark == null ? 0 : normalizedContribution(avgMark, Math.max(0, m.expMax), TCPL_INTERNAL_LAB_WEIGHT);
+        const ciaContribution = ciaExamEnabled ? normalizedContribution(ciaPerCo, ciaMaxPerCo, TCPL_INTERNAL_CIA_EXAM_WEIGHT) : 0;
+        const hasAnyCoMark = avgMark != null || ciaTotal > 0;
+        const mark = hasAnyCoMark ? round1(expContribution + ciaContribution) : null;
+        const coMax = round1(TCPL_INTERNAL_LAB_WEIGHT + (ciaExamEnabled ? TCPL_INTERNAL_CIA_EXAM_WEIGHT : 0));
+        if (mark != null) {
+          hasAnyTcplMarks = true;
+          finalTotal += mark;
+        }
+        return { coNumber: m.coNumber, mark, coMax };
       });
 
       return {
@@ -3526,6 +3534,7 @@ export default function LabCourseMarksEntry({
                               (ciaExamEnabled && enabledCoMetas.length ? ciaExamMaxEffective / enabledCoMetas.length : 0),
                           )
                         : (() => {
+                            if (usesLegacyTcplProfile && isTcpl) return round1(TCPL_INTERNAL_CO_MAX);
                             const profileCoMax = Number(TCPL_REVIEW_CO_MAX[m.coNumber] || 0);
                             const labOverrideVal = (LAB_CO_MAX_OVERRIDE as any)[`co${m.coNumber}`];
                             const perExpMaxes = Array.from({ length: clampInt(Number(m.expCount ?? 0), 0, 12) }).map(() => clampInt(Number(m.expMax ?? DEFAULT_EXPERIMENT_MAX), 0, 100));
@@ -4576,6 +4585,7 @@ export default function LabCourseMarksEntry({
                                 (ciaExamEnabled && enabledCoMetas.length ? ciaExamMaxEffective / enabledCoMetas.length : 0),
                             )
                           : (() => {
+                              if (usesLegacyTcplProfile && isTcpl) return round1(TCPL_INTERNAL_CO_MAX);
                               const profileCoMax = Number(TCPL_REVIEW_CO_MAX[m.coNumber] || 0);
                               return usesLegacyTcplProfile && profileCoMax > 0 ? profileCoMax : m.expMax + (ciaExamEnabled ? ciaExamMaxEffective / 2 : 0);
                             })();

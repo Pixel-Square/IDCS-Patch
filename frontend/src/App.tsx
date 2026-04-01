@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { derivePrimaryRole, getMe } from "./services/auth";
+import { seedUCState } from "./utils/underConstruction";
 import Navbar from "./components/navigation/Navbar";
 import DashboardSidebar from './components/layout/DashboardSidebar';
 import { useSidebar } from './components/layout/SidebarContext';
@@ -21,6 +22,8 @@ import DashboardPage from "./pages/dashboard/Dashboard";
 import ProfilePage from "./pages/profile/Profile";
 import SettingsPage from './pages/settings/SettingsPage';
 import WhatsAppSenderPage from './pages/settings/WhatsAppSenderPage';
+import UnderConstructionManagerPage from './pages/settings/UnderConstructionManagerPage';
+import UCGate from './components/UCGate';
 import MasterList from './pages/curriculum/MasterList';
 import MasterEditor from './pages/curriculum/MasterEditor';
 import DeptList from './pages/curriculum/DeptList';
@@ -71,6 +74,7 @@ import ManageGatePage from './pages/hr/ManageGatePage';
 import GatePassLogsPage from './pages/hr/GatePassLogsPage';
 import StaffValidationPage from './pages/hr/StaffValidationPage';
 import StaffSalaryPage from './pages/hr/StaffSalaryPage';
+import ExtStaffProfilesPage from './pages/hr/ExtStaffProfilesPage';
 import SalaryPage from './pages/staff/SalaryPage';
 import MyRequestsPage from './pages/staff-requests/MyRequestsPage';
 import PendingApprovalsPage from './pages/staff-requests/PendingApprovalsPage';
@@ -96,6 +100,7 @@ import RFReaderTestStudentsPage from './pages/RFReader/TestStudentsPage';
 import RFReaderAddStudentsRFPage from './pages/RFReader/AddStudentsRFPage';
 import RFReaderGateScanPage from './pages/RFReader/GateScanPage';
 import RFReaderCardsDataPage from './pages/RFReader/CardsDataPage';
+import BulkEntryPage from './pages/RFReader/BulkEntryPage';
 import AttendanceAnalyticsRequestsPage from './pages/attendance/AttendanceAnalyticsRequestsPage';
 import RequestsPage from './pages/requests/RequestsPage';
 import ProfileImageUpdateRequestsPage from './pages/requests/ProfileImageUpdateRequestsPage';
@@ -172,6 +177,7 @@ export default function App() {
           profile_type: r.profile_type || null,
           profile: r.profile || null,
         };
+        seedUCState((r as any).under_construction || {});
         setUser(normalizedUser as Me);
       })
       .catch(() => { if (!cancelled) setUser(null) })
@@ -196,6 +202,7 @@ export default function App() {
         profile_type: detail.profile_type || null,
         profile: detail.profile || null,
       };
+      seedUCState((detail as any).under_construction || {});
       setUser(normalizedUser as Me);
     };
 
@@ -239,6 +246,7 @@ export default function App() {
               collapsed ? 'lg:pl-20' : 'lg:pl-64'
             }`}
           >
+            <UCGate user={user}>
             <div className="app-main-zoom">
               <Routes>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -252,6 +260,10 @@ export default function App() {
                 <Route
                   path="/settings/whatsapp-sender"
                   element={<ProtectedRoute user={user} requiredRoles={['IQAC']} element={<WhatsAppSenderPage />} />}
+                />
+                <Route
+                  path="/settings/under-construction"
+                  element={<ProtectedRoute user={user} requiredRoles={['IQAC']} element={<UnderConstructionManagerPage />} />}
                 />
                 <Route
                   path="/iqac/applications-admin"
@@ -485,6 +497,10 @@ export default function App() {
                   element={<ProtectedRoute user={user} requiredRoles={['LIBRARY', 'SECURITY', 'IQAC', 'ADMIN']} element={<RFReaderCardsDataPage />} />}
                 />
                 <Route
+                  path="/idscan/bulk-entry"
+                  element={<ProtectedRoute user={user} requiredRoles={['LIBRARY', 'SECURITY', 'IQAC', 'ADMIN']} element={<BulkEntryPage />} />}
+                />
+                <Route
                   path="/idscan/gatepass"
                   element={<ProtectedRoute user={user} requiredRoles={['SECURITY']} element={<IDCSScanGatepassPage />} />}
                 />
@@ -610,6 +626,11 @@ export default function App() {
                   element={<ProtectedRoute user={user} requiredRoles={['HR']} requiredPermissions={['staff_requests.manage_templates']} element={<StaffSalaryPage />} />}
                 />
                 
+                <Route
+                  path="/hr/ext-staff-profiles"
+                  element={<ProtectedRoute user={user} requiredPermissions={['academics.view_staffs_page']} element={<ExtStaffProfilesPage />} />}
+                />
+
                 {/* Staff Requests Routes */}
                 <Route
                   path="/staff-requests/my-requests"
@@ -655,6 +676,7 @@ export default function App() {
                 <Route path="/branding/*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </div>
+            </UCGate>
           </main>
         </div>
       ) : (

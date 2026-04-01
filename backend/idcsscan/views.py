@@ -38,7 +38,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from academics.models import StaffProfile, StudentProfile
+from academics.models import AcademicYear, StaffProfile, StudentProfile
 from academics.models import RFReaderGate, RFReaderScan
 from academics.rfreader_serializers import RFReaderGateSerializer
 from applications import models as app_models
@@ -2412,11 +2412,22 @@ class CardsDataView(APIView):
     permission_classes = (IsAuthenticated,)
     
     def get(self, request):
-        if not request.user.roles.filter(name__in=["SECURITY", "LIBRARY", "IQAC", "ADMIN"]).exists():
+        if not _has_card_management_permission(request.user):
             return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        acad_start: Optional[int] = None
+        sem_offset = 2
+        try:
+            ay = AcademicYear.objects.filter(is_active=True).first() or AcademicYear.objects.order_by('-id').first()
+            if ay and ay.name:
+                acad_start = int(str(ay.name).split('-')[0])
+                sem_offset = 1 if (ay.parity or '').upper() == 'ODD' else 2
+        except Exception:
+            acad_start = None
+            sem_offset = 2
             
         students = StudentProfile.objects.select_related(
-            "user", "section__batch__course__department", "home_department"
+            "user", "section__batch__course__department", "section__semester", "home_department"
         ).all()
         
         staff = StaffProfile.objects.select_related("user", "department").all()
@@ -2430,12 +2441,27 @@ class CardsDataView(APIView):
             except Exception:
                 profile_image_url = None
 
-            username = ''
-            if s.user:
-                try:
-                    username = s.user.get_username()
-                except Exception:
-                    username = getattr(s.user, 'username', '') or ''
+            sem_number: Optional[int] = None
+            try:
+                if getattr(s, 'section', None) and getattr(s.section, 'semester', None):
+                    sem_number = getattr(s.section.semester, 'number', None)
+                elif acad_start is not None and getattr(s, 'section', None) and getattr(s.section, 'batch', None):
+                    batch = s.section.batch
+                    start_year = getattr(batch, 'start_year', None)
+                    if start_year is None:
+                        try:
+                            start_year = int(str(getattr(batch, 'name', '')).split('-')[0])
+                        except Exception:
+                            start_year = None
+                    if start_year is not None:
+                        delta = int(acad_start) - int(start_year)
+                        computed = delta * 2 + int(sem_offset)
+                        if computed > 0:
+                            sem_number = computed
+            except Exception:
+                sem_number = None
+
+            username = getattr(s.user, "username", "") if s.user else ""
             dept = ""
             if s.section and s.section.batch and s.section.batch.course and s.section.batch.course.department:
                 dept = s.section.batch.course.department.short_name or s.section.batch.course.department.code
@@ -2448,6 +2474,9 @@ class CardsDataView(APIView):
                 "username": username,
                 "name": f"{s.user.first_name} {s.user.last_name}".strip() if s.user else "",
                 "department": dept,
+                "section": s.section.name if s.section else None,
+                "batch": str(s.section.batch) if s.section and s.section.batch else None,
+                "semester": sem_number,
                 "rfid_uid": s.rfid_uid,
                 "status": "Connected" if s.rfid_uid else "Not Connected",
                 "profile_image_url": profile_image_url,
@@ -2461,12 +2490,7 @@ class CardsDataView(APIView):
             except Exception:
                 profile_image_url = None
 
-            username = ''
-            if s.user:
-                try:
-                    username = s.user.get_username()
-                except Exception:
-                    username = getattr(s.user, 'username', '') or ''
+            username = getattr(s.user, "username", "") if s.user else ""
             dept = (s.department.short_name or s.department.code) if s.department else ""
             data.append({
                 "id": s.id,
@@ -2480,4 +2504,97 @@ class CardsDataView(APIView):
                 "profile_image_url": profile_image_url,
             })
             
+        return Response({"results": data}, status=status.HTTP_200_OK)
+
+
+class BulkEntryPeopleView(APIView):
+    """GET /api/idscan/bulk-entry/people/
+    
+    Returns a filtered list of students or staff for bulk RFID assignment.
+    
+    Query params:
+      role      - "STUDENT" or "STAFF" (required)
+      dept      - department id (optional)
+      section   - section id (optional, for STUDENT only)
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        if not _has_card_management_permission(request.user):
+            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        role = (request.query_params.get('role') or '').upper()
+        dept = request.query_params.get('dept')
+        section = request.query_params.get('section')
+
+        data = []
+
+        if role == 'STUDENT' or not role:
+            qs = StudentProfile.objects.select_related(
+                "user", "section__batch__course__department", "home_department"
+            ).all()
+            if dept:
+                try:
+                    qs = qs.filter(section__batch__course__department_id=int(dept))
+                except (ValueError, TypeError):
+                    pass
+            if section:
+                try:
+                    qs = qs.filter(section_id=int(section))
+                except (ValueError, TypeError):
+                    pass
+            for s in qs:
+                profile_image_url = None
+                try:
+                    if getattr(s, 'profile_image', None):
+                        profile_image_url = s.profile_image.url
+                except Exception:
+                    pass
+
+                dept_name = ""
+                if s.section and s.section.batch and s.section.batch.course and s.section.batch.course.department:
+                    dept_name = s.section.batch.course.department.short_name or s.section.batch.course.department.code
+                elif s.home_department:
+                    dept_name = s.home_department.short_name or s.home_department.code
+
+                data.append({
+                    "id": s.id,
+                    "role": "STUDENT",
+                    "identifier": s.reg_no,
+                    "username": getattr(s.user, "username", "") if s.user else "",
+                    "name": f"{s.user.first_name} {s.user.last_name}".strip() if s.user else "",
+                    "department": dept_name,
+                    "section": s.section.name if s.section else None,
+                    "rfid_uid": s.rfid_uid,
+                    "profile_image_url": profile_image_url,
+                })
+
+        if role == 'STAFF' or not role:
+            qs_staff = StaffProfile.objects.select_related("user", "department").all()
+            if dept:
+                try:
+                    qs_staff = qs_staff.filter(department_id=int(dept))
+                except (ValueError, TypeError):
+                    pass
+            for s in qs_staff:
+                profile_image_url = None
+                try:
+                    if getattr(s, 'profile_image', None):
+                        profile_image_url = s.profile_image.url
+                except Exception:
+                    pass
+
+                dept_name = (s.department.short_name or s.department.code) if s.department else ""
+                data.append({
+                    "id": s.id,
+                    "role": "STAFF",
+                    "identifier": s.staff_id,
+                    "username": getattr(s.user, "username", "") if s.user else "",
+                    "name": f"{s.user.first_name} {s.user.last_name}".strip() if s.user else "",
+                    "department": dept_name,
+                    "section": None,
+                    "rfid_uid": s.rfid_uid,
+                    "profile_image_url": profile_image_url,
+                })
+
         return Response({"results": data}, status=status.HTTP_200_OK)

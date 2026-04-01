@@ -6,6 +6,8 @@ import { exportCqiPdf } from '../../utils/cqiExportPdf';
 import { getCachedMe } from '../../services/auth';
 import { fetchWithAuth } from '../../services/fetchAuth';
 import { 
+  createEditRequest,
+  createPublishRequest,
   fetchPublishedSsa1, 
   fetchPublishedSsa2, 
   fetchPublishedFormative1, 
@@ -19,9 +21,20 @@ import {
   fetchDraft,
   fetchIqacCqiConfig,
   fetchIqacQpPattern,
+  fetchClassTypeWeights,
+  formatApiErrorMessage,
+  formatEditRequestSentMessage,
 } from '../../services/obe';
 import { fetchAssessmentMasterConfig } from '../../services/cdapDb';
 import { normalizeClassType } from '../../constants/classTypes';
+import { ensureMobileVerified } from '../../services/auth';
+import { useMarkEntryEditRequestsEnabled } from '../../utils/requestControl';
+import { useEditRequestPending } from '../../hooks/useEditRequestPending';
+import { useMarkTableLock } from '../../hooks/useMarkTableLock';
+import { useEditWindow } from '../../hooks/useEditWindow';
+import { formatRemaining, usePublishWindow } from '../../hooks/usePublishWindow';
+import { useLockBodyScroll } from '../../hooks/useLockBodyScroll';
+import { getInternalMarkWeightSlotsForCo } from '../../utils/internalMarkWeights';
 
 interface CQIEntryProps {
   subjectId?: string;
@@ -29,7 +42,7 @@ interface CQIEntryProps {
   classType?: string | null;
   questionPaperType?: string | null;
   enabledAssessments?: string[] | null;
-  assessmentType?: 'cia1' | 'cia2' | 'model';
+  assessmentType?: 'cia1' | 'cia2' | 'model' | 'review1' | 'review2';
   cos?: string[];
   cqiDivider?: number;
   cqiMultiplier?: number;
@@ -117,6 +130,14 @@ function clampInt(n: number, min: number, max: number) {
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
+}
+
+function parseCoNumber(value: unknown, fallback = 1) {
+  const n = Number(value);
+  if (Number.isFinite(n)) return clamp(Math.round(n), 1, 5);
+  const s = String(value ?? '').toUpperCase();
+  const m = s.match(/\d+/);
+  return m ? clamp(Number(m[0]), 1, 5) : fallback;
 }
 
 function componentLabel(ct: string, key: string): string {
@@ -321,7 +342,7 @@ export default function CQIEntry({
     return '';
   }, [questionPaperType]);
 
-  const THRESHOLD_PERCENT = 58;
+  const THRESHOLD_PERCENT = classTypeKey === 'PROJECT' ? 60 : 58;
   const effectiveDivider = useMemo(() => {
     const dProp = Number(cqiDivider);
     if (Number.isFinite(dProp) && dProp > 0) return dProp;
@@ -340,10 +361,112 @@ export default function CQIEntry({
   const [headerMaxVisible, setHeaderMaxVisible] = useState(true);
   const [draftLog, setDraftLog] = useState<{ updated_at?: string | null; updated_by?: any | null } | null>(null);
   const [publishedLog, setPublishedLog] = useState<{ published_at?: string | null } | null>(null);
-  const [readOnly, setReadOnly] = useState(false);
+  const [localPublished, setLocalPublished] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [resettingMarks, setResettingMarks] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [requestEditOpen, setRequestEditOpen] = useState(false);
+  const [editRequestReason, setEditRequestReason] = useState('');
+  const [editRequestBusy, setEditRequestBusy] = useState(false);
+  const [requestReason, setRequestReason] = useState('');
+  const [requesting, setRequesting] = useState(false);
+  const [requestMessage, setRequestMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Parse COs from the cos array (e.g., ["CO1", "CO2"] => [1, 2])
+  const coNumbers = useMemo(() => {
+    if (!cos || !Array.isArray(cos)) return [];
+    return cos
+      .map(co => {
+        const match = co.match(/\d+/);
+        return match ? parseInt(match[0]) : null;
+      })
+      .filter((n): n is number => n !== null)
+      .sort((a, b) => a - b);
+  }, [cos]);
+
+  const cqiPageKey = useMemo(() => {
+    const assessment = String(assessmentType || 'generic').trim().toLowerCase();
+    const coKey = coNumbers.length ? coNumbers.join(',') : 'none';
+    return `${assessment}:${coKey}`;
+  }, [assessmentType, coNumbers]);
+
+  const cqiQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (teachingAssignmentId) params.set('teaching_assignment_id', String(teachingAssignmentId));
+    if (cqiPageKey) params.set('page_key', cqiPageKey);
+    if (assessmentType) params.set('assessment_type', String(assessmentType));
+    if (coNumbers.length) params.set('co_numbers', coNumbers.join(','));
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+  }, [assessmentType, cqiPageKey, coNumbers, teachingAssignmentId]);
+
+  const buildCqiPayload = (entries: Record<number, CQIEntry>) => ({
+    pageKey: cqiPageKey,
+    assessmentType: assessmentType || null,
+    coNumbers,
+    entries,
+  });
+
+  const cqiAssessmentKey = useMemo(() => {
+    const assessment = String(assessmentType || 'model')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'model';
+    const coSuffix = coNumbers.length ? `_${coNumbers.join('_')}` : '';
+    return `cqi_${assessment}${coSuffix}` as const;
+  }, [assessmentType, coNumbers]);
+
+  const editRequestsEnabled = useMarkEntryEditRequestsEnabled();
+  const {
+    data: publishWindow,
+    publishAllowed,
+    remainingSeconds,
+    loading: publishWindowLoading,
+    error: publishWindowError,
+    refresh: refreshPublishWindow,
+  } = usePublishWindow({ assessment: cqiAssessmentKey, subjectCode: String(subjectId || ''), teachingAssignmentId });
+  const { data: markLock, refresh: refreshMarkLock } = useMarkTableLock({
+    assessment: cqiAssessmentKey,
+    subjectCode: String(subjectId || ''),
+    teachingAssignmentId,
+    options: { poll: true },
+  });
+  const { data: markEntryEditWindow, refresh: refreshMarkEntryEditWindow } = useEditWindow({
+    assessment: cqiAssessmentKey,
+    subjectCode: String(subjectId || ''),
+    scope: 'MARK_ENTRY',
+    teachingAssignmentId,
+    options: { poll: true },
+  });
+  const isPublished = Boolean(localPublished || markLock?.is_published || publishedLog?.published_at);
+  
+  const entryOpen = !isPublished
+    ? true
+    : Boolean(markLock?.entry_open) || Boolean(markEntryEditWindow?.allowed_by_approval);
+
+  const publishedEditLocked = Boolean(isPublished && !entryOpen);
+  
+  const publishButtonIsRequestEdit = Boolean(publishedEditLocked && editRequestsEnabled);
+  const editRequestsBlocked = Boolean(publishedEditLocked && !editRequestsEnabled);
+  const readOnly = publishedEditLocked;
+  const globalLocked = Boolean(publishWindow?.global_override_active && publishWindow?.global_is_open === false);
+  const tableBlocked = Boolean(globalLocked || publishedEditLocked);
+  const {
+    pending: markEntryReqPending,
+    setPendingUntilMs: setMarkEntryReqPendingUntilMs,
+    refresh: refreshMarkEntryReqPending,
+  } = useEditRequestPending({
+    enabled: Boolean(publishButtonIsRequestEdit) && Boolean(subjectId),
+    assessment: cqiAssessmentKey,
+    subjectCode: subjectId ? String(subjectId) : null,
+    scope: 'MARK_ENTRY',
+    teachingAssignmentId,
+  });
+
+  useLockBodyScroll(Boolean(requestEditOpen));
 
   // Load published snapshot (if present) and lock editing.
   useEffect(() => {
@@ -351,23 +474,21 @@ export default function CQIEntry({
     (async () => {
       if (!subjectId || !teachingAssignmentId) {
         if (mounted) {
-          setReadOnly(false);
           setPublishedLog(null);
         }
         return;
       }
       try {
-        const qp = `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}`;
-        const res = await fetchWithAuth(`/api/obe/cqi-published/${encodeURIComponent(String(subjectId))}${qp}`).catch(() => null);
+        const res = await fetchWithAuth(`/api/obe/cqi-published/${encodeURIComponent(String(subjectId))}${cqiQuery}`).catch(() => null);
         if (!mounted) return;
         if (res && res.ok) {
           const j = await res.json().catch(() => null);
           const pub = j?.published;
           if (pub && typeof pub === 'object' && pub.entries && typeof pub.entries === 'object') {
             setCqiEntries(pub.entries || {});
-            setReadOnly(true);
             setDirty(false);
             setPublishedLog({ published_at: pub.publishedAt ?? null });
+            if (pub.publishedAt) setLocalPublished(true);
             return;
           }
         }
@@ -375,12 +496,11 @@ export default function CQIEntry({
         // ignore
       }
       if (mounted) {
-        setReadOnly(false);
         setPublishedLog(null);
       }
     })();
     return () => { mounted = false; };
-  }, [subjectId, teachingAssignmentId]);
+  }, [subjectId, teachingAssignmentId, cqiQuery]);
 
   // Load global IQAC CQI config (applies to all courses).
   useEffect(() => {
@@ -404,18 +524,6 @@ export default function CQIEntry({
       mounted = false;
     };
   }, []);
-
-  // Parse COs from the cos array (e.g., ["CO1", "CO2"] => [1, 2])
-  const coNumbers = useMemo(() => {
-    if (!cos || !Array.isArray(cos)) return [];
-    return cos
-      .map(co => {
-        const match = co.match(/\d+/);
-        return match ? parseInt(match[0]) : null;
-      })
-      .filter((n): n is number => n !== null)
-      .sort((a, b) => a - b);
-  }, [cos]);
 
   // Compute header maxes for each CO column from `coTotals` so we can show Max in the table header
   const headerMaxes = useMemo(() => {
@@ -601,13 +709,16 @@ export default function CQIEntry({
     if (readOnly) return;
     (async () => {
       try {
-        const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
-        const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${qp}`, { method: 'GET' }).catch(() => null);
+        const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${cqiQuery}`, { method: 'GET' }).catch(() => null);
         if (res && res.ok) {
           const j = await res.json().catch(() => null);
           if (j?.draft) {
             setCqiEntries(j.draft.entries || j.draft || {});
             setDraftLog({ updated_at: j.updated_at || null, updated_by: j.updated_by || null });
+            setDirty(false);
+          } else {
+            setCqiEntries({});
+            setDraftLog(null);
             setDirty(false);
           }
         }
@@ -615,7 +726,7 @@ export default function CQIEntry({
         // ignore
       }
     })();
-  }, [subjectId, teachingAssignmentId, readOnly]);
+  }, [subjectId, teachingAssignmentId, readOnly, cqiQuery]);
 
   // Calculate CO totals from internal marks
   useEffect(() => {
@@ -631,6 +742,7 @@ export default function CQIEntry({
         const isSpecial = ct === 'SPECIAL' && enabledSet.size;
         const allow = (k: string) => (!isSpecial ? true : enabledSet.has(String(k).toLowerCase()));
         const isTcpr = ct === 'TCPR';
+        const isProject = ct === 'PROJECT';
         const isTcpl = ct === 'TCPL';
         const isLabLike = ct === 'LAB' || ct === 'PRACTICAL';
 
@@ -659,9 +771,25 @@ export default function CQIEntry({
           return res?.pattern || null;
         };
 
+        const loadIqacModelPattern = async () => {
+          if (!classTypeKey) return null as any;
+          try {
+            const res: any = await fetchIqacQpPattern({
+              class_type: classTypeKey,
+              question_paper_type: qpForApi,
+              exam: 'MODEL',
+            });
+            const marks = Array.isArray(res?.pattern?.marks) ? res.pattern.marks : [];
+            if (!marks.length) return null;
+            return res?.pattern || null;
+          } catch {
+            return null;
+          }
+        };
+
         // Read MODEL (ME-COx) marks from the saved model sheet in localStorage (theory/tcpl/tcpr only).
         // SPECIAL courses do not include MODEL in Internal Marks.
-        const canUseLocalModel = !isLabLike && ct !== 'SPECIAL';
+        const canUseLocalModel = !isLabLike && ct !== 'SPECIAL' && !isProject;
         const needsMe = canUseLocalModel && coNumbers.some((co) => co >= 1 && co <= 5);
         const modelSheet: any = (() => {
           if (!needsMe) return null;
@@ -686,12 +814,60 @@ export default function CQIEntry({
           }
           return null;
         })();
+        
+        // Fetch published marks based on class type and enabled assessments.
+        const needs12 = coNumbers.some((co) => co === 1 || co === 2);
+        const needs34 = coNumbers.some((co) => co === 3 || co === 4);
+        const needs5 = coNumbers.some((co) => co === 5);
 
-        const modelMaxes = (() => {
+        const [iqacCia1Pattern, iqacCia2Pattern, iqacModelPattern] = await Promise.all([
+          needs12 && allow('cia1') && !isLabLike ? loadIqacPattern('CIA1') : Promise.resolve(null),
+          needs34 && allow('cia2') && !isLabLike ? loadIqacPattern('CIA2') : Promise.resolve(null),
+          needsMe ? loadIqacModelPattern() : Promise.resolve(null),
+        ]);
+
+        const modelIsTcplLike = isTcpl || isTcpr;
+        const modelPatternMarks = Array.isArray((iqacModelPattern as any)?.marks) ? (iqacModelPattern as any).marks : null;
+
+        const modelQuestions = (() => {
+          if (Array.isArray(modelPatternMarks) && modelPatternMarks.length) {
+            return modelPatternMarks.map((mx: any, idx: number) => ({ key: `q${idx + 1}`, max: Number(mx) || 0 }));
+          }
+          if (modelIsTcplLike) {
+            const count = isTcpr ? 12 : 15;
+            const twoMarkCount = isTcpr ? 8 : 10;
+            return Array.from({ length: count }, (_, i) => {
+              const idx = i + 1;
+              return { key: `q${idx}`, max: idx <= twoMarkCount ? 2 : 16 };
+            });
+          }
+          return MODEL_THEORY_QUESTIONS;
+        })();
+
+        const modelCosRow = (() => {
+          const cos = Array.isArray((iqacModelPattern as any)?.cos) ? (iqacModelPattern as any).cos : null;
+          if (Array.isArray(cos) && cos.length === modelQuestions.length) {
+            return cos.map((v: any) => parseCoNumber(v));
+          }
+          if (isTcpr) {
+            const base = [1, 1, 2, 2, 3, 3, 4, 4, 1, 2, 3, 4];
+            if (modelQuestions.length === base.length) return base;
+            return Array.from({ length: modelQuestions.length }, (_, i) => base[i % base.length]);
+          }
+          if (isTcpl) {
+            const base = [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 1, 2, 3, 4, 5];
+            if (modelQuestions.length === base.length) return base;
+            return Array.from({ length: modelQuestions.length }, (_, i) => base[i % base.length]);
+          }
+          if (modelQuestions.length === MODEL_THEORY_CO_ROW.length) return [...MODEL_THEORY_CO_ROW];
+          return Array.from({ length: modelQuestions.length }, (_, i) => MODEL_THEORY_CO_ROW[i % MODEL_THEORY_CO_ROW.length]);
+        })();
+
+        const modelQuestionMaxByCo = (() => {
           const out = { co1: 0, co2: 0, co3: 0, co4: 0, co5: 0 };
-          for (let i = 0; i < MODEL_THEORY_QUESTIONS.length; i++) {
-            const def = MODEL_THEORY_QUESTIONS[i];
-            const co = MODEL_THEORY_CO_ROW[i];
+          for (let i = 0; i < modelQuestions.length; i++) {
+            const def = modelQuestions[i];
+            const co = modelCosRow[i] ?? 1;
             if (co === 1) out.co1 += def.max;
             else if (co === 2) out.co2 += def.max;
             else if (co === 3) out.co3 += def.max;
@@ -699,6 +875,24 @@ export default function CQIEntry({
             else if (co === 5) out.co5 += def.max;
           }
           return out;
+        })();
+
+        const modelMaxes = (() => {
+          const base = { ...modelQuestionMaxByCo };
+          if (isTcpr) {
+            return { ...base, co5: base.co5 + 30 };
+          }
+          if (isTcpl) {
+            const share = 30 / 5;
+            return {
+              co1: base.co1 + share,
+              co2: base.co2 + share,
+              co3: base.co3 + share,
+              co4: base.co4 + share,
+              co5: base.co5 + share,
+            };
+          }
+          return base;
         })();
 
         const getModelScaledByCo = (student: { id: number; reg_no: string }) => {
@@ -713,20 +907,37 @@ export default function CQIEntry({
           if (absent && absentKind === 'AL') return null;
 
           const qObj = (row as any).q && typeof (row as any).q === 'object' ? (row as any).q : row;
+          const labRaw = toNumOrNull((row as any).lab);
           let hasAny = false;
           const sums = { co1: 0, co2: 0, co3: 0, co4: 0, co5: 0 };
 
-          for (let i = 0; i < MODEL_THEORY_QUESTIONS.length; i++) {
-            const def = MODEL_THEORY_QUESTIONS[i];
-            const mark = toNumOrNull((qObj as any)[def.key]);
-            if (mark == null) continue;
+          for (let i = 0; i < modelQuestions.length; i++) {
+            const def = modelQuestions[i];
+            const raw = toNumOrNull((qObj as any)[def.key]);
+            if (raw == null) continue;
             hasAny = true;
-            const co = MODEL_THEORY_CO_ROW[i];
+            const mark = clamp(raw, 0, Number(def.max) || 0);
+            const co = modelCosRow[i] ?? 1;
             if (co === 1) sums.co1 += mark;
             else if (co === 2) sums.co2 += mark;
             else if (co === 3) sums.co3 += mark;
             else if (co === 4) sums.co4 += mark;
             else if (co === 5) sums.co5 += mark;
+          }
+
+          if (modelIsTcplLike && labRaw != null) {
+            hasAny = true;
+            const lab = clamp(labRaw, 0, 30);
+            if (isTcpr) {
+              sums.co5 += lab;
+            } else {
+              const share = lab / 5;
+              sums.co1 += share;
+              sums.co2 += share;
+              sums.co3 += share;
+              sums.co4 += share;
+              sums.co5 += share;
+            }
           }
 
           if (!hasAny) return null;
@@ -737,23 +948,13 @@ export default function CQIEntry({
           };
 
           return {
-            co1: scale(sums.co1, modelMaxes.co1, 2),
-            co2: scale(sums.co2, modelMaxes.co2, 2),
-            co3: scale(sums.co3, modelMaxes.co3, 2),
-            co4: scale(sums.co4, modelMaxes.co4, 2),
-            co5: scale(sums.co5, modelMaxes.co5, 4),
+            co1: sums.co1,
+            co2: sums.co2,
+            co3: sums.co3,
+            co4: sums.co4,
+            co5: sums.co5,
           };
         };
-        
-        // Fetch published marks based on class type and enabled assessments.
-        const needs12 = coNumbers.some((co) => co === 1 || co === 2);
-        const needs34 = coNumbers.some((co) => co === 3 || co === 4);
-        const needs5 = coNumbers.some((co) => co === 5);
-
-        const [iqacCia1Pattern, iqacCia2Pattern] = await Promise.all([
-          needs12 && allow('cia1') && !isLabLike ? loadIqacPattern('CIA1') : Promise.resolve(null),
-          needs34 && allow('cia2') && !isLabLike ? loadIqacPattern('CIA2') : Promise.resolve(null),
-        ]);
 
         const coOverrideByKey = (pattern: any | null): Record<string, any> => {
           const marks = Array.isArray(pattern?.marks) ? pattern.marks : [];
@@ -770,21 +971,24 @@ export default function CQIEntry({
         const cia1CoByKey = coOverrideByKey(iqacCia1Pattern);
         const cia2CoByKey = coOverrideByKey(iqacCia2Pattern);
 
+        const needProjectReview1 = isProject && String(assessmentType || '').toLowerCase() === 'review1';
+        const needProjectReview2 = isProject && String(assessmentType || '').toLowerCase() === 'review2';
+
         const [ssa1Res, ssa2Res, f1Res, f2Res, cia1Res, cia2Res, review1Res, review2Res, labF1Res, labF2Res, labCia1Res, labCia2Res, labModelRes] =
           await Promise.all([
-            needs12 && allow('ssa1') && !isLabLike ? fetchPublishedSsa1(subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
-            needs34 && allow('ssa2') && !isLabLike ? fetchPublishedSsa2(subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
+            needs12 && allow('ssa1') && !isLabLike ? (async () => { try { const p = await fetchPublishedSsa1(subjectId, teachingAssignmentId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('ssa1', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
+            needs34 && allow('ssa2') && !isLabLike ? (async () => { try { const p = await fetchPublishedSsa2(subjectId, teachingAssignmentId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('ssa2', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
 
             // THEORY/SPECIAL only: formative (skill+att)
-            needs12 && allow('formative1') && !isLabLike && !isTcpr && !isTcpl ? fetchPublishedFormative1(subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
-            needs34 && allow('formative2') && !isLabLike && !isTcpr && !isTcpl ? fetchPublishedFormative('formative2', subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
+            needs12 && allow('formative1') && !isLabLike && !isTcpr && !isTcpl && !isProject ? fetchPublishedFormative1(subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
+            needs34 && allow('formative2') && !isLabLike && !isTcpr && !isTcpl && !isProject ? fetchPublishedFormative('formative2', subjectId, teachingAssignmentId).catch(() => ({ marks: {} })) : { marks: {} },
 
             needs12 && allow('cia1') && !isLabLike ? fetchPublishedCia1Sheet(subjectId, teachingAssignmentId).catch(() => ({ data: null })) : { data: null },
             needs34 && allow('cia2') && !isLabLike ? fetchPublishedCiaSheet('cia2', subjectId, teachingAssignmentId).catch(() => ({ data: null })) : { data: null },
 
-            // TCPR: review replaces formative
-            needs12 && allow('review1') && isTcpr ? fetchPublishedReview1(subjectId).catch(() => ({ marks: {} })) : { marks: {} },
-            needs34 && allow('review2') && isTcpr ? fetchPublishedReview2(subjectId).catch(() => ({ marks: {} })) : { marks: {} },
+            // TCPR / PROJECT: review replaces formative
+            (allow('review1') && ((isTcpr && needs12) || needProjectReview1)) ? (async () => { try { const p = await fetchPublishedReview1(subjectId, teachingAssignmentId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('review1', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
+            (allow('review2') && ((isTcpr && needs34) || needProjectReview2)) ? (async () => { try { const p = await fetchPublishedReview2(subjectId, teachingAssignmentId).catch(() => ({marks:{}})); try { const d = await fetchDraft<any>('review2', subjectId, teachingAssignmentId); if (d?.draft) return { ...p, draft: (d.draft as any).data ?? (d.draft as any).sheet ?? d.draft }; } catch{} return p; } catch { return {marks:{}} } })() : { marks: {} },
 
             // TCPL: LAB1/LAB2 stored under formative1/formative2 (lab-style)
             needs12 && allow('formative1') && isTcpl
@@ -838,12 +1042,22 @@ export default function CQIEntry({
 
         if (!mounted) return;
 
-        // Get weights from config or use defaults (weight units match Internal Marks style)
-        const DEFAULT_WEIGHTS = { ssa: 1.5, cia: 3.0, fa: 2.5 };
-        const weights = {
-          ssa: DEFAULT_WEIGHTS.ssa,
-          cia: DEFAULT_WEIGHTS.cia,
-          fa: DEFAULT_WEIGHTS.fa,
+        const remoteClassTypeWeights = await fetchClassTypeWeights().catch(() => null);
+        const classTypeWeights = remoteClassTypeWeights && typeof remoteClassTypeWeights === 'object'
+          ? remoteClassTypeWeights
+          : (lsGet<any>('iqac_class_type_weights') || null);
+        const currentClassTypeWeights = classTypeWeights && typeof classTypeWeights === 'object'
+          ? (classTypeWeights as any)[ct] || null
+          : null;
+        const weightsForCo = (coNum: number) => {
+          const slots = getInternalMarkWeightSlotsForCo(ct, currentClassTypeWeights, coNum);
+          return {
+            ssa: slots.ssa,
+            cia: slots.cia,
+            fa: slots.fa,
+            ciaExam: slots.ciaExam,
+            me: slots.me,
+          };
         };
 
         // Get max values from master config
@@ -863,8 +1077,52 @@ export default function CQIEntry({
           cia2: { co3: Number(cia2Cfg?.coMax?.co3 ?? cia2Cfg?.coMax?.co1) || 30, co4: Number(cia2Cfg?.coMax?.co4 ?? cia2Cfg?.coMax?.co2) || 30 },
           f1: { co1: Number(f1Cfg?.maxCo) || 10, co2: Number(f1Cfg?.maxCo) || 10 },
           f2: { co3: Number(f2Cfg?.maxCo) || 10, co4: Number(f2Cfg?.maxCo) || 10 },
-          review1: { co1: Number(review1Cfg?.coMax?.co1) || 15, co2: Number(review1Cfg?.coMax?.co2) || 15 },
-          review2: { co3: Number(review2Cfg?.coMax?.co3 ?? review2Cfg?.coMax?.co1) || 15, co4: Number(review2Cfg?.coMax?.co4 ?? review2Cfg?.coMax?.co2) || 15 },
+          review1: isProject ? { co1: 50, co2: 0 } : { co1: Number(review1Cfg?.coMax?.co1) || 15, co2: Number(review1Cfg?.coMax?.co2) || 15 },
+          review2: isProject ? { co3: 50, co4: 0 } : { co3: Number(review2Cfg?.coMax?.co3 ?? review2Cfg?.coMax?.co1) || 15, co4: Number(review2Cfg?.coMax?.co4 ?? review2Cfg?.coMax?.co2) || 15 },
+        };
+
+        const readReviewMarkByCo = (reviewRes: any, studentId: number, coKey: 'co1' | 'co2' | 'co3' | 'co4'): number | null => {
+          if (isProject) {
+            const draftSheet = reviewRes?.draft?.sheet && typeof reviewRes.draft.sheet === 'object'
+              ? reviewRes.draft.sheet
+              : reviewRes?.draft && typeof reviewRes.draft === 'object' && reviewRes.draft?.rowsByStudentId
+                ? reviewRes.draft
+                : null;
+            const draftRow = draftSheet?.rowsByStudentId?.[String(studentId)];
+            if (draftRow && typeof draftRow === 'object') {
+              const ciaExamTotal = toNumOrNull((draftRow as any)?.ciaExam);
+              if (ciaExamTotal != null) return clamp(ciaExamTotal, 0, 50);
+              const componentMarks = (draftRow as any)?.reviewComponentMarks && typeof (draftRow as any).reviewComponentMarks === 'object'
+                ? Object.values((draftRow as any).reviewComponentMarks)
+                : [];
+              const sum = componentMarks.reduce<number>((acc, raw) => {
+                const n = toNumOrNull(raw);
+                return acc + (n == null ? 0 : n);
+              }, 0);
+              if (sum > 0) return clamp(sum, 0, 50);
+            }
+            const total = toNumOrNull(reviewRes?.marks?.[String(studentId)]);
+            return total == null ? null : clamp(Number(total), 0, 50);
+          }
+
+          const draftRows: any[] = reviewRes?.draft?.rows || reviewRes?.draft?.sheet?.rows || [];
+          const draftRow = draftRows.find((r) => String(r?.studentId) === String(studentId));
+          if (draftRow) {
+            const rawReviewCoMarks = (draftRow as any)?.reviewCoMarks?.[coKey];
+            if (Array.isArray(rawReviewCoMarks)) {
+              const total = rawReviewCoMarks.reduce<number>((sum, val) => {
+                const n = toNumOrNull(val);
+                return sum + (n == null ? 0 : n);
+              }, 0);
+              return total;
+            }
+
+            const directVal = toNumOrNull((draftRow as any)?.[coKey]);
+            if (directVal != null) return directVal;
+          }
+
+          const total = toNumOrNull(reviewRes?.marks?.[String(studentId)]);
+          return total == null ? null : Number(total) / 2;
         };
 
         const readLabAssessmentByCo = (
@@ -994,6 +1252,23 @@ export default function CQIEntry({
               };
             }
 
+            if (isTcpl) {
+              const tcplWeights = weightsForCo(coNumber);
+              const labWeight = Math.max(0, Number(tcplWeights.fa || 0));
+              const ciaExamWeight = Math.max(0, Number(tcplWeights.ciaExam || 0));
+              const ciaMaxPerCo = ciaEnabled ? defaultCiaMax / coShareCount : 0;
+              const expContribution = avgMark != null ? normalizedContribution(avgMark, Math.max(0, cfg.expMax), labWeight) : 0;
+              const ciaContribution = ciaEnabled ? normalizedContribution(ciaPortion ?? 0, ciaMaxPerCo, ciaExamWeight) : 0;
+              const coMax = labWeight + ciaExamWeight;
+              const hasAny = hasExperimentMarks || ciaPortion != null;
+              if (!hasAny || coMax <= 0) return null;
+
+              return {
+                value: clamp(expContribution + ciaContribution, 0, coMax),
+                max: coMax,
+              };
+            }
+
             const ciaMax = ciaEnabled ? defaultCiaMax / coShareCount : 0;
             const coMax = Math.max(0, cfg.expMax) + ciaMax;
             const hasAny = hasExperimentMarks || ciaPortion != null;
@@ -1084,16 +1359,45 @@ export default function CQIEntry({
               const k = `co${coNum}` as keyof typeof modelScaled;
               if (k in modelScaled) {
                 meMark = Number((modelScaled as any)[k]);
-                meMax = coNum === 5 ? 4 : 2;
+                meMax = (modelMaxes as any)[k] || 0;
               }
             }
 
-            if (coNum === 1 || coNum === 2) {
+            if (isProject) {
+              const reviewAssessment = String(assessmentType || '').toLowerCase();
+              if (coNum === 1 && reviewAssessment === 'review1') {
+                const review1Mark = readReviewMarkByCo(review1Res as any, student.id, 'co1');
+                if (review1Mark != null) {
+                  reviewMark = review1Mark;
+                  reviewMax = 50;
+                }
+              }
+              if (coNum === 1 && reviewAssessment === 'review2') {
+                const review2Mark = readReviewMarkByCo(review2Res as any, student.id, 'co3');
+                if (review2Mark != null) {
+                  reviewMark = review2Mark;
+                  reviewMax = 50;
+                }
+              }
+            }
+
+            if (!isProject && (coNum === 1 || coNum === 2)) {
               // THEORY/TCPL/TCPR: SSA1 and CIA1. LAB/PRACTICAL: CIA comes from lab sheet.
               if (!isLabLike) {
                 const ssa1Total = toNumOrNull((ssa1Res as any).marks[String(student.id)]);
-                const ssa1Half = ssa1Total == null ? null : Number(ssa1Total) / 2;
-                ssaMark = ssa1Half;
+                let ssaMarkVal: number | null = null;
+                const ssaDraftRows: any[] = (ssa1Res as any).draft?.rows || (ssa1Res as any).draft?.sheet?.rows || [];
+                const draftRow = ssaDraftRows.find((r) => String(r.studentId) === String(student.id));
+                if (draftRow) {
+                  const splitVal = coNum === 1 ? draftRow.co1 : draftRow.co2;
+                  if (splitVal !== "" && splitVal != null && !isNaN(Number(splitVal))) {
+                    ssaMarkVal = Number(splitVal);
+                  }
+                }
+                if (ssaMarkVal === null && ssa1Total != null) {
+                  ssaMarkVal = Number(ssa1Total) / 2;
+                }
+                ssaMark = ssaMarkVal;
                 ssaMax = coNum === 1 ? maxes.ssa1.co1 : maxes.ssa1.co2;
 
                 if (cia1Data) {
@@ -1126,10 +1430,9 @@ export default function CQIEntry({
 
                 // TCPR: Review1 replaces Formative1
                 if (isTcpr) {
-                  const review1Total = toNumOrNull((review1Res as any).marks[String(student.id)]);
-                  const review1Half = review1Total == null ? null : Number(review1Total) / 2;
-                  if (review1Half != null) {
-                    reviewMark = review1Half;
+                  const review1Mark = readReviewMarkByCo(review1Res as any, student.id, coNum === 1 ? 'co1' : 'co2');
+                  if (review1Mark != null) {
+                    reviewMark = review1Mark;
                     reviewMax = coNum === 1 ? maxes.review1.co1 : maxes.review1.co2;
                   }
                 }
@@ -1165,11 +1468,22 @@ export default function CQIEntry({
                   }
                 }
               }
-            } else if (coNum === 3 || coNum === 4) {
+            } else if (!isProject && (coNum === 3 || coNum === 4)) {
               if (!isLabLike) {
                 const ssa2Total = toNumOrNull((ssa2Res as any).marks[String(student.id)]);
-                const ssa2Half = ssa2Total == null ? null : Number(ssa2Total) / 2;
-                ssaMark = ssa2Half;
+                let ssaMarkVal: number | null = null;
+                const ssaDraftRows: any[] = (ssa2Res as any).draft?.rows || (ssa2Res as any).draft?.sheet?.rows || [];
+                const draftRow = ssaDraftRows.find((r) => String(r.studentId) === String(student.id));
+                if (draftRow) {
+                  const splitVal = coNum === 3 ? draftRow.co3 : draftRow.co4;
+                  if (splitVal !== "" && splitVal != null && !isNaN(Number(splitVal))) {
+                    ssaMarkVal = Number(splitVal);
+                  }
+                }
+                if (ssaMarkVal === null && ssa2Total != null) {
+                  ssaMarkVal = Number(ssa2Total) / 2;
+                }
+                ssaMark = ssaMarkVal;
                 ssaMax = coNum === 3 ? maxes.ssa2.co3 : maxes.ssa2.co4;
 
                 if (cia2Data) {
@@ -1202,10 +1516,9 @@ export default function CQIEntry({
 
                 // TCPR: Review2 replaces Formative2
                 if (isTcpr) {
-                  const review2Total = toNumOrNull((review2Res as any).marks[String(student.id)]);
-                  const review2Half = review2Total == null ? null : Number(review2Total) / 2;
-                  if (review2Half != null) {
-                    reviewMark = review2Half;
+                  const review2Mark = readReviewMarkByCo(review2Res as any, student.id, coNum === 3 ? 'co3' : 'co4');
+                  if (review2Mark != null) {
+                    reviewMark = review2Mark;
                     reviewMax = coNum === 3 ? maxes.review2.co3 : maxes.review2.co4;
                   }
                 }
@@ -1253,24 +1566,27 @@ export default function CQIEntry({
             }
 
             // Build component list and breakdown (only include components present)
+            const weights = weightsForCo(coNum);
             const components: Array<{ key: string; mark: number; max: number; w: number; }> = [];
             if (ssaMark !== null && ssaMax > 0) components.push({ key: 'ssa', mark: ssaMark, max: ssaMax, w: weights.ssa });
             if (ciaMark !== null && ciaMax > 0) components.push({ key: 'cia', mark: ciaMark, max: ciaMax, w: weights.cia });
 
             if (reviewMark !== null && reviewMax > 0) {
               // TCPR review replaces formative weight
-              components.push({ key: 'review', mark: reviewMark, max: reviewMax, w: weights.fa });
+              components.push({ key: 'review', mark: reviewMark, max: reviewMax, w: isProject ? reviewMax : weights.fa });
             }
 
             if (faMark !== null && faMax > 0) {
               const key = isTcpl ? (coNum === 1 || coNum === 2 ? 'lab1' : coNum === 3 || coNum === 4 ? 'lab2' : 'fa') : 'fa';
-              components.push({ key, mark: faMark, max: faMax, w: weights.fa });
+              const tcplFaWeight = isTcpl ? Math.max(0, Number(weights.fa || 0) + Number(weights.ciaExam || 0)) : weights.fa;
+              components.push({ key, mark: faMark, max: faMax, w: tcplFaWeight });
             }
 
             if (meMark !== null && meMax > 0) {
               // For local model sheets: meMax is already 2/4 and mark is scaled to that; set w=meMax so contrib==mark.
               // For lab-like: meMax is the CO_MAX; treat it like a regular component with weight equal to meMax.
-              components.push({ key: 'me', mark: meMark, max: meMax, w: meMax });
+              const meWeight = weights.me > 0 ? weights.me : ((!isLabLike && modelScaled) ? (coNum === 5 ? 4 : 2) : meMax);
+              components.push({ key: 'me', mark: meMark, max: meMax, w: meWeight });
             }
 
             if (components.length > 0) {
@@ -1311,7 +1627,7 @@ export default function CQIEntry({
   }, [subjectId, teachingAssignmentId, classType, enabledAssessments, students, coNumbers, masterCfg]);
 
   const handleCQIChange = (studentId: number, coKey: string, value: string) => {
-    if (readOnly) return;
+    if (tableBlocked) return;
     // allow empty to clear
     if (value === '') {
       setCqiErrors(prev => {
@@ -1359,9 +1675,89 @@ export default function CQIEntry({
     });
   };
 
+  const handleRequestEdit = async () => {
+    if (!subjectId || !teachingAssignmentId) return;
+    if (!editRequestsEnabled) {
+      setActionError('Edit requests are disabled by IQAC.');
+      return;
+    }
+    if (markEntryReqPending) {
+      setActionError('Edit request is pending. Please wait for approval.');
+      return;
+    }
+
+    const reason = String(editRequestReason || '').trim();
+    if (!reason) {
+      setActionError('Reason is required.');
+      return;
+    }
+
+    const mobileOk = await ensureMobileVerified();
+    if (!mobileOk) {
+      setActionError('Please verify your mobile number in Profile before requesting edits.');
+      window.location.href = '/profile';
+      return;
+    }
+
+    setEditRequestBusy(true);
+    setActionError(null);
+    try {
+      const created = await createEditRequest({
+        assessment: cqiAssessmentKey,
+        subject_code: String(subjectId),
+        scope: 'MARK_ENTRY',
+        reason,
+        teaching_assignment_id: teachingAssignmentId,
+      });
+      alert(formatEditRequestSentMessage(created));
+      setRequestEditOpen(false);
+      setEditRequestReason('');
+      setMarkEntryReqPendingUntilMs(Date.now() + 24 * 60 * 60 * 1000);
+      refreshMarkEntryReqPending({ silent: true });
+      refreshMarkLock({ silent: true });
+      refreshMarkEntryEditWindow({ silent: true });
+    } catch (e: any) {
+      const msg = formatApiErrorMessage(e, 'Failed to request edit');
+      setActionError(msg);
+      alert(`Edit request failed: ${msg}`);
+    } finally {
+      setEditRequestBusy(false);
+    }
+  };
+
+  const requestApproval = async () => {
+    if (!subjectId) return;
+    const reason = String(requestReason || '').trim();
+    if (!reason) {
+      setRequestMessage('Reason is required.');
+      return;
+    }
+
+    setRequesting(true);
+    setRequestMessage(null);
+    try {
+      const created = await createPublishRequest({
+        assessment: cqiAssessmentKey,
+        subject_code: String(subjectId),
+        reason,
+        teaching_assignment_id: teachingAssignmentId,
+      });
+      const routed = String((created as any)?.routed_to || '').trim().toUpperCase();
+      const warn = String((created as any)?.routing_warning || '').trim();
+      const baseMsg = routed === 'HOD' ? 'Request sent to HOD successfully.' : 'Request sent to IQAC successfully.';
+      setRequestMessage(warn ? `${baseMsg} ${warn}` : baseMsg);
+      setRequestReason('');
+      refreshPublishWindow();
+    } catch (e: any) {
+      setRequestMessage(e?.message || 'Failed to send request.');
+    } finally {
+      setRequesting(false);
+    }
+  };
+
   const handleSave = () => {
     if (!subjectId || !teachingAssignmentId) return;
-    if (readOnly) return;
+    if (tableBlocked) return;
     // validate no errors
     if (Object.keys(cqiErrors).length) {
       alert('Fix CQI input errors before saving');
@@ -1369,9 +1765,8 @@ export default function CQIEntry({
     }
 
     (async () => {
-      const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
       try {
-        const res = await fetchWithAuth(`/api/obe/cqi-save/${encodeURIComponent(String(subjectId))}${qp}`, { method: 'PUT', body: JSON.stringify({ entries: cqiEntries }) }).catch(() => null);
+        const res = await fetchWithAuth(`/api/obe/cqi-save/${encodeURIComponent(String(subjectId))}${cqiQuery}`, { method: 'PUT', body: JSON.stringify(buildCqiPayload(cqiEntries)) }).catch(() => null);
         if (res && res.ok) {
           alert('CQI entries saved to server');
           setDirty(false);
@@ -1443,7 +1838,7 @@ export default function CQIEntry({
           onClick={handleSave}
           className="obe-btn obe-btn-primary"
           style={{ minWidth: 100 }}
-          disabled={readOnly}
+          disabled={tableBlocked}
         >
           Save CQI
         </button>
@@ -1478,11 +1873,10 @@ export default function CQIEntry({
             onClick={async () => {
               // Save draft to server
               if (!subjectId || !teachingAssignmentId) return alert('Missing subject/teaching assignment');
-              if (readOnly) return;
+              if (tableBlocked) return;
               try {
-                const payload = { entries: cqiEntries };
-                const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
-                const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${qp}`, {
+                const payload = buildCqiPayload(cqiEntries);
+                const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${cqiQuery}`, {
                   method: 'PUT',
                   body: JSON.stringify(payload),
                 }).catch(() => null);
@@ -1501,17 +1895,17 @@ export default function CQIEntry({
             }}
             className="obe-btn"
             style={{ minWidth: 110 }}
-            disabled={readOnly}
+            disabled={tableBlocked}
           >
             Save Draft
           </button>
 
-          {!readOnly ? (
+          {!publishedEditLocked ? (
             <button
               type="button"
               onClick={async () => {
                 if (!subjectId || !teachingAssignmentId) return alert('Missing subject/teaching assignment');
-                if (readOnly) return;
+                if (tableBlocked) return;
                 const ok = confirm('Reset CQI marks for all students? This clears the saved draft.');
                 if (!ok) return;
                 setResettingMarks(true);
@@ -1522,10 +1916,9 @@ export default function CQIEntry({
                   setDirty(false);
 
                   // Save empty draft to server.
-                  const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
-                  const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${qp}`, {
+                  const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${cqiQuery}`, {
                     method: 'PUT',
-                    body: JSON.stringify({ entries: {} }),
+                    body: JSON.stringify(buildCqiPayload({})),
                   }).catch(() => null);
 
                   if (res && res.ok) {
@@ -1544,7 +1937,7 @@ export default function CQIEntry({
               }}
               className="obe-btn obe-btn-danger"
               style={{ minWidth: 120 }}
-              disabled={resettingMarks || readOnly}
+              disabled={resettingMarks || tableBlocked || !publishAllowed || globalLocked}
               title="Clears the saved draft marks"
             >
               {resettingMarks ? 'Resetting…' : 'Reset Marks'}
@@ -1554,35 +1947,186 @@ export default function CQIEntry({
           <button
             type="button"
             onClick={async () => {
+              if (globalLocked) {
+                alert('Publishing is locked by IQAC.');
+                return;
+              }
+              if (!publishAllowed) {
+                alert('Publish window is closed. Please request IQAC approval.');
+                return;
+              }
+              if (publishButtonIsRequestEdit) {
+                if (markEntryReqPending) {
+                  alert('Edit request is pending. Please wait for approval.');
+                  return;
+                }
+                const mobileOk = await ensureMobileVerified();
+                if (!mobileOk) {
+                  alert('Please verify your mobile number in Profile before requesting edits.');
+                  window.location.href = '/profile';
+                  return;
+                }
+                setRequestEditOpen(true);
+                setActionError(null);
+                return;
+              }
               if (!subjectId) return alert('Missing subject');
-              if (readOnly) return;
+              if (tableBlocked) return;
               if (!confirm('Publish CQI to DB? This action cannot be undone.')) return;
+              setPublishing(true);
               try {
-                const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
-                const res = await fetchWithAuth(`/api/obe/cqi-publish/${encodeURIComponent(String(subjectId))}${qp}`, {
+                const res = await fetchWithAuth(`/api/obe/cqi-publish/${encodeURIComponent(String(subjectId))}${cqiQuery}`, {
                   method: 'POST',
-                  body: JSON.stringify({ coNumbers, entries: cqiEntries }),
+                  body: JSON.stringify(buildCqiPayload(cqiEntries)),
                 }).catch(() => null);
                 if (res && res.ok) {
                   const j = await res.json().catch(() => null);
-                  setReadOnly(true);
                   setDirty(false);
-                  setPublishedLog({ published_at: j?.published_at ?? null });
+                  setLocalPublished(true);
+                  setPublishedLog({ published_at: j?.published_at ?? new Date().toISOString() });
+                  refreshPublishWindow();
+                  refreshMarkLock({ silent: true });
+                  refreshMarkEntryEditWindow({ silent: true });
                   alert('CQI published');
                 } else {
                   const txt = res ? await res.text().catch(() => '') : '';
                   alert(txt || 'Publish failed');
                 }
-              } catch (e: any) { alert('Publish failed: ' + String(e?.message || e)); }
+              } catch (e: any) {
+                alert('Publish failed: ' + String(e?.message || e));
+              } finally {
+                setPublishing(false);
+              }
             }}
             className="obe-btn obe-btn-primary"
             style={{ minWidth: 110 }}
-            disabled={readOnly}
+            disabled={editRequestsBlocked || (publishButtonIsRequestEdit ? markEntryReqPending : tableBlocked || publishing || !publishAllowed)}
           >
-            Publish
+            {publishButtonIsRequestEdit ? (markEntryReqPending ? 'Request Pending' : 'Request Edit') : editRequestsBlocked ? 'Published & Locked' : publishing ? 'Publishing…' : 'Publish'}
           </button>
         </div>
       </div>
+
+      <div style={{ marginBottom: 10, fontSize: 12, color: publishAllowed ? '#065f46' : '#b91c1c' }}>
+        {publishWindowLoading ? (
+          'Checking publish due time…'
+        ) : publishWindowError ? (
+          publishWindowError
+        ) : publishWindow?.due_at ? (
+          <div
+            style={{
+              display: 'inline-block',
+              border: '1px solid #e5e7eb',
+              borderRadius: 12,
+              padding: '8px 10px',
+              background: '#fff',
+              maxWidth: '100%',
+            }}
+          >
+            <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 900, letterSpacing: 0.4 }}>REMAINING</div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: publishAllowed ? '#065f46' : '#b91c1c' }}>{formatRemaining(remainingSeconds)}</div>
+            <div style={{ marginTop: 2, fontSize: 11, color: '#6b7280' }}>Due: {new Date(publishWindow.due_at).toLocaleString()}</div>
+            {publishWindow.allowed_by_approval && publishWindow.approval_until ? (
+              <div style={{ marginTop: 2, fontSize: 11, color: '#6b7280' }}>Approved until {new Date(publishWindow.approval_until).toLocaleString()}</div>
+            ) : null}
+          </div>
+        ) : (
+          'Due time not set by IQAC.'
+        )}
+      </div>
+
+      {globalLocked ? (
+        <div style={{ marginBottom: 10, border: '1px solid #fde68a', background: '#fffbeb', borderRadius: 12, padding: 12 }}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Publishing disabled by IQAC</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            Global publishing is turned OFF for this CQI page. You can view the page, but editing and publishing are locked.
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
+            <button className="obe-btn" onClick={() => refreshPublishWindow()} disabled={publishWindowLoading}>Refresh</button>
+          </div>
+        </div>
+      ) : !publishAllowed ? (
+        <div style={{ marginBottom: 10, border: '1px solid #fecaca', background: '#fff7ed', borderRadius: 12, padding: 12 }}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Publish time is over</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Send a request for approval. The request follows the same HOD/IQAC flow as other OBE mark entry pages.</div>
+          <textarea
+            value={requestReason}
+            onChange={(e) => setRequestReason(e.target.value)}
+            placeholder="Reason (required)"
+            rows={3}
+            style={{ width: '100%', padding: 10, borderRadius: 10, border: '1px solid #e5e7eb', resize: 'vertical' }}
+          />
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
+            <button className="obe-btn" onClick={() => refreshPublishWindow()} disabled={requesting || publishWindowLoading}>Refresh</button>
+            <button className="obe-btn obe-btn-primary" onClick={requestApproval} disabled={requesting || !String(requestReason || '').trim()}>{requesting ? 'Requesting…' : 'Request Approval'}</button>
+          </div>
+          {requestMessage ? <div style={{ marginTop: 8, fontSize: 12, color: '#065f46' }}>{requestMessage}</div> : null}
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <div style={{ marginBottom: 12, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', borderRadius: 10, padding: '10px 12px', fontWeight: 600 }}>
+          {actionError}
+        </div>
+      ) : null}
+
+      {publishedEditLocked ? (
+        <div style={{ marginBottom: 12, border: '1px solid #fde68a', background: '#fffbeb', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 800, color: '#92400e' }}>Published & locked</div>
+              <div style={{ marginTop: 4, fontSize: 13, color: '#6b7280' }}>
+                CQI is read-only after publish. Use Request Edit to ask IQAC for edit access.
+                {markEntryReqPending ? ' Edit request is pending.' : ''}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="obe-btn obe-btn-primary"
+              disabled={editRequestsBlocked || markEntryReqPending}
+              onClick={async () => {
+                if (editRequestsBlocked) return;
+                if (markEntryReqPending) return;
+                const mobileOk = await ensureMobileVerified();
+                if (!mobileOk) {
+                  alert('Please verify your mobile number in Profile before requesting edits.');
+                  window.location.href = '/profile';
+                  return;
+                }
+                setRequestEditOpen(true);
+                setActionError(null);
+              }}
+            >
+              {editRequestsBlocked ? 'Published & Locked' : markEntryReqPending ? 'Request Pending' : 'Request Edit'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {requestEditOpen ? (
+        <div style={{ marginBottom: 12, border: '1px solid #dbeafe', background: '#f8fbff', borderRadius: 12, padding: 14 }}>
+          <div style={{ fontWeight: 900, fontSize: 14, color: '#111827' }}>Request Edit Access</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+            This request goes through the same IQAC approval flow as mark entry pages. After approval, this CQI page becomes editable again until the approval window ends.
+          </div>
+          <textarea
+            value={editRequestReason}
+            onChange={(e) => setEditRequestReason(e.target.value)}
+            placeholder="Explain why you need to edit this published CQI page"
+            rows={3}
+            className="obe-input"
+            style={{ marginTop: 10, resize: 'vertical' }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+            <button className="obe-btn" disabled={editRequestBusy} onClick={() => setRequestEditOpen(false)}>
+              Cancel
+            </button>
+            <button className="obe-btn obe-btn-success" disabled={editRequestBusy || markEntryReqPending || !String(editRequestReason || '').trim()} onClick={handleRequestEdit}>
+              {editRequestBusy ? 'Sending…' : markEntryReqPending ? 'Request Pending' : 'Send Request'}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #e6eef8' }}>
@@ -1592,20 +2136,19 @@ export default function CQIEntry({
             {publishedLog?.published_at ? ` · Published: ${new Date(String(publishedLog.published_at)).toLocaleString()}` : ''}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <label style={{ fontSize: 13, color: '#475569' }}><input type="checkbox" checked={autoSaveEnabled} onChange={() => setAutoSaveEnabled((s) => !s)} /> Auto-save</label>
+            <label style={{ fontSize: 13, color: '#475569' }}><input type="checkbox" checked={autoSaveEnabled} onChange={() => setAutoSaveEnabled((s) => !s)} disabled={tableBlocked} /> Auto-save</label>
             <button className="obe-btn" onClick={() => {
               // manual sync draft to server
               (async () => {
                 if (!subjectId || !teachingAssignmentId) return alert('Missing subject/TA');
-                if (readOnly) return;
+                if (tableBlocked) return;
                 try {
-                  const qp = teachingAssignmentId ? `?teaching_assignment_id=${encodeURIComponent(String(teachingAssignmentId))}` : '';
-                  const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${qp}`, { method: 'PUT', body: JSON.stringify({ entries: cqiEntries }) }).catch(() => null);
+                  const res = await fetchWithAuth(`/api/obe/cqi-draft/${encodeURIComponent(String(subjectId))}${cqiQuery}`, { method: 'PUT', body: JSON.stringify(buildCqiPayload(cqiEntries)) }).catch(() => null);
                   if (res && res.ok) { const j = await res.json().catch(() => null); setDraftLog(j || null); setDirty(false); alert('Draft synced to server'); }
                   else { alert('Server save failed'); }
                 } catch (e:any) { alert('Server save failed: ' + String(e?.message || e)); }
               })();
-            }} disabled={readOnly}>Sync Draft</button>
+            }} disabled={tableBlocked}>Sync Draft</button>
           </div>
         </div>
         <table className="cqi-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -1851,13 +2394,13 @@ export default function CQIEntry({
                               fontWeight: 600,
                               marginBottom: 4,
                             }}>
-                              CQI ATTAINED
+                              CQI NOT ATTAINED
                             </div>
                             <input
                               type="number"
                               value={cqiValue ?? ''}
                               onChange={(e) => handleCQIChange(student.id, coKey, e.target.value)}
-                              disabled={readOnly}
+                              disabled={tableBlocked}
                               placeholder="Enter CQI"
                               className="obe-input"
                               style={{

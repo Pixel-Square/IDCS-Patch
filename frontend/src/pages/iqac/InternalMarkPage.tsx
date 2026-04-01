@@ -1,8 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { normalizeClassType } from '../../constants/classTypes';
 import { fetchDeptRows, fetchMasters } from '../../services/curriculum';
 import { fetchInternalMarkMapping, upsertInternalMarkMapping } from '../../services/obe';
+import fetchWithAuth from '../../services/fetchAuth';
+
+type CqiPublishedData = {
+  publishedAt?: string;
+  coNumbers?: number[];
+  entries?: Record<string, Record<string, number | null>>;
+};
 
 export default function InternalMarkPage(): JSX.Element {
   const { courseCode, taId } = useParams<{ courseCode: string; taId: string }>();
@@ -14,6 +21,14 @@ export default function InternalMarkPage(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [mapping, setMapping] = useState<Record<string, any> | null>(null);
   const [classType, setClassType] = useState<string | null>(null);
+
+  // Slider tab state
+  const [activeTab, setActiveTab] = useState<'actual' | 'after-cqi'>('actual');
+  const [cqiLoading, setCqiLoading] = useState(false);
+  const [cqiPublished, setCqiPublished] = useState<CqiPublishedData | null>(null);
+  const [cqiError, setCqiError] = useState<string | null>(null);
+  const [cqiFetched, setCqiFetched] = useState(false);
+  const sliderRef = useRef<HTMLDivElement>(null);
 
   const DEFAULTS = {
     header: ['CO1', 'CO1', 'CO1', 'CO2', 'CO2', 'CO2', 'CO3', 'CO3', 'CO3', 'CO4', 'CO4', 'CO4', 'CO1', 'CO2', 'CO3', 'CO4', 'CO5'],
@@ -121,6 +136,59 @@ export default function InternalMarkPage(): JSX.Element {
     });
   };
 
+  // Fetch CQI published data when switching to After CQI tab
+  useEffect(() => {
+    if (activeTab !== 'after-cqi' || !taId || cqiFetched) return;
+    let mounted = true;
+    (async () => {
+      setCqiLoading(true);
+      setCqiError(null);
+      try {
+        const res = await fetchWithAuth(
+          `/api/obe/cqi-published/${encodeURIComponent(subjectId)}?teaching_assignment_id=${encodeURIComponent(taId)}`
+        );
+        if (!mounted) return;
+        if (res.ok) {
+          const j = await res.json().catch(() => null);
+          setCqiPublished(j?.published ?? null);
+        } else {
+          setCqiError('Failed to load CQI data');
+        }
+      } catch (e: any) {
+        if (!mounted) return;
+        setCqiError(e?.message || String(e));
+      } finally {
+        if (mounted) {
+          setCqiLoading(false);
+          setCqiFetched(true);
+        }
+      }
+    })();
+    return () => { mounted = false; };
+  }, [activeTab, taId, subjectId, cqiFetched]);
+
+  // Compute per-CO average CQI input from published entries
+  const cqiCoAverages = useMemo(() => {
+    if (!cqiPublished?.entries) return {} as Record<string, number>;
+    const sums: Record<string, number> = {};
+    const counts: Record<string, number> = {};
+    for (const studentEntry of Object.values(cqiPublished.entries)) {
+      if (!studentEntry || typeof studentEntry !== 'object') continue;
+      for (const [coKey, val] of Object.entries(studentEntry)) {
+        if (val == null) continue;
+        const n = Number(val);
+        if (!Number.isFinite(n)) continue;
+        sums[coKey] = (sums[coKey] ?? 0) + n;
+        counts[coKey] = (counts[coKey] ?? 0) + 1;
+      }
+    }
+    const avgs: Record<string, number> = {};
+    for (const k of Object.keys(sums)) {
+      avgs[k] = Math.round((sums[k] / counts[k]) * 100) / 100;
+    }
+    return avgs;
+  }, [cqiPublished]);
+
   const handleSave = async () => {
     setSaving(true);
     setError(null);
@@ -145,45 +213,263 @@ export default function InternalMarkPage(): JSX.Element {
   const cycles: string[] = m.cycles;
   const isTcpl = normalizeClassType(classType) === 'TCPL';
 
+  // Per-CO internal weight totals (cycle components + ME column)
+  // Columns layout (non-TCPL 17-slot):
+  //   CO1: [0,1,2] cycle + [12] ME
+  //   CO2: [3,4,5] cycle + [13] ME
+  //   CO3: [6,7,8] cycle + [14] ME
+  //   CO4: [9,10,11] cycle + [15] ME
+  //   CO5: [16] ME only
+  const coInternalMax = useMemo(() => {
+    const w = weightsArr.map((x) => Number(x) || 0);
+    return {
+      co1: (w[0] ?? 0) + (w[1] ?? 0) + (w[2] ?? 0) + (w[12] ?? 0),
+      co2: (w[3] ?? 0) + (w[4] ?? 0) + (w[5] ?? 0) + (w[13] ?? 0),
+      co3: (w[6] ?? 0) + (w[7] ?? 0) + (w[8] ?? 0) + (w[14] ?? 0),
+      co4: (w[9] ?? 0) + (w[10] ?? 0) + (w[11] ?? 0) + (w[15] ?? 0),
+      co5: (w[16] ?? 0),
+    };
+  }, [weightsArr]);
+
+  const coList = ['co1', 'co2', 'co3', 'co4', 'co5'] as const;
+  const publishedCoSet = new Set((cqiPublished?.coNumbers ?? []).map((n) => `co${n}`));
+
   return (
     <main style={{ padding: 18 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Internal Mark Mapping - {subjectId}</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="obe-btn" onClick={() => navigate(-1)}>Back</button>
-          <button className="obe-btn obe-btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+          {activeTab === 'actual' && (
+            <button className="obe-btn obe-btn-primary" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          )}
         </div>
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-          <thead>
-            <tr>
-              {headers.map((h, i) => (
-                <th key={i} style={{ border: '1px solid #d1d5db', padding: 8, background: '#f3f4f6' }}>{h}</th>
-              ))}
-            </tr>
-            <tr>
-              {cycles.map((c, i) => (
-                <th key={`cy-${i}`} style={{ border: '1px solid #e5e7eb', padding: 8, background: '#f9fafb', fontWeight: 600 }}>
-                  {isTcpl && String(c).toLowerCase() === 'fa' ? 'Lab' : c}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              {weightsArr.map((w, i) => (
-                <td key={i} style={{ border: '1px solid #e5e7eb', padding: 6, background: '#f3f4f6' }}>
-                  <input type="number" step="0.1" value={w === '' ? '' : String(w)} onChange={(e) => handleCellChange(i, e.target.value)} style={{ width: 70, padding: 6 }} />
-                </td>
-              ))}
-            </tr>
-          </tbody>
-        </table>
+      {/* Slider Tab Bar */}
+      <div style={{ position: 'relative', display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
+        <div
+          style={{
+            position: 'absolute',
+            top: 4,
+            left: activeTab === 'actual' ? 4 : 'calc(50% + 2px)',
+            width: 'calc(50% - 6px)',
+            height: 'calc(100% - 8px)',
+            background: '#fff',
+            borderRadius: 8,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+            transition: 'left 0.25s cubic-bezier(.4,0,.2,1)',
+          }}
+        />
+        <button
+          onClick={() => setActiveTab('actual')}
+          style={{
+            position: 'relative',
+            zIndex: 1,
+            padding: '8px 28px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            fontWeight: activeTab === 'actual' ? 600 : 400,
+            color: activeTab === 'actual' ? '#1d4ed8' : '#6b7280',
+            borderRadius: 8,
+            fontSize: 14,
+            transition: 'color 0.2s',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Actual
+        </button>
+        <button
+          onClick={() => setActiveTab('after-cqi')}
+          style={{
+            position: 'relative',
+            zIndex: 1,
+            padding: '8px 28px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            fontWeight: activeTab === 'after-cqi' ? 600 : 400,
+            color: activeTab === 'after-cqi' ? '#1d4ed8' : '#6b7280',
+            borderRadius: 8,
+            fontSize: 14,
+            transition: 'color 0.2s',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          After CQI
+        </button>
       </div>
 
-      {error ? <div style={{ color: 'red', marginTop: 12 }}>{error}</div> : null}
+      {/* ── Tab 1: Actual ── */}
+      {activeTab === 'actual' && (
+        <>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+              <thead>
+                <tr>
+                  {headers.map((h, i) => (
+                    <th key={i} style={{ border: '1px solid #d1d5db', padding: 8, background: '#f3f4f6' }}>{h}</th>
+                  ))}
+                </tr>
+                <tr>
+                  {cycles.map((c, i) => (
+                    <th key={`cy-${i}`} style={{ border: '1px solid #e5e7eb', padding: 8, background: '#f9fafb', fontWeight: 600 }}>
+                      {isTcpl && String(c).toLowerCase() === 'fa' ? 'Lab' : c}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  {weightsArr.map((w, i) => (
+                    <td key={i} style={{ border: '1px solid #e5e7eb', padding: 6, background: '#f3f4f6' }}>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={w === '' ? '' : String(w)}
+                        onChange={(e) => handleCellChange(i, e.target.value)}
+                        style={{ width: 70, padding: 6 }}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {error ? <div style={{ color: 'red', marginTop: 12 }}>{error}</div> : null}
+        </>
+      )}
+
+      {/* ── Tab 2: After CQI ── */}
+      {activeTab === 'after-cqi' && (
+        <div>
+          {!taId ? (
+            <div style={{ padding: 16, background: '#fef9c3', borderRadius: 8, border: '1px solid #fde047', color: '#854d0e' }}>
+              No teaching assignment context available. Open this page from a specific teaching assignment to view CQI data.
+            </div>
+          ) : cqiLoading ? (
+            <div style={{ padding: 16, color: '#6b7280' }}>Loading CQI data…</div>
+          ) : cqiError ? (
+            <div style={{ padding: 16, color: 'red' }}>{cqiError}</div>
+          ) : !cqiPublished ? (
+            <div style={{ padding: 16, background: '#f0f9ff', borderRadius: 8, border: '1px solid #bae6fd', color: '#0c4a6e' }}>
+              CQI has not been published yet for this course. Once CQI is published, the combined marks will appear here.
+            </div>
+          ) : (
+            <>
+              {/* Published badge */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <span style={{ background: '#dcfce7', color: '#166534', borderRadius: 20, padding: '4px 14px', fontWeight: 600, fontSize: 13, border: '1px solid #86efac' }}>
+                  ✓ CQI Published
+                </span>
+                {cqiPublished.publishedAt && (
+                  <span style={{ color: '#6b7280', fontSize: 12 }}>
+                    on {new Date(cqiPublished.publishedAt).toLocaleString()}
+                  </span>
+                )}
+              </div>
+
+              {/* Read-only base weights table */}
+              <div style={{ marginBottom: 20, overflowX: 'auto' }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, color: '#374151', fontSize: 13 }}>Base Internal Weights</div>
+                <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                  <thead>
+                    <tr>
+                      {headers.map((h, i) => (
+                        <th key={i} style={{ border: '1px solid #d1d5db', padding: 8, background: '#f3f4f6', fontSize: 13 }}>{h}</th>
+                      ))}
+                    </tr>
+                    <tr>
+                      {cycles.map((c, i) => (
+                        <th key={`cy-${i}`} style={{ border: '1px solid #e5e7eb', padding: 8, background: '#f9fafb', fontWeight: 600, fontSize: 13 }}>
+                          {isTcpl && String(c).toLowerCase() === 'fa' ? 'Lab' : c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      {weightsArr.map((w, i) => (
+                        <td key={i} style={{ border: '1px solid #e5e7eb', padding: 8, background: '#f9fafb', textAlign: 'center', fontSize: 13 }}>
+                          {w === '' ? '—' : String(w)}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Per-CO summary: Internal Max + Avg CQI Mark = Total After CQI */}
+              <div style={{ fontWeight: 600, marginBottom: 8, color: '#374151', fontSize: 13 }}>CO-wise Summary After CQI</div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', minWidth: 480 }}>
+                  <thead>
+                    <tr>
+                      {['CO', 'Internal Max', 'Avg CQI Mark', 'Total After CQI', 'CQI Applied'].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            border: '1px solid #d1d5db',
+                            padding: '10px 16px',
+                            background: '#1d4ed8',
+                            color: '#fff',
+                            fontWeight: 700,
+                            fontSize: 13,
+                            textAlign: 'center',
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {coList.map((coKey, idx) => {
+                      const internalMax = coInternalMax[coKey];
+                      if (internalMax <= 0) return null;
+                      const avgCqi = cqiCoAverages[coKey] ?? null;
+                      const hasCqi = publishedCoSet.has(coKey) && avgCqi !== null;
+                      const total = hasCqi ? Math.round((internalMax + avgCqi!) * 100) / 100 : internalMax;
+                      const label = `CO${idx + 1}`;
+                      return (
+                        <tr key={coKey} style={{ background: idx % 2 === 0 ? '#f9fafb' : '#fff' }}>
+                          <td style={{ border: '1px solid #e5e7eb', padding: '10px 16px', textAlign: 'center', fontWeight: 700, color: '#1d4ed8', fontSize: 14 }}>
+                            {label}
+                          </td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: '10px 16px', textAlign: 'center', fontSize: 13 }}>
+                            {internalMax}
+                          </td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: '10px 16px', textAlign: 'center', fontSize: 13, color: hasCqi ? '#065f46' : '#9ca3af' }}>
+                            {hasCqi ? `+${avgCqi}` : '—'}
+                          </td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: '10px 16px', textAlign: 'center', fontWeight: 700, fontSize: 14, color: hasCqi ? '#1d4ed8' : '#374151' }}>
+                            {total}
+                          </td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: '10px 16px', textAlign: 'center', fontSize: 13 }}>
+                            {hasCqi ? (
+                              <span style={{ background: '#dcfce7', color: '#166534', borderRadius: 12, padding: '2px 10px', fontWeight: 600, fontSize: 12 }}>Yes</span>
+                            ) : (
+                              <span style={{ background: '#f3f4f6', color: '#9ca3af', borderRadius: 12, padding: '2px 10px', fontSize: 12 }}>No</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop: 10, color: '#6b7280', fontSize: 12 }}>
+                * Avg CQI Mark is the average of all published CQI inputs for each CO across enrolled students.
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </main>
   );
 }

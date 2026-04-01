@@ -1096,8 +1096,10 @@ class TeachingAssignmentViewSet(viewsets.ModelViewSet):
             except Exception:
                 return False
 
-        def _clean_keys(vals):
+        def _clean_keys(vals, *, include_model=False):
             allowed = {'ssa1', 'formative1', 'ssa2', 'formative2', 'cia1', 'cia2'}
+            if include_model:
+                allowed.add('model')
             cleaned = []
             for v in (vals or []):
                 try:
@@ -1237,7 +1239,7 @@ class TeachingAssignmentViewSet(viewsets.ModelViewSet):
         if not isinstance(vals, (list, tuple)):
             return Response({'detail': 'enabled_assessments must be a list'}, status=400)
 
-        cleaned = _clean_keys(vals)
+        cleaned = _clean_keys(vals, include_model=not _is_special_course_row(row))
         if _is_special_course_row(row):
             if not cleaned:
                 return Response({'detail': 'At least one assessment is required for SPECIAL courses.'}, status=400)
@@ -7690,3 +7692,92 @@ class RemoveSecondarySectionView(APIView):
         count = qs.count()
         qs.update(end_date=today)
         return Response({'ended': count})
+
+
+# ---------------------------------------------------------------------------
+# ExtStaffProfile views
+# ---------------------------------------------------------------------------
+
+class ExtStaffProfileListCreateView(APIView):
+    """
+    GET  /api/academics/ext-staff-profiles/   - list all ext staff profiles
+    POST /api/academics/ext-staff-profiles/   - create a new ext staff profile
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def _check_permission(self, request):
+        if not request.user.is_superuser and not request.user.has_perm('academics.view_staffs_page'):
+            raise PermissionDenied('You do not have permission to manage ext staff profiles.')
+
+    def get(self, request):
+        self._check_permission(request)
+        from .models import ExtStaffProfile
+        from .serializers import ExtStaffProfileSerializer
+        qs = ExtStaffProfile.objects.select_related('user').order_by('-created_at')
+        return Response(ExtStaffProfileSerializer(qs, many=True).data)
+
+    def post(self, request):
+        self._check_permission(request)
+        from .serializers import ExtStaffProfileSerializer
+        serializer = ExtStaffProfileSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ExtStaffProfileDetailView(APIView):
+    """
+    PATCH  /api/academics/ext-staff-profiles/<pk>/  - partial update
+    DELETE /api/academics/ext-staff-profiles/<pk>/  - delete
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def _check_permission(self, request):
+        if not request.user.is_superuser and not request.user.has_perm('academics.view_staffs_page'):
+            raise PermissionDenied('You do not have permission to manage ext staff profiles.')
+
+    def _get_obj(self, pk):
+        from .models import ExtStaffProfile
+        return get_object_or_404(ExtStaffProfile, pk=pk)
+
+    def patch(self, request, pk):
+        self._check_permission(request)
+        from .serializers import ExtStaffProfileSerializer
+        obj = self._get_obj(pk)
+        serializer = ExtStaffProfileSerializer(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, pk):
+        self._check_permission(request)
+        obj = self._get_obj(pk)
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ExtStaffProfileUsersView(APIView):
+    """
+    GET /api/academics/ext-staff-profiles/available-users/
+    Returns all Users that do NOT yet have an ExtStaffProfile, for the picker.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        if not request.user.is_superuser and not request.user.has_perm('academics.view_staffs_page'):
+            raise PermissionDenied()
+        from django.contrib.auth import get_user_model
+        from .models import ExtStaffProfile
+        User = get_user_model()
+        already_assigned = ExtStaffProfile.objects.values_list('user_id', flat=True)
+        qs = User.objects.exclude(id__in=already_assigned).order_by('username')
+        data = [
+            {
+                'id': u.id,
+                'username': u.username,
+                'email': u.email,
+                'full_name': u.get_full_name() or u.username,
+            }
+            for u in qs
+        ]
+        return Response(data)

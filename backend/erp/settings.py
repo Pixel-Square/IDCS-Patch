@@ -254,6 +254,10 @@ SIMPLE_JWT = {
 # must provide header: X-Biometric-Key: <value>
 STAFF_BIOMETRIC_INGEST_KEY = os.getenv('STAFF_BIOMETRIC_INGEST_KEY', '').strip()
 
+# API key for machine-to-machine reads from reporting API endpoints.
+# Callers can pass it in header X-Reporting-Api-Key (preferred) or X-API-Key.
+REPORTING_API_KEY = os.getenv('REPORTING_API_KEY', '').strip()
+
 # eSSL/ZKTeco realtime listener defaults (used by sync_essl_realtime command).
 ESSL_DEVICE_IP = os.getenv('ESSL_DEVICE_IP', '192.168.81.80').strip()
 ESSL_DEVICE_PORT = int(os.getenv('ESSL_DEVICE_PORT', '4370'))

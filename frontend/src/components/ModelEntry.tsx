@@ -164,6 +164,8 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
   const [tcplSheet, setTcplSheet] = useState<TcplSheetState>({});
   const [theorySheet, setTheorySheet] = useState<TcplSheetState>({});
   const [iqacPattern, setIqacPattern] = useState<{ marks: number[]; cos?: Array<number | string> } | null>(null);
+  const [iqacPatternLoading, setIqacPatternLoading] = useState(false);
+  const [iqacPatternError, setIqacPatternError] = useState<string | null>(null);
 
   const [requestReason, setRequestReason] = useState('');
   const [requesting, setRequesting] = useState(false);
@@ -274,10 +276,10 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
   useEffect(() => {
     const norm = (v: any) => {
       const s = String(v ?? '').trim().toUpperCase();
+      // TCPR is a class_type used as a legacy QP type marker — keep the guard.
       if (s === 'TCPR') return 'TCPR';
-      if (s === 'QP2') return 'QP2';
-      if (s === 'QP1') return 'QP1';
-      return '';
+      // Pass through any non-empty code so DB-managed types work correctly.
+      return s || '';
     };
 
     // Prefer the course/header-provided QP (so changes in the header reflect here).
@@ -305,12 +307,18 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
       if (classKey.startsWith('THEORY')) classKey = 'THEORY';
       if (!classKey) {
         setIqacPattern(null);
+        setIqacPatternLoading(false);
+        setIqacPatternError(null);
         return;
       }
 
-      const qpKey = normalizedQpType === 'QP2' ? 'QP2' : normalizedQpType === 'QP1' ? 'QP1' : '';
+      // Pass through any non-empty QP code so DB-managed types work.
+      // Use empty string only for null/non-THEORY contexts (qpForApi null-coalesces it).
+      const qpKey = String(normalizedQpType || '').trim();
       const qpForApi = classKey === 'THEORY' ? (qpKey ? qpKey : null) : null;
 
+      setIqacPatternLoading(true);
+      setIqacPatternError(null);
       try {
         const res = await OBE.fetchIqacQpPattern({
           class_type: classKey,
@@ -320,9 +328,13 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
         const p = Array.isArray(res?.pattern?.marks) ? res.pattern.marks : [];
         if (!alive) return;
         setIqacPattern(p.length ? (res.pattern as any) : null);
-      } catch {
+        setIqacPatternError(null);
+      } catch (e: any) {
         if (!alive) return;
         setIqacPattern(null);
+        setIqacPatternError(String(e?.message || e || 'Failed to load QP pattern'));
+      } finally {
+        if (alive) setIqacPatternLoading(false);
       }
     };
     run();
@@ -434,15 +446,31 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     };
   };
 
+  // Keep a ref that always points to the latest buildPayload closure so the
+  // obe:before-tab-switch handler (which has stable deps) always sends fresh data.
+  const buildPayloadRef = useRef<() => ModelDraftPayload>(buildPayload);
+  useEffect(() => {
+    buildPayloadRef.current = buildPayload;
+  }); // no deps → runs every render
+
   const applyPayload = (raw: any) => {
     if (!raw || typeof raw !== 'object') return;
     // Avoid auto-saving immediately when hydrating from server.
     suppressAutosaveRef.current = true;
 
     const nextQpType = typeof raw.qpType === 'string' ? raw.qpType : null;
-    if (nextQpType != null) {
+    // IMPORTANT:
+    // The course/header-provided QP type (from DB) must be the source of truth.
+    // Previously, loading an old draft could override the header QP (e.g. header shows QP1FINAL
+    // but draft had qpType=QP1), causing the wrong IQAC pattern/questions to be used.
+    // Only hydrate qpType from the draft when the course did NOT provide any QP type.
+    const courseQpRaw = String(questionPaperType ?? '').trim().toUpperCase();
+    const courseQp = courseQpRaw === 'TCPR' ? 'TCPR' : courseQpRaw;
+    const canHydrateQpFromDraft = !courseQp;
+    if (canHydrateQpFromDraft && nextQpType != null) {
+      // Accept any code from draft payload; do not clamp to QP1/QP2 only.
       const v = String(nextQpType || '').trim().toUpperCase();
-      const next = v === 'QP2' ? 'QP2' : 'QP1';
+      const next = v || 'QP1';
       setQpType(next);
       try {
         lsSet(qpTypeStorageKey, next);
@@ -636,15 +664,15 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     }
   };
 
-  // Auto-save draft when switching tabs
+  // Auto-save draft when switching tabs — uses ref so handler always has latest state
   useEffect(() => {
     const handler = () => {
       if (!subjectId || publishedEditLocked) return;
-      OBE.saveDraft('model', subjectId, buildPayload(), teachingAssignmentId).catch(() => {});
+      OBE.saveDraft('model', subjectId, buildPayloadRef.current(), teachingAssignmentId).catch(() => {});
     };
     window.addEventListener('obe:before-tab-switch', handler);
     return () => window.removeEventListener('obe:before-tab-switch', handler);
-  }, [subjectId, publishedEditLocked]);
+  }, [subjectId, publishedEditLocked, teachingAssignmentId]);
 
   const publish = async () => {
     if (!subjectId) return;
@@ -933,7 +961,6 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     ];
   }, [iqacPattern, isTheory]);
 
-  const theoryCoCount = 5;
   const theoryTotalMax = useMemo(() => theoryQuestions.reduce((sum, q) => sum + q.max, 0), [theoryQuestions]);
 
   // CO mapping row under Q1..Q16.
@@ -943,13 +970,19 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
     if (isTheory && Array.isArray(cos) && cos.length === theoryQuestions.length) {
       return cos.map((v: any) => {
         const n = Number(v);
-        if (Number.isFinite(n)) return Math.max(1, Math.min(5, Math.trunc(n)));
+        if (Number.isFinite(n)) return Math.max(1, Math.trunc(n));
         return 1;
       });
     }
     if (theoryQuestions.length === defaultRow.length) return defaultRow;
     return Array.from({ length: theoryQuestions.length }, (_, i) => defaultRow[i % defaultRow.length]);
   }, [iqacPattern, isTheory, theoryQuestions.length]);
+
+  // Derived from actual COs used so unused CO columns are hidden automatically.
+  const theoryCoCount = useMemo(() => {
+    if (!theoryCosRow.length) return 1;
+    return Math.max(1, Math.max(...theoryCosRow));
+  }, [theoryCosRow]);
 
   // BTL mapping row under Q1..Q16.
   // Default derived from screenshot: BTL2=8, BTL3=54, BTL4=28, BTL5=10.
@@ -966,7 +999,7 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
       if (co >= 1 && co <= theoryCoCount) coMax[co - 1] += q.max;
     });
     return coMax;
-  }, [theoryQuestions, theoryCosRow]);
+  }, [theoryQuestions, theoryCosRow, theoryCoCount]);
 
   const theoryCoMaxRow = useMemo(() => {
     // THEORY: CO max is based on question max only (no LAB/REVIEW column).
@@ -1489,14 +1522,44 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
         </div>
       ) : null}
 
-      <div style={{ marginBottom: 10, color: '#6b7280', fontSize: 12 }}>
-        Subject: <b>{subjectId}</b> | Assessment: <b>MODEL</b>
-        {normalizedClassType ? (
-          <>
-            {' '}| Class: <b>{normalizedClassType}</b>
-          </>
+      <div style={{ marginBottom: 12, padding: '8px 14px', background: 'linear-gradient(180deg,#f8fafc,#ffffff)', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: '#475569', fontWeight: 600 }}>
+          <span style={{ color: '#94a3b8', fontWeight: 500 }}>Subject</span>
+          <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+          <span style={{ color: '#1e293b', fontWeight: 700 }}>{subjectId}</span>
+          <span style={{ margin: '0 8px', color: '#e2e8f0' }}>|</span>
+          <span style={{ color: '#94a3b8', fontWeight: 500 }}>Assessment</span>
+          <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+          <span style={{ color: '#1e293b' }}>MODEL</span>
+          {normalizedClassType ? (
+            <>
+              <span style={{ margin: '0 8px', color: '#e2e8f0' }}>|</span>
+              <span style={{ color: '#94a3b8', fontWeight: 500 }}>Class</span>
+              <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+              <span style={{ color: '#1e293b' }}>{normalizedClassType}</span>
+            </>
+          ) : null}
+          <span style={{ margin: '0 8px', color: '#e2e8f0' }}>|</span>
+          <span style={{ color: '#94a3b8', fontWeight: 500 }}>QP</span>
+          <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+          <span style={{ color: '#1e293b', fontWeight: 700 }}>{normalizedQpType || 'QP1'}</span>
+        </span>
+        {iqacPatternLoading ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#0b74b8', background: '#e0f2fe', border: '1px solid #bae6fd', borderRadius: 999, padding: '2px 10px' }}>
+            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#0b74b8', animation: 'obe-pulse-dot 1.2s ease-in-out infinite' }} />
+            Loading QP pattern…
+          </span>
         ) : null}
-        {' '}| QP: <b>{normalizedQpType || 'QP1'}</b>
+        {iqacPatternError ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 999, padding: '2px 10px' }}>
+            ⚠ Pattern load failed
+          </span>
+        ) : null}
+        {!iqacPatternLoading && !iqacPatternError && iqacPattern ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#047857', background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: 999, padding: '2px 10px' }}>
+            ✓ {questions.length} questions loaded
+          </span>
+        ) : null}
       </div>
 
       {loading ? <div style={{ color: '#6b7280', marginBottom: 8 }}>Loading roster…</div> : null}
@@ -2279,7 +2342,22 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                                 const onCellKeyDown = (colKey: string) => (e: React.KeyboardEvent<HTMLInputElement>) => {
                                   if (e.key === 'Tab') {
                                     e.preventDefault();
-                                    moveFocus(colKey, e.shiftKey ? 'left' : 'right');
+                                    const colIndex = colOrder.indexOf(colKey);
+                                    if (!e.shiftKey) {
+                                      if (colIndex === colOrder.length - 1) {
+                                        const nextRowIndex = Math.min(renderRows.length - 1, idx + 1);
+                                        focusRef(`${getRowKey(renderRows[nextRowIndex] as any, nextRowIndex)}|${colOrder[0]}`);
+                                      } else {
+                                        moveFocus(colKey, 'right');
+                                      }
+                                    } else {
+                                      if (colIndex === 0) {
+                                        const prevRowIndex = Math.max(0, idx - 1);
+                                        focusRef(`${getRowKey(renderRows[prevRowIndex] as any, prevRowIndex)}|${colOrder[colOrder.length - 1]}`);
+                                      } else {
+                                        moveFocus(colKey, 'left');
+                                      }
+                                    }
                                   } else if (e.key === 'ArrowLeft') {
                                     e.preventDefault();
                                     moveFocus(colKey, 'left');
@@ -2294,18 +2372,21 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                                     moveFocus(colKey, 'down');
                                   }
                                 };
+                                const atMax = v !== '' && Number(v) >= q.max;
                                 return (
-                                  <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center' }}>
+                                  <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center', background: atMax ? 'rgba(251,191,36,0.12)' : undefined }}>
                                     <input
                                       ref={registerRef(inputKey)}
                                       type="text"
                                       inputMode="decimal"
                                       disabled={absent && !canEditAbsent}
                                       value={v === '' ? '' : String(v)}
+                                      placeholder={`/${q.max}`}
+                                      title={`Max mark: ${q.max}`}
                                       onChange={(e) => setQ(q.key, e.target.value, q.max)}
                                       onFocus={(e) => e.currentTarget.select()}
                                       onKeyDown={onCellKeyDown(q.key)}
-                                      style={excelInputStyle}
+                                      style={{ ...excelInputStyle, color: atMax ? '#92400e' : undefined }}
                                     />
                                   </td>
                                 );
@@ -2530,7 +2611,22 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                             const onCellKeyDown = (colKey: string) => (e: React.KeyboardEvent<HTMLInputElement>) => {
                               if (e.key === 'Tab') {
                                 e.preventDefault();
-                                moveFocus(colKey, e.shiftKey ? 'left' : 'right');
+                                const colIndex = colOrder.indexOf(colKey);
+                                if (!e.shiftKey) {
+                                  if (colIndex === colOrder.length - 1) {
+                                    const nextRowIndex = Math.min(renderRows.length - 1, idx + 1);
+                                    focusRef(`${getRowKey(renderRows[nextRowIndex] as any, nextRowIndex)}|${colOrder[0]}`);
+                                  } else {
+                                    moveFocus(colKey, 'right');
+                                  }
+                                } else {
+                                  if (colIndex === 0) {
+                                    const prevRowIndex = Math.max(0, idx - 1);
+                                    focusRef(`${getRowKey(renderRows[prevRowIndex] as any, prevRowIndex)}|${colOrder[colOrder.length - 1]}`);
+                                  } else {
+                                    moveFocus(colKey, 'left');
+                                  }
+                                }
                               } else if (e.key === 'ArrowLeft') {
                                 e.preventDefault();
                                 moveFocus(colKey, 'left');
@@ -2545,18 +2641,21 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                                 moveFocus(colKey, 'down');
                               }
                             };
+                            const atMax = v !== '' && Number(v) >= q.max;
                             return (
-                              <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center' }}>
+                              <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center', background: atMax ? 'rgba(251,191,36,0.12)' : undefined }}>
                                 <input
                                   ref={registerRef(inputKey)}
                                   type="text"
                                   inputMode="decimal"
                                   disabled={absent && !canEditAbsent}
                                   value={v === '' ? '' : String(v)}
+                                  placeholder={`/${q.max}`}
+                                  title={`Max mark: ${q.max}`}
                                   onChange={(e) => setQ(q.key, e.target.value, q.max)}
                                   onFocus={(e) => e.currentTarget.select()}
                                   onKeyDown={onCellKeyDown(q.key)}
-                                  style={excelInputStyle}
+                                  style={{ ...excelInputStyle, color: atMax ? '#92400e' : undefined }}
                                 />
                               </td>
                             );
@@ -2918,7 +3017,22 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                       const onCellKeyDown = (colKey: string) => (e: React.KeyboardEvent<HTMLInputElement>) => {
                         if (e.key === 'Tab') {
                           e.preventDefault();
-                          moveFocus(colKey, e.shiftKey ? 'left' : 'right');
+                          const colIndex = colOrder.indexOf(colKey);
+                          if (!e.shiftKey) {
+                            if (colIndex === colOrder.length - 1) {
+                              const nextRowIndex = Math.min(renderRows.length - 1, idx + 1);
+                              focusRef(`${getRowKey(renderRows[nextRowIndex] as any, nextRowIndex)}|${colOrder[0]}`);
+                            } else {
+                              moveFocus(colKey, 'right');
+                            }
+                          } else {
+                            if (colIndex === 0) {
+                              const prevRowIndex = Math.max(0, idx - 1);
+                              focusRef(`${getRowKey(renderRows[prevRowIndex] as any, prevRowIndex)}|${colOrder[colOrder.length - 1]}`);
+                            } else {
+                              moveFocus(colKey, 'left');
+                            }
+                          }
                         } else if (e.key === 'ArrowLeft') {
                           e.preventDefault();
                           moveFocus(colKey, 'left');
@@ -2962,18 +3076,21 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                     {tcplQuestions.map((q) => {
                       const v = (row.q || ({} as any))[q.key] ?? '';
                       const inputKey = `${rowKey}|${q.key}`;
+                      const atMax = v !== '' && Number(v) >= q.max;
                       return (
-                        <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center' }}>
+                        <td key={`${idx}-${q.key}`} style={{ ...cellTd, textAlign: 'center', background: atMax ? 'rgba(251,191,36,0.12)' : undefined }}>
                           <input
                             ref={registerRef(inputKey)}
                             type="text"
                             inputMode="decimal"
                             disabled={absent && !canEditAbsent}
                             value={v === '' ? '' : String(v)}
+                            placeholder={`/${q.max}`}
+                            title={`Max mark: ${q.max}`}
                             onChange={(e) => setQ(q.key, e.target.value, q.max)}
                             onFocus={(e) => e.currentTarget.select()}
                             onKeyDown={onCellKeyDown(q.key)}
-                            style={excelInputStyle}
+                            style={{ ...excelInputStyle, color: atMax ? '#92400e' : undefined }}
                           />
                         </td>
                       );
@@ -2988,6 +3105,8 @@ export default function ModelEntry({ subjectId, classType, teachingAssignmentId,
                         inputMode="decimal"
                         disabled={absent && !canEditAbsent}
                         value={lab === '' ? '' : String(lab)}
+                        placeholder={`/${tcplLabMax}`}
+                        title={`Max mark: ${tcplLabMax}`}
                         onChange={(e) => setLab(e.target.value)}
                         onFocus={(e) => e.currentTarget.select()}
                         onKeyDown={onCellKeyDown('lab')}

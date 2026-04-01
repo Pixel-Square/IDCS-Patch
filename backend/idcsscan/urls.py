@@ -16,6 +16,7 @@ from idcsscan.views import (
     GatepassOfflineIgnoreView,
     GatepassOfflinePullAllView,
     GatepassOfflineIgnoreAllView,
+    BulkEntryPeopleView,
 )
 
 urlpatterns = [
@@ -47,4 +48,5 @@ urlpatterns = [
     path('gatepass-offline/pull-all/', GatepassOfflinePullAllView.as_view(), name='idscan-gatepass-offline-pull-all'),
     path('gatepass-offline/ignore-all/', GatepassOfflineIgnoreAllView.as_view(), name='idscan-gatepass-offline-ignore-all'),
     path('rfreader/scans/export.csv', RFReaderScanExportCsvView.as_view(), name='idscan-rfreader-scans-export-csv'),
+    path('bulk-entry/people/', BulkEntryPeopleView.as_view(), name='idscan-bulk-entry-people'),
 ]

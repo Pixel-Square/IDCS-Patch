@@ -505,10 +505,12 @@ export default function DashboardSidebar({ baseUrl = '' }: { baseUrl?: string })
     items.length = 0;
     if (profileItem) items.push(profileItem);
     items.push({ key: 'idscan_assign_cards', label: 'Assign Cards', to: '/idscan/assign-cards' });
+    items.push({ key: 'idscan_bulk_entry', label: 'Bulk RFID Entry', to: '/idscan/bulk-entry' });
     items.push({ key: 'idscan_cards_data', label: 'Cards Data', to: '/idscan/cards-data' });
   } else if (isSecurity && !items.some((i) => i.key === 'idscan_test')) {
     items.push({ key: 'idscan_test',     label: 'RFID Scanner Test', to: '/idscan/test' });
     items.push({ key: 'idscan_assign_cards', label: 'RFID Card Assignment', to: '/idscan/assign-cards' });
+    items.push({ key: 'idscan_bulk_entry', label: 'Bulk RFID Entry', to: '/idscan/bulk-entry' });
     items.push({ key: 'idscan_cards_data', label: 'Cards Data', to: '/idscan/cards-data' });
     items.push({ key: 'idscan_gatepass', label: 'Gatepass Scanner',   to: '/idscan/gatepass' });
     items.push({ key: 'idscan_gatescan', label: 'GateScan', to: '/idscan/gatescan' });

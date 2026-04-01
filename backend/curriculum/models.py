@@ -16,11 +16,45 @@ CLASS_TYPE_CHOICES = (
     ('SPECIAL', 'Special'),
 )
 
-QP_TYPE_CHOICES = (
-    ('QP1', 'QP1'),
-    ('QP2', 'QP2'),
-    ('ASPR', 'ASPR'),
-)
+def validate_question_paper_type_code(value: str):
+    """Validate the QP type code against the DB-managed QuestionPaperType table.
+
+    We intentionally avoid Django model field `choices` here so new QP types
+    added in admin immediately work across the system.
+    """
+    code = (value or '').strip()
+    if not code:
+        return
+    try:
+        from django.db import connection
+        if 'curriculum_questionpapertype' not in connection.introspection.table_names():
+            return
+    except Exception:
+        # Be defensive during early migrations / introspection failures
+        return
+    if not QuestionPaperType.objects.filter(code=code).exists():
+        raise ValidationError(f"Invalid Question Paper Type: {code}")
+
+
+class QuestionPaperType(models.Model):
+    """DB-managed list of valid Question Paper Types (e.g. QP1, QP2, ASPR).
+
+    Seeded via migration 0023. Can be extended through the admin.
+    """
+    code = models.CharField(max_length=32, unique=True)
+    label = models.CharField(max_length=64)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Question Paper Type'
+        verbose_name_plural = 'Question Paper Types'
+        ordering = ('sort_order', 'code')
+
+    def __str__(self):
+        return self.label or self.code
 
 
 
@@ -142,7 +176,7 @@ class CurriculumMaster(models.Model):
     course_code = models.CharField(max_length=64, blank=True, null=True)
     course_name = models.CharField(max_length=255, blank=True, null=True)
     class_type = models.CharField(max_length=16, choices=CLASS_TYPE_CHOICES, default='THEORY')
-    qp_type = models.CharField(max_length=16, choices=QP_TYPE_CHOICES, default='QP1', blank=True, null=True)
+    qp_type = models.CharField(max_length=16, default='QP1', blank=True, null=True, validators=[validate_question_paper_type_code])
     category = models.CharField(max_length=64, blank=True)
     is_elective = models.BooleanField(default=False)
     # Dept-Core flag: subjects like Program Core / Engineering Science that are taught
@@ -258,7 +292,7 @@ class CurriculumDepartment(models.Model):
     total_mark = models.PositiveSmallIntegerField(null=True, blank=True)
 
     total_hours = models.PositiveIntegerField(null=True, blank=True)
-    question_paper_type = models.CharField(max_length=64, choices=QP_TYPE_CHOICES, default='QP1', blank=True)
+    question_paper_type = models.CharField(max_length=64, default='QP1', blank=True, validators=[validate_question_paper_type_code])
     editable = models.BooleanField(default=False)
     overridden = models.BooleanField(default=False)
     # Dept-Core flag: see CurriculumMaster.is_dept_core for full explanation.
@@ -340,8 +374,9 @@ class CurriculumDepartment(models.Model):
                 protected_fields = [
                     'regulation', 'semester', 'course_code', 'course_name', 'class_type', 'category',
                     'l', 't', 'p', 's', 'c', 'internal_mark', 'external_mark', 'total_mark',
-                    'total_hours', 'question_paper_type',
+                    'total_hours',
                     'is_elective',
+                    # 'question_paper_type' is intentionally excluded so HOD can update it independently
                 ]
                 from django.core.exceptions import ValidationError
                 for f in protected_fields:
@@ -385,7 +420,7 @@ class ElectiveSubject(models.Model):
     total_mark = models.PositiveSmallIntegerField(null=True, blank=True)
 
     total_hours = models.PositiveIntegerField(null=True, blank=True)
-    question_paper_type = models.CharField(max_length=64, choices=QP_TYPE_CHOICES, default='QP1', blank=True)
+    question_paper_type = models.CharField(max_length=64, default='QP1', blank=True, validators=[validate_question_paper_type_code])
 
     editable = models.BooleanField(default=False)
     overridden = models.BooleanField(default=False)

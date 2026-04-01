@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count, Q
 from django.http import HttpResponse
-from .models import CurriculumMaster, CurriculumDepartment, ElectiveSubject, DepartmentGroup, DepartmentGroupMapping
+from .models import CurriculumMaster, CurriculumDepartment, ElectiveSubject, DepartmentGroup, DepartmentGroupMapping, QuestionPaperType
 from .serializers import CurriculumMasterSerializer, CurriculumDepartmentSerializer, ElectiveSubjectSerializer, DepartmentGroupSerializer
 from .permissions import IsIQACOrReadOnly, IsIQACOnly
 from accounts.utils import get_user_permissions
@@ -552,3 +552,16 @@ class DepartmentGroupViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = DepartmentGroupSerializer
     permission_classes = [IsAuthenticated]
 
+
+
+class QuestionPaperTypeListView(APIView):
+    """Return list of active Question Paper Types.
+
+    GET /api/curriculum/qp-types/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = QuestionPaperType.objects.filter(is_active=True).order_by('sort_order', 'code')
+        data = [{'id': q.id, 'code': q.code, 'label': q.label} for q in qs]
+        return Response(data)

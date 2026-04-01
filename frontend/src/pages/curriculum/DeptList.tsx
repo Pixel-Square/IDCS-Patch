@@ -6,6 +6,7 @@ import fetchWithAuth from '../../services/fetchAuth';
 import { Edit, Check, X, Save, RefreshCw, Copy } from 'lucide-react';
 
 type Department = { id: number; code: string; name: string; short_name?: string };
+type QPType = { id: number; code: string; label: string };
 
 export default function DeptList() {
   const [rows, setRows] = useState<any[]>([]);
@@ -22,6 +23,7 @@ export default function DeptList() {
   const [propagateSection, setPropagateSection] = useState(false);
   const [propagateSectionTargets, setPropagateSecTargets] = useState<number[]>([]);
   const [propagatingSec, setPropagatingSec] = useState(false);
+  const [qpTypes, setQpTypes] = useState<QPType[]>([]);
   const uniqueRegs = rows && rows.length ? Array.from(new Set(rows.map(r => r.regulation))) : [];
   const uniqueSems = rows && rows.length ? Array.from(new Set(rows.map(r => r.semester))).sort((a,b)=>a-b) : [];
   const [selectedReg, setSelectedReg] = useState<string | null>(uniqueRegs.length === 1 ? uniqueRegs[0] : (uniqueRegs[0] ?? null));
@@ -40,6 +42,13 @@ export default function DeptList() {
   useEffect(() => {
     fetchDeptRows().then(r => setRows(r)).catch(console.error).finally(() => setLoading(false));
     fetchBatchYears().then(setBatchYears).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchWithAuth('/api/curriculum/qp-types/')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setQpTypes(Array.isArray(data) ? data : []))
+      .catch(() => setQpTypes([]));
   }, []);
 
   // Fetch departments based on curriculum permissions
@@ -119,6 +128,7 @@ export default function DeptList() {
     }
   })();
   const isIqac = userRoles.map((r) => String(r || '').toUpperCase()).includes('IQAC');
+  const isHod = userRoles.map((r) => String(r || '').toUpperCase()).includes('HOD');
   const canApprove = Array.isArray(userPerms) && (userPerms.includes('curriculum.department.approve') || userPerms.includes('CURRICULUM_DEPARTMENT_APPROVE'));
   // Propagate/copy is only for users with master curriculum or all-department curriculum access
   const canPropagate = Array.isArray(userPerms) && (
@@ -580,7 +590,19 @@ export default function DeptList() {
                     <td className="px-3 py-2 whitespace-nowrap"><input type="number" value={r.external_mark || ''} onChange={e => setRows(rs => rs.map(row => row.id === r.id ? { ...row, external_mark: Number(e.target.value) } : row))} className="w-full min-w-[88px] text-right px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" /></td>
                     <td className="px-3 py-2 whitespace-nowrap"><input type="number" value={r.total_mark || ''} onChange={e => setRows(rs => rs.map(row => row.id === r.id ? { ...row, total_mark: Number(e.target.value) } : row))} className="w-full min-w-[88px] text-right px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" /></td>
                     <td className="px-3 py-2 whitespace-nowrap"><input type="number" value={r.total_hours || ''} onChange={e => setRows(rs => rs.map(row => row.id === r.id ? { ...row, total_hours: Number(e.target.value) } : row))} className="w-full min-w-[88px] text-right px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" /></td>
-                    <td className="px-3 py-2 whitespace-nowrap"><input value={r.question_paper_type || ''} onChange={e => setRows(rs => rs.map(row => row.id === r.id ? { ...row, question_paper_type: e.target.value } : row))} className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" /></td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <select
+                        value={r.question_paper_type || ''}
+                        onChange={e => setRows(rs => rs.map(row => row.id === r.id ? { ...row, question_paper_type: e.target.value } : row))}
+                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 edit-cell-input"
+                        style={{ minWidth: 90 }}
+                      >
+                        <option value="">— Select —</option>
+                        {qpTypes.map(qt => (
+                          <option key={qt.code} value={qt.code}>{qt.label}</option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="px-3 py-2 whitespace-nowrap">{r.editable ? <span className="text-emerald-600 font-semibold">Yes</span> : <span className="text-gray-400">No</span>}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <button
@@ -621,7 +643,31 @@ export default function DeptList() {
                     <td className="px-3 py-2.5 whitespace-nowrap text-sm">{r.external_mark ?? '-'}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-sm">{r.total_mark ?? '-'}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-sm">{r.total_hours ?? '-'}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-sm">{r.question_paper_type || '-'}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {qpTypes.length > 0 ? (
+                        <select
+                          value={r.question_paper_type || ''}
+                          onChange={async (e) => {
+                            const val = e.target.value;
+                            setRows(rs => rs.map(row => row.id === r.id ? { ...row, question_paper_type: val } : row));
+                            try {
+                              await updateDeptRow(r.id, { question_paper_type: val });
+                            } catch (err: any) {
+                              alert('Failed to save QP Type: ' + String(err));
+                            }
+                          }}
+                          className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          style={{ minWidth: 80 }}
+                        >
+                          <option value="">—</option>
+                          {qpTypes.map(qt => (
+                            <option key={qt.code} value={qt.code}>{qt.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-sm">{r.question_paper_type || '-'}</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-sm">{r.editable ? <span className="text-emerald-600 font-semibold">Yes</span> : <span className="text-gray-400">No</span>}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <div className="flex items-center gap-1">
@@ -1058,11 +1104,16 @@ export default function DeptList() {
               </div>
               <div className="col-span-2">
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Question Paper Type</label>
-                <input 
-                  value={addForm.question_paper_type || ''} 
-                  onChange={e => setAddForm(f => ({ ...f, question_paper_type: e.target.value }))} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                />
+                <select
+                  value={addForm.question_paper_type || ''}
+                  onChange={e => setAddForm(f => ({ ...f, question_paper_type: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">— Select —</option>
+                  {qpTypes.map(qt => (
+                    <option key={qt.code} value={qt.code}>{qt.label}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex items-center gap-2">
                 <input 
@@ -1243,11 +1294,16 @@ export default function DeptList() {
               </div>
               <div className="col-span-2">
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Question Paper Type</label>
-                <input 
-                  value={editElectiveForm.question_paper_type || ''} 
-                  onChange={e => setEditElectiveForm((f:any) => ({ ...f, question_paper_type: e.target.value }))} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                />
+                <select
+                  value={editElectiveForm.question_paper_type || ''}
+                  onChange={e => setEditElectiveForm((f:any) => ({ ...f, question_paper_type: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">— Select —</option>
+                  {qpTypes.map(qt => (
+                    <option key={qt.code} value={qt.code}>{qt.label}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex items-center gap-2">
                 <input 

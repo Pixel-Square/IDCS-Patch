@@ -41,8 +41,8 @@ type CqiTabKey = `cqi_${number}`;
 type TabKey = BaseTabKey | CqiTabKey;
 
 type CqiPlacement = {
-  showAfter: 'cia1' | 'cia2' | 'model';
-  assessmentType: 'cia1' | 'cia2' | 'model';
+  showAfter: 'cia1' | 'cia2' | 'model' | 'review1' | 'review2';
+  assessmentType: 'cia1' | 'cia2' | 'model' | 'review1' | 'review2';
   cos: string[];
 };
 
@@ -125,6 +125,8 @@ function parseCqiOption(optionId: string): CqiPlacement | null {
   const id = String(optionId || '').trim().toLowerCase();
   if (id === 'cia1_co1_co2') return { showAfter: 'cia1', assessmentType: 'cia1', cos: ['CO1', 'CO2'] };
   if (id === 'cia2_co3_co4') return { showAfter: 'cia2', assessmentType: 'cia2', cos: ['CO3', 'CO4'] };
+  if (id === 'review1_co1') return { showAfter: 'review1', assessmentType: 'review1', cos: ['CO1'] };
+  if (id === 'review2_co1') return { showAfter: 'review2', assessmentType: 'review2', cos: ['CO1'] };
   if (id === 'model_co1_co2_co3_co4_co5') return { showAfter: 'model', assessmentType: 'model', cos: ['CO1', 'CO2', 'CO3', 'CO4', 'CO5'] };
   if (id === 'model_co3_co4_co5') return { showAfter: 'model', assessmentType: 'model', cos: ['CO3', 'CO4', 'CO5'] };
   if (id === 'model_co5') return { showAfter: 'model', assessmentType: 'model', cos: ['CO5'] };
@@ -222,7 +224,9 @@ function getVisibleTabs(classType: string | null | undefined, enabledAssessments
 
   // LAB: only show lab assessments (no SSA/Formative)
   if (ct === 'LAB') {
-    return BASE_TABS.filter((t) => ['dashboard', 'cia1', 'cia2', 'model'].includes(t.key)).map((t) => {
+    const allowedLabTabs = new Set(['dashboard', 'cia1', 'cia2']);
+    if (enabled.has('model')) allowedLabTabs.add('model');
+    return BASE_TABS.filter((t) => allowedLabTabs.has(t.key)).map((t) => {
       if (t.key === 'cia1') return { ...t, label: 'CIA 1 LAB' };
       if (t.key === 'cia2') return { ...t, label: 'CIA 2 LAB' };
       if (t.key === 'model') return { ...t, label: 'MODEL LAB' };
@@ -264,14 +268,14 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`obe-sidebar-btn ${active ? 'active' : ''}`}
+      className={`obe-assess-btn${active ? ' active' : ''}`}
     >
       {label}
     </button>
   );
 }
 
-// Extended tab button to support CQI floating variant
+// Extended tab button to support CQI variant
 function TabButtonExtended({
   active,
   label,
@@ -288,7 +292,7 @@ function TabButtonExtended({
   return (
     <button
       onClick={onClick}
-      className={`obe-sidebar-btn ${active ? 'active' : ''} ${isCqi ? 'cqi-floating-btn' : ''}`}
+      className={`obe-assess-btn${isCqi ? ' obe-assess-btn-cqi' : ''}${active ? ' active' : ''}`}
       {...(uniqueId ? { 'data-cqi-id': uniqueId } as any : {})}
     >
       {label}
@@ -610,11 +614,17 @@ export default function MarkEntryTabs({
   const baseVisibleTabs = useMemo(() => getVisibleTabs(effectiveClassTypeForTabs, effectiveEnabled), [effectiveClassTypeForTabs, enabledAssessments, facultyEnabledAssessments]);
 
   const cqiPlacements = useMemo(() => {
+    if (normalizedEffectiveClassType === 'PROJECT') {
+      return [
+        { showAfter: 'review1', assessmentType: 'review1', cos: ['CO1'] },
+        { showAfter: 'review2', assessmentType: 'review2', cos: ['CO1'] },
+      ] as CqiPlacement[];
+    }
     const options = Array.isArray(cqiConfig?.options) ? cqiConfig.options : [];
     return options
       .map((raw) => parseCqiOption(raw))
       .filter((x): x is CqiPlacement => Boolean(x));
-  }, [cqiConfig]);
+  }, [cqiConfig, normalizedEffectiveClassType]);
 
   const visibleTabs = useMemo(() => {
     const out: TabDef[] = [...baseVisibleTabs];
@@ -1082,26 +1092,10 @@ export default function MarkEntryTabs({
         </div>
       ) : null}
 
-      <div style={{ 
-        background: 'linear-gradient(135deg, #f8fafc 0%, #e0f2fe 100%)',
-        borderRadius: 12,
-        padding: '16px',
-        marginBottom: 20,
-        border: '1px solid #cbd5e1',
-        boxShadow: '0 2px 8px rgba(2,6,23,0.04), inset 0 1px 0 rgba(255,255,255,0.5)'
-      }}>
-        <div style={{ 
-          fontSize: 12, 
-          fontWeight: 700, 
-          color: '#64748b', 
-          textTransform: 'uppercase', 
-          letterSpacing: '0.05em',
-          marginBottom: 12
-        }}>
-          Assessment Exams
-        </div>
-        <div className="obe-sidebar-nav" aria-label="Mark Entry sub-tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {visibleTabs.map((t, idx) => (
+      <div className="obe-assess-nav" aria-label="Mark Entry sub-tabs">
+        <span className="obe-assess-nav-label">Assessment Exams</span>
+        <div className="obe-assess-nav-row">
+          {visibleTabs.map((t) => (
             <React.Fragment key={t.key}>
               {t.cqi ? (
                 <TabButtonExtended
@@ -1407,6 +1401,7 @@ export default function MarkEntryTabs({
                 if (String(active).startsWith('cqi_')) {
                   return (
                     <CQIEntry
+                      key={`${activeCqi?.assessmentType || 'model'}:${(activeCqi?.cos || []).join('_')}`}
                       subjectId={subjectId}
                       teachingAssignmentId={selectedTaId ?? undefined}
                       classType={effectiveClassType ?? null}

@@ -294,6 +294,8 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
   const [masterCfg, setMasterCfg] = useState<any>(null);
   const [masterCfgWarning, setMasterCfgWarning] = useState<string | null>(null);
   const [iqacPattern, setIqacPattern] = useState<{ marks: number[]; cos?: Array<number | string> } | null>(null);
+  const [iqacPatternLoading, setIqacPatternLoading] = useState(false);
+  const [iqacPatternError, setIqacPatternError] = useState<string | null>(null);
   const [subjectPayload, setSubjectPayload] = useState<any>(null);
 
   const classTypeKey = useMemo(() => {
@@ -305,12 +307,12 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
   }, [classType]);
 
   const qpTypeKey = useMemo(() => {
+    // Return the code as-is; do not restrict to only QP1/QP2 so DB-managed
+    // types (ASPR, QP1 FINAL YEAR, etc.) are passed through to the API.
     const s = String(questionPaperType ?? '')
       .trim()
       .toUpperCase();
-    if (s === 'QP2') return 'QP2';
-    if (s === 'QP1') return 'QP1';
-    return '';
+    return s; // empty string means "no type" (non-THEORY classes)
   }, [questionPaperType]);
 
   useEffect(() => {
@@ -318,6 +320,8 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
     const run = async () => {
       if (!classTypeKey) {
         setIqacPattern(null);
+        setIqacPatternLoading(false);
+        setIqacPatternError(null);
         return;
       }
 
@@ -327,6 +331,9 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
       const examForApi = assessmentKey === 'cia2' ? 'CIA2' : 'CIA1';
       let res: any = null;
       let p: any[] = [];
+
+      setIqacPatternLoading(true);
+      setIqacPatternError(null);
 
       // Prefer CIA1/CIA2-specific config.
       try {
@@ -349,13 +356,16 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
             exam: 'CIA' as any,
           });
           p = Array.isArray(res?.pattern?.marks) ? res.pattern.marks : [];
-        } catch {
-          // ignore
+        } catch (e: any) {
+          if (!alive) return;
+          setIqacPatternError(String(e?.message || e || 'Failed to load QP pattern'));
         }
       }
 
       if (!alive) return;
       setIqacPattern(p.length ? (res.pattern as any) : null);
+      if (p.length) setIqacPatternError(null);
+      setIqacPatternLoading(false);
     };
     run();
     return () => {
@@ -2063,6 +2073,41 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
 
   if (loading) return <div style={{ color: '#6b7280' }}>Loading {assessmentLabel} roster…</div>;
 
+  // QP Pattern status display (shown after roster loads)
+  const qpPatternStatusBar = (
+    <div style={{ marginBottom: 12, padding: '8px 14px', background: 'linear-gradient(180deg,#f8fafc,#ffffff)', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12, color: '#475569', fontWeight: 600, letterSpacing: '0.01em' }}>
+        <span style={{ color: '#94a3b8', fontWeight: 500 }}>Assessment</span>
+        <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+        <span style={{ color: '#1e293b' }}>{assessmentLabel}</span>
+        <span style={{ margin: '0 8px', color: '#e2e8f0' }}>|</span>
+        <span style={{ color: '#94a3b8', fontWeight: 500 }}>Class</span>
+        <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+        <span style={{ color: '#1e293b' }}>{classTypeKey || 'N/A'}</span>
+        <span style={{ margin: '0 8px', color: '#e2e8f0' }}>|</span>
+        <span style={{ color: '#94a3b8', fontWeight: 500 }}>QP</span>
+        <span style={{ margin: '0 6px', color: '#cbd5e1' }}>·</span>
+        <span style={{ color: '#1e293b', fontWeight: 700 }}>{qpTypeKey || 'N/A'}</span>
+      </span>
+      {iqacPatternLoading ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#0b74b8', background: '#e0f2fe', border: '1px solid #bae6fd', borderRadius: 999, padding: '2px 10px' }}>
+          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#0b74b8', animation: 'obe-pulse-dot 1.2s ease-in-out infinite' }} />
+          Loading pattern…
+        </span>
+      ) : null}
+      {iqacPatternError ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 999, padding: '2px 10px' }}>
+          ⚠ Pattern load failed
+        </span>
+      ) : null}
+      {!iqacPatternLoading && !iqacPatternError && iqacPattern ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#047857', background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: 999, padding: '2px 10px' }}>
+          ✓ {questions.length} questions loaded
+        </span>
+      ) : null}
+    </div>
+  );
+
   const hasAbsentees = students.some((s) => Boolean(sheet.rowsByStudentId[String(s.id)]?.absent));
   const visibleStudents = showAbsenteesOnly
     ? students.filter((s) => {
@@ -2176,6 +2221,8 @@ export default function Cia1Entry({ subjectId, teachingAssignmentId, assessmentK
           {masterCfgWarning}
         </div>
       )}
+
+      {qpPatternStatusBar}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

@@ -137,6 +137,14 @@ class MeSerializer(serializers.Serializer):
     profile_image_updated = serializers.SerializerMethodField()
     name_email_edited = serializers.SerializerMethodField()
     profileEdited = serializers.SerializerMethodField()
+    under_construction = serializers.SerializerMethodField()
+
+    def get_under_construction(self, obj):
+        try:
+            from .models import SiteConfiguration
+            return SiteConfiguration.get().under_construction or {}
+        except Exception:
+            return {}
 
     def get_profile_image_updated(self, obj):
         try:

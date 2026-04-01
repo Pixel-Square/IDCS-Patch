@@ -2,8 +2,80 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { fetchIQACCourseTeachingMap, IQACTeachingMapRow } from '../../services/academics';
 import { fetchDeptRows, DeptRow } from '../../services/curriculum';
-import { iqacResetAssessment, DraftAssessmentKey } from '../../services/obe';
+import {
+  fetchTeachingAssignmentEnabledAssessmentsInfo,
+  iqacResetAssessment,
+  setTeachingAssignmentEnabledAssessmentsInfo,
+  DraftAssessmentKey,
+} from '../../services/obe';
 import { clearLocalDraftCache } from '../../utils/obeDraftCache';
+import { normalizeClassType } from '../../constants/classTypes';
+
+function LabModelToggleButton({ teachingAssignmentId }: { teachingAssignmentId: number }): JSX.Element {
+  const [enabledAssessments, setEnabledAssessments] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const info = await fetchTeachingAssignmentEnabledAssessmentsInfo(Number(teachingAssignmentId));
+        if (!mounted) return;
+        const arr = Array.isArray(info?.enabled_assessments)
+          ? info.enabled_assessments.map((x: any) => String(x || '').trim().toLowerCase()).filter(Boolean)
+          : [];
+        setEnabledAssessments(arr);
+        setError(null);
+      } catch (e: any) {
+        if (!mounted) return;
+        setEnabledAssessments([]);
+        setError(e?.message || 'Failed to load model lab status');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [teachingAssignmentId]);
+
+  const modelEnabled = enabledAssessments.includes('model');
+
+  const toggleModelLab = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      const next = modelEnabled
+        ? enabledAssessments.filter((item) => item !== 'model')
+        : [...enabledAssessments.filter(Boolean), 'model'];
+      const resp = await setTeachingAssignmentEnabledAssessmentsInfo(Number(teachingAssignmentId), next);
+      const saved = Array.isArray(resp?.enabled_assessments)
+        ? resp.enabled_assessments.map((x: any) => String(x || '').trim().toLowerCase()).filter(Boolean)
+        : [];
+      setEnabledAssessments(saved);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to update model lab setting');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+      <div style={{ fontSize: 12, color: modelEnabled ? '#065f46' : '#92400e', fontWeight: 700 }}>
+        Model Lab: {loading ? 'Loading…' : modelEnabled ? 'Enabled' : 'Disabled'}
+      </div>
+      <button className="obe-btn" onClick={toggleModelLab} disabled={loading || saving}>
+        {saving ? 'Saving…' : modelEnabled ? 'Disable Model Lab' : 'Enable Model Lab'}
+      </button>
+      {error ? <div style={{ fontSize: 12, color: '#b91c1c' }}>{error}</div> : null}
+    </div>
+  );
+}
 
 export default function AcademicControllerCoursePage(): JSX.Element {
   const { courseCode } = useParams<{ courseCode: string }>();
@@ -138,6 +210,10 @@ export default function AcademicControllerCoursePage(): JSX.Element {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
                 {g.items.map((r) => (
+                  (() => {
+                    const dept = (deptRows || []).find((d) => String(d?.course_code || '').trim().toUpperCase() === code.toUpperCase());
+                    const itemClassType = normalizeClassType((r as any)?.class_type || dept?.class_type || '');
+                    return (
                   <div
                     key={String(r.teaching_assignment_id)}
                     style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 10, background: '#fff', display: 'flex', flexDirection: 'column', gap: 8 }}
@@ -146,10 +222,7 @@ export default function AcademicControllerCoursePage(): JSX.Element {
                       <div style={{ fontSize: 12, color: '#6b7280' }}>
                         {r.section_name ? `Section: ${r.section_name}` : ''}
                         {r.academic_year ? `  •  AY: ${r.academic_year}` : ''}
-                        {(() => {
-                          const dept = (deptRows || []).find((d) => String(d?.course_code || '').trim().toUpperCase() === code.toUpperCase());
-                          return dept ? `  •  Dept: ${dept.department?.name || dept.department?.code || ''}  •  Sem: ${dept.semester || '—'}` : '';
-                        })()}
+                        {dept ? `  •  Dept: ${dept.department?.name || dept.department?.code || ''}  •  Sem: ${dept.semester || '—'}` : ''}
                       </div>
                     <div style={{ marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
@@ -168,7 +241,10 @@ export default function AcademicControllerCoursePage(): JSX.Element {
                         Reset Course
                       </button>
                     </div>
+                    {itemClassType === 'LAB' ? <LabModelToggleButton teachingAssignmentId={Number(r.teaching_assignment_id)} /> : null}
                   </div>
+                    );
+                  })()
                 ))}
               </div>
             </div>

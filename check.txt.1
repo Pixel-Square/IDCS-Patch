@@ -1,32 +1,5 @@
 == IDCS health check ==
-time=2026-03-26T00:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[FAIL] public frontend (status=520, expected=^(200|301|302)$)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=10 warn=0 fail=2
-== IDCS health check ==
-time=2026-03-26T00:10:01+05:30
+time=2026-03-30T00:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -42,8 +15,8 @@ time=2026-03-26T00:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -53,7 +26,7 @@ time=2026-03-26T00:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T00:20:01+05:30
+time=2026-03-30T00:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -69,8 +42,8 @@ time=2026-03-26T00:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -80,7 +53,7 @@ time=2026-03-26T00:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T00:30:01+05:30
+time=2026-03-30T00:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -96,62 +69,8 @@ time=2026-03-26T00:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=6
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T00:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=6
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T00:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -161,7 +80,7 @@ time=2026-03-26T00:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T01:00:01+05:30
+time=2026-03-30T00:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -177,8 +96,8 @@ time=2026-03-26T01:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -188,7 +107,7 @@ time=2026-03-26T01:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T01:10:01+05:30
+time=2026-03-30T00:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -204,8 +123,8 @@ time=2026-03-26T01:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -215,7 +134,7 @@ time=2026-03-26T01:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T01:20:01+05:30
+time=2026-03-30T00:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -231,8 +150,8 @@ time=2026-03-26T01:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -242,7 +161,7 @@ time=2026-03-26T01:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T01:30:01+05:30
+time=2026-03-30T01:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -258,8 +177,8 @@ time=2026-03-26T01:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -269,7 +188,7 @@ time=2026-03-26T01:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T01:40:01+05:30
+time=2026-03-30T01:10:02+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -285,8 +204,8 @@ time=2026-03-26T01:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -296,7 +215,7 @@ time=2026-03-26T01:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T01:50:01+05:30
+time=2026-03-30T01:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -312,8 +231,8 @@ time=2026-03-26T01:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -323,7 +242,7 @@ time=2026-03-26T01:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T02:00:01+05:30
+time=2026-03-30T01:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -339,8 +258,8 @@ time=2026-03-26T02:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -350,7 +269,7 @@ time=2026-03-26T02:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T02:10:01+05:30
+time=2026-03-30T01:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -366,8 +285,8 @@ time=2026-03-26T02:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -377,7 +296,7 @@ time=2026-03-26T02:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T02:20:01+05:30
+time=2026-03-30T01:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -393,8 +312,8 @@ time=2026-03-26T02:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -404,7 +323,7 @@ time=2026-03-26T02:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T02:30:01+05:30
+time=2026-03-30T02:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -420,8 +339,8 @@ time=2026-03-26T02:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -431,7 +350,7 @@ time=2026-03-26T02:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T02:40:01+05:30
+time=2026-03-30T02:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -447,8 +366,8 @@ time=2026-03-26T02:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -458,7 +377,7 @@ time=2026-03-26T02:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T02:50:01+05:30
+time=2026-03-30T02:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -474,8 +393,8 @@ time=2026-03-26T02:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -485,7 +404,7 @@ time=2026-03-26T02:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T03:00:01+05:30
+time=2026-03-30T02:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -501,8 +420,8 @@ time=2026-03-26T03:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -512,7 +431,7 @@ time=2026-03-26T03:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T03:10:01+05:30
+time=2026-03-30T02:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -528,8 +447,8 @@ time=2026-03-26T03:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -539,7 +458,7 @@ time=2026-03-26T03:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T03:20:01+05:30
+time=2026-03-30T02:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -555,8 +474,8 @@ time=2026-03-26T03:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -566,7 +485,7 @@ time=2026-03-26T03:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T03:30:01+05:30
+time=2026-03-30T03:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -582,8 +501,8 @@ time=2026-03-26T03:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -593,7 +512,7 @@ time=2026-03-26T03:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T03:40:01+05:30
+time=2026-03-30T03:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -609,8 +528,8 @@ time=2026-03-26T03:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -620,7 +539,7 @@ time=2026-03-26T03:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T03:50:01+05:30
+time=2026-03-30T03:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -636,8 +555,8 @@ time=2026-03-26T03:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -647,7 +566,7 @@ time=2026-03-26T03:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T04:00:01+05:30
+time=2026-03-30T03:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -663,8 +582,8 @@ time=2026-03-26T04:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -674,7 +593,7 @@ time=2026-03-26T04:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T04:10:01+05:30
+time=2026-03-30T03:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -690,8 +609,8 @@ time=2026-03-26T04:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -701,7 +620,7 @@ time=2026-03-26T04:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T04:20:01+05:30
+time=2026-03-30T03:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -717,8 +636,8 @@ time=2026-03-26T04:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -728,7 +647,7 @@ time=2026-03-26T04:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T04:30:01+05:30
+time=2026-03-30T04:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -744,8 +663,8 @@ time=2026-03-26T04:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -755,7 +674,7 @@ time=2026-03-26T04:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T04:40:01+05:30
+time=2026-03-30T04:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -771,8 +690,8 @@ time=2026-03-26T04:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -782,7 +701,7 @@ time=2026-03-26T04:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T04:50:01+05:30
+time=2026-03-30T04:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -798,8 +717,8 @@ time=2026-03-26T04:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -809,7 +728,7 @@ time=2026-03-26T04:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T05:00:01+05:30
+time=2026-03-30T04:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -825,8 +744,8 @@ time=2026-03-26T05:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -836,7 +755,7 @@ time=2026-03-26T05:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T05:10:01+05:30
+time=2026-03-30T04:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -852,8 +771,8 @@ time=2026-03-26T05:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -863,7 +782,7 @@ time=2026-03-26T05:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T05:20:01+05:30
+time=2026-03-30T04:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -879,8 +798,8 @@ time=2026-03-26T05:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -890,7 +809,7 @@ time=2026-03-26T05:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T05:30:01+05:30
+time=2026-03-30T05:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -906,8 +825,8 @@ time=2026-03-26T05:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -917,7 +836,7 @@ time=2026-03-26T05:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T05:40:01+05:30
+time=2026-03-30T05:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -933,8 +852,8 @@ time=2026-03-26T05:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -944,7 +863,7 @@ time=2026-03-26T05:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T05:50:01+05:30
+time=2026-03-30T05:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -960,8 +879,8 @@ time=2026-03-26T05:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -971,7 +890,7 @@ time=2026-03-26T05:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T06:00:01+05:30
+time=2026-03-30T05:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -987,8 +906,8 @@ time=2026-03-26T06:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -998,826 +917,7 @@ time=2026-03-26T06:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T06:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=68
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T06:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=84
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T06:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=93
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T06:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=111
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T06:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=58
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T07:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=78
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T07:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=102
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T07:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=96
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T07:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=72
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T07:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=75
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T07:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=93
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T08:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=90
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T08:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=75
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T08:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=72
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T08:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=81
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T08:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=72
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T08:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=48
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T09:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=58
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T09:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=90
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T09:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=68
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T09:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public frontend (status=000000, expected=^(200|301|302)$)
-curl: (60) SSL certificate problem: self-signed certificate in certificate chain
-More details here: https://curl.se/docs/sslcerts.html
-
-curl failed to verify the legitimacy of the server and therefore could not
-establish a secure connection to it. To learn more about this situation and
-how to fix it, please visit the web page mentioned above.
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=63
-
-== Summary ==
-pass=8 warn=1 fail=3
-== IDCS health check ==
-time=2026-03-26T09:40:01+05:30
+time=2026-03-30T05:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -1833,62 +933,8 @@ time=2026-03-26T09:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=63
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T09:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=24
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T10:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -1898,7 +944,7 @@ time=2026-03-26T10:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T10:10:01+05:30
+time=2026-03-30T05:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -1914,8 +960,8 @@ time=2026-03-26T10:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -1925,7 +971,7 @@ time=2026-03-26T10:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T10:20:01+05:30
+time=2026-03-30T06:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -1941,8 +987,8 @@ time=2026-03-26T10:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -1952,7 +998,7 @@ time=2026-03-26T10:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T10:30:01+05:30
+time=2026-03-30T06:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -1968,8 +1014,8 @@ time=2026-03-26T10:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (79 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -1979,7 +1025,7 @@ time=2026-03-26T10:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T10:40:01+05:30
+time=2026-03-30T06:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -1995,8 +1041,8 @@ time=2026-03-26T10:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (79 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2006,7 +1052,7 @@ time=2026-03-26T10:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T10:50:01+05:30
+time=2026-03-30T06:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2022,8 +1068,548 @@ time=2026-03-26T10:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T06:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T06:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T07:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T07:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T07:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T07:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T07:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T07:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T08:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T08:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T08:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T08:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T08:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T08:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T09:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T09:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T09:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T09:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T09:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T09:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2033,7 +1619,7 @@ time=2026-03-26T10:50:01+05:30
 == Summary ==
 pass=10 warn=1 fail=1
 == IDCS health check ==
-time=2026-03-26T11:00:01+05:30
+time=2026-03-30T10:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2049,8 +1635,8 @@ time=2026-03-26T11:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2060,7 +1646,7 @@ time=2026-03-26T11:00:01+05:30
 == Summary ==
 pass=10 warn=1 fail=1
 == IDCS health check ==
-time=2026-03-26T11:10:01+05:30
+time=2026-03-30T10:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2076,8 +1662,8 @@ time=2026-03-26T11:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2087,7 +1673,7 @@ time=2026-03-26T11:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T11:20:01+05:30
+time=2026-03-30T10:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2103,8 +1689,8 @@ time=2026-03-26T11:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2114,7 +1700,7 @@ time=2026-03-26T11:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T11:30:01+05:30
+time=2026-03-30T10:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2130,8 +1716,8 @@ time=2026-03-26T11:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (75 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2141,7 +1727,7 @@ time=2026-03-26T11:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T11:40:01+05:30
+time=2026-03-30T10:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2157,8 +1743,8 @@ time=2026-03-26T11:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (75 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2168,7 +1754,7 @@ time=2026-03-26T11:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T11:50:01+05:30
+time=2026-03-30T10:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2184,62 +1770,8 @@ time=2026-03-26T11:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=2
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T12:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=2
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T12:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2249,7 +1781,7 @@ time=2026-03-26T12:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T12:20:01+05:30
+time=2026-03-30T11:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2265,8 +1797,8 @@ time=2026-03-26T12:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2276,7 +1808,7 @@ time=2026-03-26T12:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T12:30:01+05:30
+time=2026-03-30T11:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2292,359 +1824,8 @@ time=2026-03-26T12:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T12:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T12:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T13:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=4
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T13:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=4
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T13:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T13:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T13:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T13:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T14:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T14:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=2
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=16
-
-== Summary ==
-pass=9 warn=2 fail=1
-== IDCS health check ==
-time=2026-03-26T14:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=2
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=30
-
-== Summary ==
-pass=9 warn=2 fail=1
-== IDCS health check ==
-time=2026-03-26T14:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=16
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T14:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2654,7 +1835,7 @@ time=2026-03-26T14:40:01+05:30
 == Summary ==
 pass=10 warn=1 fail=1
 == IDCS health check ==
-time=2026-03-26T14:50:01+05:30
+time=2026-03-30T11:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2670,252 +1851,8 @@ time=2026-03-26T14:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=28
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T15:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=28
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T15:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T15:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-curl: (28) Connection timed out after 10002 milliseconds
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=10 warn=0 fail=2
-== IDCS health check ==
-time=2026-03-26T15:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T15:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T15:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=1
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=2
-
-== Summary ==
-pass=9 warn=2 fail=1
-== IDCS health check ==
-time=2026-03-26T16:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=3
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=2
-
-== Summary ==
-pass=9 warn=2 fail=1
-== IDCS health check ==
-time=2026-03-26T16:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=2
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T16:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2925,7 +1862,7 @@ time=2026-03-26T16:20:01+05:30
 == Summary ==
 pass=10 warn=1 fail=1
 == IDCS health check ==
-time=2026-03-26T16:30:01+05:30
+time=2026-03-30T11:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2941,8 +1878,143 @@ time=2026-03-26T16:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T11:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T11:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[WARN] cloudflared recent error lines=20
+
+== Summary ==
+pass=10 warn=1 fail=1
+== IDCS health check ==
+time=2026-03-30T12:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[WARN] cloudflared recent error lines=20
+
+== Summary ==
+pass=10 warn=1 fail=1
+== IDCS health check ==
+time=2026-03-30T12:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T12:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2952,7 +2024,7 @@ time=2026-03-26T16:30:01+05:30
 == Summary ==
 pass=10 warn=1 fail=1
 == IDCS health check ==
-time=2026-03-26T16:40:01+05:30
+time=2026-03-30T12:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2968,8 +2040,8 @@ time=2026-03-26T16:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -2979,7 +2051,7 @@ time=2026-03-26T16:40:01+05:30
 == Summary ==
 pass=10 warn=1 fail=1
 == IDCS health check ==
-time=2026-03-26T16:50:01+05:30
+time=2026-03-30T12:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -2995,116 +2067,8 @@ time=2026-03-26T16:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=14
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T17:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=21
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T17:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=12
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T17:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=3
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T17:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3114,7 +2078,7 @@ time=2026-03-26T17:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T17:40:01+05:30
+time=2026-03-30T12:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3130,8 +2094,8 @@ time=2026-03-26T17:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3141,7 +2105,7 @@ time=2026-03-26T17:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T17:50:01+05:30
+time=2026-03-30T13:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3157,8 +2121,8 @@ time=2026-03-26T17:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3168,7 +2132,7 @@ time=2026-03-26T17:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T18:00:01+05:30
+time=2026-03-30T13:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3184,8 +2148,8 @@ time=2026-03-26T18:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3195,7 +2159,7 @@ time=2026-03-26T18:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T18:10:01+05:30
+time=2026-03-30T13:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3211,8 +2175,8 @@ time=2026-03-26T18:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3222,7 +2186,7 @@ time=2026-03-26T18:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T18:20:01+05:30
+time=2026-03-30T13:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3238,8 +2202,8 @@ time=2026-03-26T18:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3249,7 +2213,7 @@ time=2026-03-26T18:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T18:30:01+05:30
+time=2026-03-30T13:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3265,62 +2229,8 @@ time=2026-03-26T18:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=1
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T18:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[WARN] gunicorn recent error lines=1
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T18:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3330,7 +2240,7 @@ time=2026-03-26T18:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T19:00:01+05:30
+time=2026-03-30T13:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3346,62 +2256,8 @@ time=2026-03-26T19:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=6
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T19:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=6
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T19:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3411,7 +2267,7 @@ time=2026-03-26T19:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T19:30:01+05:30
+time=2026-03-30T14:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3427,8 +2283,8 @@ time=2026-03-26T19:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3438,7 +2294,7 @@ time=2026-03-26T19:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T19:40:01+05:30
+time=2026-03-30T14:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3454,8 +2310,8 @@ time=2026-03-26T19:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3465,7 +2321,7 @@ time=2026-03-26T19:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T19:50:01+05:30
+time=2026-03-30T14:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3481,8 +2337,8 @@ time=2026-03-26T19:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3492,7 +2348,7 @@ time=2026-03-26T19:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T20:00:01+05:30
+time=2026-03-30T14:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3508,8 +2364,8 @@ time=2026-03-26T20:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3519,7 +2375,7 @@ time=2026-03-26T20:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T20:10:01+05:30
+time=2026-03-30T14:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3535,8 +2391,8 @@ time=2026-03-26T20:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3546,7 +2402,7 @@ time=2026-03-26T20:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T20:20:01+05:30
+time=2026-03-30T14:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3562,8 +2418,8 @@ time=2026-03-26T20:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3573,7 +2429,7 @@ time=2026-03-26T20:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T20:30:01+05:30
+time=2026-03-30T15:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3589,197 +2445,8 @@ time=2026-03-26T20:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T20:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T20:50:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=63
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T21:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[WARN] cloudflared recent error lines=63
-
-== Summary ==
-pass=10 warn=1 fail=1
-== IDCS health check ==
-time=2026-03-26T21:10:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T21:20:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T21:30:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=11 warn=0 fail=1
-== IDCS health check ==
-time=2026-03-26T21:40:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-[OK]   public login API (status=405)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3789,7 +2456,7 @@ time=2026-03-26T21:40:01+05:30
 == Summary ==
 pass=10 warn=1 fail=1
 == IDCS health check ==
-time=2026-03-26T21:50:01+05:30
+time=2026-03-30T15:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3805,8 +2472,8 @@ time=2026-03-26T21:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3816,7 +2483,7 @@ time=2026-03-26T21:50:01+05:30
 == Summary ==
 pass=10 warn=1 fail=1
 == IDCS health check ==
-time=2026-03-26T22:00:01+05:30
+time=2026-03-30T15:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3832,8 +2499,8 @@ time=2026-03-26T22:00:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3843,7 +2510,7 @@ time=2026-03-26T22:00:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T22:10:01+05:30
+time=2026-03-30T15:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3859,8 +2526,8 @@ time=2026-03-26T22:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3870,7 +2537,7 @@ time=2026-03-26T22:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T22:20:01+05:30
+time=2026-03-30T15:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3886,8 +2553,8 @@ time=2026-03-26T22:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3897,7 +2564,7 @@ time=2026-03-26T22:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T22:30:01+05:30
+time=2026-03-30T15:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3913,8 +2580,8 @@ time=2026-03-26T22:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3924,7 +2591,7 @@ time=2026-03-26T22:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T22:40:01+05:30
+time=2026-03-30T16:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3940,8 +2607,8 @@ time=2026-03-26T22:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3951,7 +2618,7 @@ time=2026-03-26T22:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T22:50:01+05:30
+time=2026-03-30T16:10:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -3967,8 +2634,8 @@ time=2026-03-26T22:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -3978,35 +2645,7 @@ time=2026-03-26T22:50:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T23:00:01+05:30
-
-[1] Service status
-[OK]   nginx active
-[OK]   gunicorn active
-[OK]   cloudflared active
-
-[2] Local HTTP checks
-[FAIL] local frontend (status=400, expected=^(200|301|302)$)
-[OK]   local login API (status=400)
-
-[3] Public HTTPS checks
-[OK]   public frontend (status=200)
-curl: (28) Operation timed out after 10002 milliseconds with 0 bytes received
-[FAIL] public login API (status=000000, expected=^(200|400|401|405)$)
-
-[4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
-
-[5] Recent error signals (last 20 min)
-[OK]   gunicorn recent errors=0
-[OK]   nginx recent errors=0
-[OK]   cloudflared recent errors=0
-
-== Summary ==
-pass=10 warn=0 fail=2
-== IDCS health check ==
-time=2026-03-26T23:10:01+05:30
+time=2026-03-30T16:20:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -4022,8 +2661,8 @@ time=2026-03-26T23:10:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -4033,7 +2672,7 @@ time=2026-03-26T23:10:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T23:20:01+05:30
+time=2026-03-30T16:30:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -4049,8 +2688,8 @@ time=2026-03-26T23:20:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -4060,7 +2699,7 @@ time=2026-03-26T23:20:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T23:30:01+05:30
+time=2026-03-30T16:40:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -4076,8 +2715,8 @@ time=2026-03-26T23:30:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -4087,7 +2726,7 @@ time=2026-03-26T23:30:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T23:40:01+05:30
+time=2026-03-30T16:50:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -4103,8 +2742,8 @@ time=2026-03-26T23:40:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -4114,7 +2753,7 @@ time=2026-03-26T23:40:01+05:30
 == Summary ==
 pass=11 warn=0 fail=1
 == IDCS health check ==
-time=2026-03-26T23:50:01+05:30
+time=2026-03-30T17:00:01+05:30
 
 [1] Service status
 [OK]   nginx active
@@ -4130,8 +2769,8 @@ time=2026-03-26T23:50:01+05:30
 [OK]   public login API (status=405)
 
 [4] TLS certificate freshness
-[OK]   idcs.krgi.co.in cert valid (78 days left)
-[OK]   db.krgi.co.in cert valid (78 days left)
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
 
 [5] Recent error signals (last 20 min)
 [OK]   gunicorn recent errors=0
@@ -4140,3 +2779,1110 @@ time=2026-03-26T23:50:01+05:30
 
 == Summary ==
 pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T17:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T17:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T17:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T17:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T17:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T18:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T18:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T18:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T18:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T18:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T18:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T19:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T19:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T19:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T19:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T19:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T19:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T20:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T20:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[WARN] cloudflared recent error lines=2
+
+== Summary ==
+pass=10 warn=1 fail=1
+== IDCS health check ==
+time=2026-03-30T20:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[WARN] cloudflared recent error lines=2
+
+== Summary ==
+pass=10 warn=1 fail=1
+== IDCS health check ==
+time=2026-03-30T20:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T20:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T20:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[WARN] cloudflared recent error lines=8
+
+== Summary ==
+pass=10 warn=1 fail=1
+== IDCS health check ==
+time=2026-03-30T21:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[WARN] cloudflared recent error lines=8
+
+== Summary ==
+pass=10 warn=1 fail=1
+== IDCS health check ==
+time=2026-03-30T21:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T21:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T21:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T21:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T21:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T22:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T22:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T22:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T22:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T22:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T22:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T23:00:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T23:10:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T23:20:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T23:30:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[OK]   cloudflared recent errors=0
+
+== Summary ==
+pass=11 warn=0 fail=1
+== IDCS health check ==
+time=2026-03-30T23:40:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[WARN] cloudflared recent error lines=2
+
+== Summary ==
+pass=10 warn=1 fail=1
+== IDCS health check ==
+time=2026-03-30T23:50:01+05:30
+
+[1] Service status
+[OK]   nginx active
+[OK]   gunicorn active
+[OK]   cloudflared active
+
+[2] Local HTTP checks
+[FAIL] local frontend (status=400, expected=^(200|301|302)$)
+[OK]   local login API (status=400)
+
+[3] Public HTTPS checks
+[OK]   public frontend (status=200)
+[OK]   public login API (status=405)
+
+[4] TLS certificate freshness
+[OK]   idcs.krgi.co.in cert valid (74 days left)
+[OK]   db.krgi.co.in cert valid (74 days left)
+
+[5] Recent error signals (last 20 min)
+[OK]   gunicorn recent errors=0
+[OK]   nginx recent errors=0
+[WARN] cloudflared recent error lines=2
+
+== Summary ==
+pass=10 warn=1 fail=1

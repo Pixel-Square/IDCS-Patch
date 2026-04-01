@@ -126,6 +126,11 @@ urlpatterns = [
     # IQAC QP Pattern config
     path('iqac/qp-pattern', views.qp_pattern_get),
     path('iqac/qp-pattern/save', views.qp_pattern_upsert),
+
+    # IQAC Customizable Exam (batch-scoped QP pattern overrides)
+    path('iqac/custom-exam/batches', views.iqac_custom_exam_batches),
+    path('iqac/custom-exam/qp-pattern', views.iqac_batch_qp_pattern_get),
+    path('iqac/custom-exam/qp-pattern/save', views.iqac_batch_qp_pattern_upsert),
     # IQAC CQI global configuration
     path('iqac/cqi-config', views.iqac_cqi_get),
     path('iqac/cqi-config/save', views.iqac_cqi_upsert),

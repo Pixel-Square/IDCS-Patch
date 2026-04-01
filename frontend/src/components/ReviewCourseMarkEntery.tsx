@@ -18,10 +18,10 @@ export default function ReviewCourseMarkEntery({ subjectId, teachingAssignmentId
 
   const config =
     assessmentKey === 'cia1'
-      ? { label: 'CIA 1 Review', coA: 1, coB: 2 as number | null }
+      ? { label: 'CIA 1 Review', coA: 1, coB: null as number | null }
       : assessmentKey === 'cia2'
-        ? { label: 'CIA 2 Review', coA: 3, coB: 4 as number | null }
-        : { label: 'MODEL Review', coA: 5, coB: null as number | null };
+        ? { label: 'CIA 2 Review', coA: 1, coB: null as number | null }
+        : { label: 'MODEL Review', coA: 1, coB: null as number | null };
 
   return (
     <LabCourseMarksEntry
@@ -33,7 +33,7 @@ export default function ReviewCourseMarkEntery({ subjectId, teachingAssignmentId
       label={config.label}
       coA={config.coA}
       coB={config.coB}
-      initialEnabledCos={[1, 2, 3, 4, 5]}
+      initialEnabledCos={[1]}
       viewerMode={Boolean(viewerMode)}
       itemLabel="Content"
       itemLabelPlural="Content"

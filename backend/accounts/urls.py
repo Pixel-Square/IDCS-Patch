@@ -26,6 +26,7 @@ from .views import (
     WhatsAppGatewayClearSessionView,
     ProfileImageUpdateRequestView,
     ProfileImageUpdateRequestReviewView,
+    UCStateView,
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 from .api.dashboard import DashboardView
@@ -65,4 +66,6 @@ urlpatterns = [
     path('settings/whatsapp/restart/',    WhatsAppGatewayRestartView.as_view(),  name='settings_whatsapp_restart'),
     path('settings/whatsapp/send-test/',  WhatsAppGatewaySendTestView.as_view(), name='settings_whatsapp_send_test'),
     path('settings/whatsapp/clear-session/', WhatsAppGatewayClearSessionView.as_view(), name='settings_whatsapp_clear_session'),
+    # Under-construction state (read: any auth, write: IQAC only)
+    path('uc-state/', UCStateView.as_view(), name='uc_state'),
 ]

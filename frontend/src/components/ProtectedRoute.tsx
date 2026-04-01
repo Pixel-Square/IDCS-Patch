@@ -42,5 +42,6 @@ export default function ProtectedRoute({ user, element, requiredRoles, requiredP
   }
 
   if(!allowed) return <Navigate to="/dashboard" replace />
+
   return element
 }

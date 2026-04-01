@@ -775,7 +775,7 @@ class ObeEditRequest(models.Model):
     subject_code = models.CharField(max_length=64, db_index=True)
     subject_name = models.CharField(max_length=255, blank=True, default='')
     section_name = models.CharField(max_length=64, blank=True, default='')
-    assessment = models.CharField(max_length=20, choices=ASSESSMENT_CHOICES)
+    assessment = models.CharField(max_length=64)
     scope = models.CharField(max_length=24, choices=SCOPE_CHOICES, db_index=True)
     reason = models.TextField(blank=True, default='')
 
@@ -959,7 +959,7 @@ class ObeMarkTableLock(models.Model):
     subject_name = models.CharField(max_length=255, blank=True, default='')
     section_name = models.CharField(max_length=64, blank=True, default='')
 
-    assessment = models.CharField(max_length=20, choices=ASSESSMENT_CHOICES, db_index=True)
+    assessment = models.CharField(max_length=64, db_index=True)
 
     # Published indicates the faculty has published at least once.
     is_published = models.BooleanField(default=False, db_index=True)
@@ -1046,6 +1046,35 @@ class ObeQpPatternConfig(models.Model):
                 fields=['class_type', 'question_paper_type', 'exam'],
                 name='unique_qp_pattern_per_class_type_qp_exam'
             )
+        ]
+
+
+class ObeBatchQpPatternOverride(models.Model):
+    """Batch-scoped override for QP patterns.
+
+    This enables IQAC/OBE master to customize question pattern (marks + CO mapping)
+    for a specific student batch, per class type and assessment.
+    """
+
+    batch = models.ForeignKey('academics.Batch', on_delete=models.CASCADE, related_name='obe_qp_overrides')
+    class_type = models.CharField(max_length=50)
+    question_paper_type = models.CharField(max_length=50, null=True, blank=True)
+    exam = models.CharField(max_length=50)
+    pattern = models.JSONField(default=dict)
+    updated_by = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'obe_batch_qp_pattern_override'
+        constraints = [
+            UniqueConstraint(
+                fields=['batch', 'class_type', 'question_paper_type', 'exam'],
+                name='unique_batch_qp_pattern_override_key',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['batch', 'exam']),
+            models.Index(fields=['class_type', 'question_paper_type', 'exam']),
         ]
 
 
