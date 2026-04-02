@@ -6,7 +6,7 @@ import { CoeCourseStudent, fetchCoeStudentsMap } from '../../services/coe';
 import { getCourseKey, readCourseSelectionMap } from './courseSelectionStorage';
 import { listFinalizedBundleConfigs } from '../../utils/coeBundleFinalizeStore';
 import krLogoSrc from '../../assets/krlogo.png';
-import newBannerSrc from '../../assets/new_banner.png';
+import newBannerSrc from '../../assets/newban.jpeg';
 import { getAttendanceFilterKey, readCourseAbsenteesMap } from './attendanceStore';
 import { getSemesterStartSequence, generateDummyNumber } from './dummySequence';
 import fetchWithAuth from '../../services/fetchAuth';
