@@ -2628,36 +2628,35 @@ export default function InternalMarkCoursePage({ courseId, enabledAssessments, c
       };
 
       const PROJECT_CQI_RATE = 0.6;    // take 60% of CQI mark
-      const PROJECT_TOTAL_MAX = 60;     // review1(30) + review2(30)
-      const THRESHOLD_MARKS = round2((PROJECT_TOTAL_MAX * THRESHOLD_PERCENT) / 100); // 34.8
+      const RAW_TOTAL_MAX = 100;        // review1(50) + review2(50) in raw space
+      const RAW_THRESHOLD = 58;         // threshold in raw marks (58 out of 100)
+      const SCALE_FACTOR = maxTotal / RAW_TOTAL_MAX; // 60/100 = 0.6 (dashboard shows /60)
 
       return computedRows.map((r: any) => {
         const review1Base = typeof r.cells?.[0] === 'number' && Number.isFinite(r.cells[0]) ? Number(r.cells[0]) : null;
         const review2Base = typeof r.cells?.[1] === 'number' && Number.isFinite(r.cells[1]) ? Number(r.cells[1]) : null;
 
-        // Combined original total (out of 60)
-        const combinedOrig = (review1Base ?? 0) + (review2Base ?? 0);
+        // Combined in dashboard scaled space (out of 60)
+        const combinedScaled = (review1Base ?? 0) + (review2Base ?? 0);
         const hasAnyMark = review1Base != null || review2Base != null;
 
-        // CQI: single combined mark for the whole project
-        let cqiAdd = 0;
+        // CQI operates in raw space (/100): convert scaled → raw
+        let cqiAddScaled = 0;
         if (activeTab === 'after-cqi' && hasAnyMark) {
+          const rawTotal = combinedScaled / SCALE_FACTOR; // convert to /100
           const cqiMark = getCombinedCqiMark(Number(r.id));
-          if (cqiMark != null && Number.isFinite(cqiMark) && cqiMark > 0) {
-            const originalPct = (combinedOrig / PROJECT_TOTAL_MAX) * 100;
-            if (originalPct < THRESHOLD_PERCENT) {
-              // Take 60% of CQI mark, cap so total doesn't exceed 58%
-              const rawAdd = cqiMark * PROJECT_CQI_RATE;
-              const maxAllowed = Math.max(0, THRESHOLD_MARKS - combinedOrig);
-              cqiAdd = Math.min(rawAdd, maxAllowed);
-            }
+          if (cqiMark != null && Number.isFinite(cqiMark) && cqiMark > 0 && rawTotal < RAW_THRESHOLD) {
+            const rawAdd = cqiMark * PROJECT_CQI_RATE;
+            const maxAllowedRaw = Math.max(0, RAW_THRESHOLD - rawTotal);
+            const actualAddRaw = Math.min(rawAdd, maxAllowedRaw);
+            cqiAddScaled = round2(actualAddRaw * SCALE_FACTOR); // convert back to /60
           }
         }
 
         // Column values stay unchanged (CQI applies to total, not per-review)
         const colVals = [review1Base, review2Base];
 
-        let effTotal = hasAnyMark ? round2(combinedOrig + cqiAdd) : r.total;
+        let effTotal = hasAnyMark ? round2(combinedScaled + cqiAddScaled) : r.total;
         if (effTotal != null) effTotal = clamp(effTotal, 0, maxTotal);
         const effPct = effTotal != null && maxTotal ? round2((effTotal / maxTotal) * 100) : r.pct;
         return { ...r, colVals, effTotal, effPct };

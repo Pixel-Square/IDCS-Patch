@@ -2,14 +2,14 @@
  * PureProjectCQIEntry
  *
  * CQI assessment for pure PROJECT type courses (non-PRBL).
- * Combines Review 1 (scaled to 30) + Review 2 (scaled to 30) → total out of 60.
- * Students with combined total < 58% of 60 (= 34.8) are "CQI NOT ATTAINED".
+ * Review 1 (/50) + Review 2 (/50) = Total (/100).
+ * If total < 58 → CQI NOT ATTAINED.
  *
  * Rules:
  *  - Single CQI test per student (not separate for each review).
  *  - CQI mark is out of 10.
  *  - After CQI: add 60% of the CQI mark (mark × 0.6).
- *  - If adding 60% CQI makes total exceed 58%, cap at 58% (34.8).
+ *  - If adding makes total exceed 58, cap at 58.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import fetchWithAuth from '../services/fetchAuth';
@@ -22,11 +22,9 @@ import { useEditRequestPending } from '../hooks/useEditRequestPending';
 // ──────────────────────────────────────────────────────────────────────
 //  Constants
 // ──────────────────────────────────────────────────────────────────────
-const REVIEW_RAW_MAX       = 50;   // each review is out of 50
-const REVIEW_SCALED_MAX    = 30;   // each review scaled to 30
-const TOTAL_MAX            = 60;   // review1(30) + review2(30)
-const THRESHOLD_PCT        = 58;   // 58%
-const THRESHOLD_MARKS      = (THRESHOLD_PCT / 100) * TOTAL_MAX; // 34.8
+const REVIEW_MAX           = 50;   // each review is out of 50
+const TOTAL_MAX            = 100;  // review1(50) + review2(50)
+const THRESHOLD_MARKS      = 58;   // if total < 58 → CQI
 const CQI_INPUT_MAX        = 10;   // CQI mark entered out of 10
 const CQI_RATE             = 0.6;  // take 60% of CQI mark
 
@@ -39,11 +37,6 @@ function clamp(n: number, lo: number, hi: number) {
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
-}
-
-function scale(value: number, fromMax: number, toMax: number): number {
-  if (!fromMax || !toMax) return 0;
-  return round2((value / fromMax) * toMax);
 }
 
 function toNumOrNull(v: unknown): number | null {
@@ -67,7 +60,7 @@ function extractReviewMark(reviewRes: any, studentId: number | string): number |
     const row = draftSheet.rowsByStudentId?.[sid];
     if (row && typeof row === 'object') {
       const ciaExamTotal = toNumOrNull((row as any)?.ciaExam);
-      if (ciaExamTotal != null) return clamp(ciaExamTotal, 0, REVIEW_RAW_MAX);
+      if (ciaExamTotal != null) return clamp(ciaExamTotal, 0, REVIEW_MAX);
       const componentMarks = (row as any)?.reviewComponentMarks && typeof (row as any).reviewComponentMarks === 'object'
         ? Object.values((row as any).reviewComponentMarks)
         : [];
@@ -75,13 +68,13 @@ function extractReviewMark(reviewRes: any, studentId: number | string): number |
         const n = toNumOrNull(raw);
         return acc + (n == null ? 0 : n);
       }, 0);
-      if (sum > 0) return clamp(sum, 0, REVIEW_RAW_MAX);
+      if (sum > 0) return clamp(sum, 0, REVIEW_MAX);
     }
   }
 
   // Published marks
   const total = toNumOrNull(reviewRes?.marks?.[sid]);
-  return total == null ? null : clamp(Number(total), 0, REVIEW_RAW_MAX);
+  return total == null ? null : clamp(Number(total), 0, REVIEW_MAX);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -91,15 +84,11 @@ type Student = { id: number; reg_no: string; name: string; section?: string | nu
 
 type RowData = {
   student: Student;
-  review1Raw: number | null;    // out of 50
-  review2Raw: number | null;    // out of 50
-  review1Scaled: number | null; // out of 30
-  review2Scaled: number | null; // out of 30
-  combined: number | null;      // out of 60
-  combinedPct: number | null;
+  review1: number | null;   // out of 50
+  review2: number | null;   // out of 50
+  combined: number | null;  // out of 100
   needsCqi: boolean;
   afterCqi: number | null;
-  afterCqiPct: number | null;
 };
 
 type Props = {
@@ -239,51 +228,30 @@ export default function PureProjectCQIEntry({ subjectId, teachingAssignmentId }:
 
     return roster.map((s) => {
       const sid = String(s.id);
-      const r1Raw = extractReviewMark(review1Res, sid);
-      const r2Raw = extractReviewMark(review2Res, sid);
+      const review1 = extractReviewMark(review1Res, sid);
+      const review2 = extractReviewMark(review2Res, sid);
 
-      const r1Scaled = r1Raw != null ? scale(r1Raw, REVIEW_RAW_MAX, REVIEW_SCALED_MAX) : null;
-      const r2Scaled = r2Raw != null ? scale(r2Raw, REVIEW_RAW_MAX, REVIEW_SCALED_MAX) : null;
-
-      const hasSome = r1Scaled != null || r2Scaled != null;
-      const combined = hasSome
-        ? round2((r1Scaled ?? 0) + (r2Scaled ?? 0))
-        : null;
-      const combinedPct = combined != null ? round2((combined / TOTAL_MAX) * 100) : null;
+      const hasSome = review1 != null || review2 != null;
+      const combined = hasSome ? round2((review1 ?? 0) + (review2 ?? 0)) : null;
 
       const needsCqi = combined != null && combined < THRESHOLD_MARKS;
 
-      // After CQI calculation
+      // After CQI: add 60% of CQI mark, cap at 58
       const cqiMark = cqiEntries[sid];
       const cqiNum = typeof cqiMark === 'number' && Number.isFinite(cqiMark) ? cqiMark : 0;
 
       let afterCqi: number | null = null;
       if (combined != null) {
         if (needsCqi && cqiNum > 0) {
-          // Take 60% of CQI mark
           const rawAdd = cqiNum * CQI_RATE;
-          // Cap so total does not exceed 58%
           const maxAllowed = Math.max(0, THRESHOLD_MARKS - combined);
-          const add = Math.min(rawAdd, maxAllowed);
-          afterCqi = round2(combined + add);
+          afterCqi = round2(combined + Math.min(rawAdd, maxAllowed));
         } else {
           afterCqi = combined;
         }
       }
-      const afterCqiPct = afterCqi != null ? round2((afterCqi / TOTAL_MAX) * 100) : null;
 
-      return {
-        student: s,
-        review1Raw: r1Raw,
-        review2Raw: r2Raw,
-        review1Scaled: r1Scaled,
-        review2Scaled: r2Scaled,
-        combined,
-        combinedPct,
-        needsCqi,
-        afterCqi,
-        afterCqiPct,
-      };
+      return { student: s, review1, review2, combined, needsCqi, afterCqi };
     });
   }, [roster, review1Res, review2Res, cqiEntries]);
 
@@ -427,15 +395,13 @@ export default function PureProjectCQIEntry({ subjectId, teachingAssignmentId }:
         CQI – Project Combined Assessment
       </div>
       <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>
-        Threshold: {THRESHOLD_PCT}% of {TOTAL_MAX} = {THRESHOLD_MARKS} marks.
+        Threshold: {THRESHOLD_MARKS} out of {TOTAL_MAX}.
         Students below threshold are marked <strong style={{ color: '#dc2626' }}>CQI NOT ATTAINED</strong>.
       </div>
       <div style={{ fontSize: 11, color: '#475569', marginBottom: 12, lineHeight: 1.6 }}>
         <strong>Formula:</strong>{' '}
-        Review 1 (/{REVIEW_RAW_MAX}) scaled to /{REVIEW_SCALED_MAX}{' · '}
-        Review 2 (/{REVIEW_RAW_MAX}) scaled to /{REVIEW_SCALED_MAX}{' · '}
-        Total = /{TOTAL_MAX}{' · '}
-        CQI: mark × {CQI_RATE}, capped at {THRESHOLD_PCT}%
+        Review 1 (/{REVIEW_MAX}) + Review 2 (/{REVIEW_MAX}) = Total /{TOTAL_MAX}{' · '}
+        CQI: mark × {CQI_RATE}, capped at {THRESHOLD_MARKS}
       </div>
 
       {/* Summary */}
@@ -503,10 +469,8 @@ export default function PureProjectCQIEntry({ subjectId, teachingAssignmentId }:
               <th style={hStyle}>S.No</th>
               <th style={{ ...hStyle, textAlign: 'left', minWidth: 100 }}>Reg No</th>
               <th style={{ ...hStyle, textAlign: 'left', minWidth: 140 }}>Name</th>
-              <th style={hStyle}>Review 1<br /><span style={{ fontWeight: 400, fontSize: 10 }}>Raw /{REVIEW_RAW_MAX}</span></th>
-              <th style={hStyle}>Review 1<br /><span style={{ fontWeight: 400, fontSize: 10 }}>Scaled /{REVIEW_SCALED_MAX}</span></th>
-              <th style={hStyle}>Review 2<br /><span style={{ fontWeight: 400, fontSize: 10 }}>Raw /{REVIEW_RAW_MAX}</span></th>
-              <th style={hStyle}>Review 2<br /><span style={{ fontWeight: 400, fontSize: 10 }}>Scaled /{REVIEW_SCALED_MAX}</span></th>
+              <th style={hStyle}>Review 1<br /><span style={{ fontWeight: 400, fontSize: 10 }}>/{REVIEW_MAX}</span></th>
+              <th style={hStyle}>Review 2<br /><span style={{ fontWeight: 400, fontSize: 10 }}>/{REVIEW_MAX}</span></th>
               <th style={hStyle}>Total<br /><span style={{ fontWeight: 400, fontSize: 10 }}>/{TOTAL_MAX}</span></th>
               <th style={hStyle}>CQI Status</th>
               <th style={hStyle}>CQI Mark<br /><span style={{ fontWeight: 400, fontSize: 10 }}>(0–{CQI_INPUT_MAX})</span></th>
@@ -522,21 +486,13 @@ export default function PureProjectCQIEntry({ subjectId, teachingAssignmentId }:
                   <td style={cellStyle}>{idx + 1}</td>
                   <td style={{ ...cellStyle, textAlign: 'left' }}>{r.student.reg_no}</td>
                   <td style={{ ...cellStyle, textAlign: 'left' }}>{r.student.name}</td>
-                  {/* Review 1 raw */}
-                  <td style={{ ...cellStyle, fontSize: 11 }}>
-                    {r.review1Raw != null ? round2(r.review1Raw) : '—'}
-                  </td>
-                  {/* Review 1 scaled */}
+                  {/* Review 1 */}
                   <td style={{ ...cellStyle, fontWeight: 700 }}>
-                    {r.review1Scaled != null ? round2(r.review1Scaled) : '—'}
+                    {r.review1 != null ? round2(r.review1) : '—'}
                   </td>
-                  {/* Review 2 raw */}
-                  <td style={{ ...cellStyle, fontSize: 11 }}>
-                    {r.review2Raw != null ? round2(r.review2Raw) : '—'}
-                  </td>
-                  {/* Review 2 scaled */}
+                  {/* Review 2 */}
                   <td style={{ ...cellStyle, fontWeight: 700 }}>
-                    {r.review2Scaled != null ? round2(r.review2Scaled) : '—'}
+                    {r.review2 != null ? round2(r.review2) : '—'}
                   </td>
                   {/* Combined total */}
                   <td style={{
@@ -549,9 +505,6 @@ export default function PureProjectCQIEntry({ subjectId, teachingAssignmentId }:
                     {r.combined != null ? (
                       <div>
                         <div>{round2(r.combined)}</div>
-                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                          ({r.combinedPct != null ? round2(r.combinedPct) : 0}%)
-                        </div>
                       </div>
                     ) : '—'}
                   </td>
@@ -568,9 +521,6 @@ export default function PureProjectCQIEntry({ subjectId, teachingAssignmentId }:
                   <td style={cellStyle}>
                     {r.needsCqi && !isViewOnly ? (
                       <div>
-                        <div style={{ fontSize: 10, color: '#dc2626', fontWeight: 600, marginBottom: 4 }}>
-                          ×{CQI_RATE}, cap {THRESHOLD_PCT}%
-                        </div>
                         <input
                           type="number"
                           min={0}
@@ -612,9 +562,6 @@ export default function PureProjectCQIEntry({ subjectId, teachingAssignmentId }:
                     {r.afterCqi != null ? (
                       <div>
                         <div>{round2(r.afterCqi)}</div>
-                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                          ({r.afterCqiPct != null ? round2(r.afterCqiPct) : 0}%)
-                        </div>
                         {r.afterCqi > (r.combined ?? 0) && (
                           <div style={{ fontSize: 10, color: '#16a34a', marginTop: 2 }}>
                             +{round2(r.afterCqi - (r.combined ?? 0))}
@@ -628,7 +575,7 @@ export default function PureProjectCQIEntry({ subjectId, teachingAssignmentId }:
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={11} style={{ ...cellStyle, color: '#94a3b8', textAlign: 'center', padding: 24 }}>
+                <td colSpan={9} style={{ ...cellStyle, color: '#94a3b8', textAlign: 'center', padding: 24 }}>
                   No student data available. Ensure Review 1 and Review 2 are published first.
                 </td>
               </tr>
