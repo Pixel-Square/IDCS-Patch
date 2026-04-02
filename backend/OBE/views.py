@@ -934,6 +934,17 @@ def cia_export_template_xlsx(request, assessment: str, subject_id: str):
         if not students.exists():
             students = StudentProfile.objects.select_related('user', 'section').all().order_by('reg_no')
 
+    # Sort roster alphabetically by student name (matches UI display order).
+    def _sort_name(sp):
+        u = getattr(sp, 'user', None)
+        if not u:
+            return ''
+        return ' '.join([
+            str(getattr(u, 'first_name', '') or '').strip(),
+            str(getattr(u, 'last_name', '') or '').strip(),
+        ]).strip().upper() or str(getattr(u, 'username', '') or '').strip().upper()
+    students = sorted(students, key=_sort_name)
+
     # Build workbook
     import openpyxl
     from openpyxl.styles import Font, Protection
