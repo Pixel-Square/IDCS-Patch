@@ -90,6 +90,7 @@ def _ensure_teaching_assignments_from_subject_batches(staff_profile) -> int:
     except Exception:
         return 0
 
+    # ── Part 1: Curriculum-row based batches (non-elective) ──
     batches_qs = StudentSubjectBatch.objects.filter(
         staff=staff_profile,
         is_active=True,
@@ -97,70 +98,161 @@ def _ensure_teaching_assignments_from_subject_batches(staff_profile) -> int:
         curriculum_row__isnull=False,
     ).select_related('academic_year')
 
-    if not batches_qs.exists():
-        return 0
-
     created_or_updated = 0
-
-    # Group by (academic_year, curriculum_row) and create one TeachingAssignment per pair.
-    pairs = list(
-        batches_qs.values_list('academic_year_id', 'curriculum_row_id').distinct()
-    )
 
     from academics.models import StudentProfile
 
-    for academic_year_id, curriculum_row_id in pairs:
-        if not academic_year_id or not curriculum_row_id:
-            continue
-
-        # If any active TA already exists for this staff+course+year (any section), don't create another.
-        existing = TeachingAssignment.objects.filter(
-            staff=staff_profile,
-            academic_year_id=academic_year_id,
-            curriculum_row_id=curriculum_row_id,
+    if batches_qs.exists():
+        # Group by (academic_year, curriculum_row) and create one TeachingAssignment per pair.
+        pairs = list(
+            batches_qs.values_list('academic_year_id', 'curriculum_row_id').distinct()
         )
-        if existing.filter(is_active=True).exists():
-            continue
 
-        # Infer a representative section if all students in the batches belong to exactly one section.
-        section_ids = list(
-            StudentProfile.objects.filter(
-                subject_batches__staff=staff_profile,
-                subject_batches__is_active=True,
-                subject_batches__academic_year_id=academic_year_id,
-                subject_batches__curriculum_row_id=curriculum_row_id,
-            ).exclude(section_id__isnull=True).values_list('section_id', flat=True).distinct()
-        )
-        section_id = section_ids[0] if len(section_ids) == 1 else None
-
-        # If an inactive TA exists, reactivate it (prefer one matching inferred section if possible).
-        try:
-            ta_to_reactivate = None
-            if section_id is not None:
-                ta_to_reactivate = existing.filter(section_id=section_id).first()
-            if ta_to_reactivate is None:
-                ta_to_reactivate = existing.first()
-
-            if ta_to_reactivate is not None:
-                if not ta_to_reactivate.is_active:
-                    ta_to_reactivate.is_active = True
-                    ta_to_reactivate.save(update_fields=['is_active'])
-                    created_or_updated += 1
+        for academic_year_id, curriculum_row_id in pairs:
+            if not academic_year_id or not curriculum_row_id:
                 continue
-        except Exception:
-            pass
 
-        try:
-            TeachingAssignment.objects.create(
+            # If any active TA already exists for this staff+course+year (any section), don't create another.
+            existing = TeachingAssignment.objects.filter(
                 staff=staff_profile,
                 academic_year_id=academic_year_id,
                 curriculum_row_id=curriculum_row_id,
-                section_id=section_id,
-                is_active=True,
             )
-            created_or_updated += 1
+            if existing.filter(is_active=True).exists():
+                continue
+
+            # Infer a representative section if all students in the batches belong to exactly one section.
+            section_ids = list(
+                StudentProfile.objects.filter(
+                    subject_batches__staff=staff_profile,
+                    subject_batches__is_active=True,
+                    subject_batches__academic_year_id=academic_year_id,
+                    subject_batches__curriculum_row_id=curriculum_row_id,
+                ).exclude(section_id__isnull=True).values_list('section_id', flat=True).distinct()
+            )
+            section_id = section_ids[0] if len(section_ids) == 1 else None
+
+            # If an inactive TA exists, reactivate it (prefer one matching inferred section if possible).
+            try:
+                ta_to_reactivate = None
+                if section_id is not None:
+                    ta_to_reactivate = existing.filter(section_id=section_id).first()
+                if ta_to_reactivate is None:
+                    ta_to_reactivate = existing.first()
+
+                if ta_to_reactivate is not None:
+                    if not ta_to_reactivate.is_active:
+                        ta_to_reactivate.is_active = True
+                        ta_to_reactivate.save(update_fields=['is_active'])
+                        created_or_updated += 1
+                    continue
+            except Exception:
+                pass
+
+            try:
+                TeachingAssignment.objects.create(
+                    staff=staff_profile,
+                    academic_year_id=academic_year_id,
+                    curriculum_row_id=curriculum_row_id,
+                    section_id=section_id,
+                    is_active=True,
+                )
+                created_or_updated += 1
+            except Exception:
+                # Ignore races / integrity errors; this is best-effort.
+                continue
+
+    # ── Part 2: Elective batches (no curriculum_row) ──
+    # For batches where curriculum_row is NULL, resolve elective_subject
+    # from the batch creator's teaching assignments using student overlap.
+    elective_batches_qs = StudentSubjectBatch.objects.filter(
+        staff=staff_profile,
+        is_active=True,
+        academic_year__is_active=True,
+        curriculum_row__isnull=True,
+    ).select_related('academic_year', 'created_by')
+
+    for sb in elective_batches_qs:
+        try:
+            creator_id = getattr(sb, 'created_by_id', None)
+            if not creator_id:
+                continue
+
+            academic_year_id = sb.academic_year_id
+            if not academic_year_id:
+                continue
+
+            # Find elective TAs of the creator
+            creator_etas = TeachingAssignment.objects.filter(
+                staff_id=creator_id,
+                elective_subject__isnull=False,
+                is_active=True,
+                academic_year_id=academic_year_id,
+            ).select_related('elective_subject')
+
+            if not creator_etas.exists():
+                continue
+
+            # Determine which elective subject by student overlap
+            batch_student_ids = set(sb.students.values_list('id', flat=True))
+            if not batch_student_ids:
+                continue
+
+            matched_es_id = None
+            from curriculum.models import ElectiveChoice
+            for eta in creator_etas:
+                es_id = eta.elective_subject_id
+                if not es_id:
+                    continue
+                choice_student_ids = set(
+                    ElectiveChoice.objects.filter(
+                        elective_subject_id=es_id, is_active=True
+                    ).values_list('student_id', flat=True)
+                )
+                overlap = batch_student_ids & choice_student_ids
+                if len(overlap) > 0:
+                    matched_es_id = es_id
+                    break
+
+            # Fallback: if only one creator elective TA exists, use it
+            if not matched_es_id and creator_etas.count() == 1:
+                matched_es_id = creator_etas.first().elective_subject_id
+
+            if not matched_es_id:
+                continue
+
+            # Check if an active TA already exists for this staff + elective_subject + year
+            existing = TeachingAssignment.objects.filter(
+                staff=staff_profile,
+                academic_year_id=academic_year_id,
+                elective_subject_id=matched_es_id,
+            )
+            if existing.filter(is_active=True).exists():
+                continue
+
+            # Try reactivating an inactive one
+            try:
+                inactive = existing.filter(is_active=False).first()
+                if inactive:
+                    inactive.is_active = True
+                    inactive.save(update_fields=['is_active'])
+                    created_or_updated += 1
+                    continue
+            except Exception:
+                pass
+
+            try:
+                TeachingAssignment.objects.create(
+                    staff=staff_profile,
+                    academic_year_id=academic_year_id,
+                    elective_subject_id=matched_es_id,
+                    section_id=None,
+                    is_active=True,
+                )
+                created_or_updated += 1
+            except Exception:
+                continue
         except Exception:
-            # Ignore races / integrity errors; this is best-effort.
             continue
 
     return created_or_updated
@@ -241,12 +333,13 @@ class MyTeachingAssignmentsView(APIView):
         if not qs_staff.exists():
             qs_staff = base_qs.filter(staff__user=user, academic_year__is_active=True)
 
-        # Backfill from StudentSubjectBatch when the staff has no teaching assignments at all.
+        # Backfill from StudentSubjectBatch — always run to pick up newly
+        # assigned batches (e.g. elective batches assigned by another staff).
+        try:
+            _ensure_teaching_assignments_from_subject_batches(staff_profile)
+        except Exception:
+            pass
         if not qs_staff.exists():
-            try:
-                _ensure_teaching_assignments_from_subject_batches(staff_profile)
-            except Exception:
-                pass
             qs_staff = qs.filter(staff__user=user)
             if not qs_staff.exists():
                 qs_staff = qs.filter(staff=staff_profile)
