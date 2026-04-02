@@ -8,7 +8,7 @@ import { readTTScheduleMap } from './ttScheduleStore';
 import { getCachedMe } from '../../services/auth';
 import fetchWithAuth from '../../services/fetchAuth';
 import krLogoSrc from '../../assets/krlogo.png';
-import newBannerSrc from '../../assets/new_banner.png';
+import newBannerSrc from '../../assets/newban.jpeg';
 
 type AttendanceRow = {
   reg_no: string;
@@ -382,12 +382,12 @@ export default function AttendancePage() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 10;
-    const headerTop = 5;
-    const detailsTop = 43;
-    const tableTop = 50;
-    const footerY = pageHeight - 14;
-    const rowsPerColumn = 20;
-    const columnsPerPage = 3;
+    const headerTop = 0; // Moved up by decreasing from 15
+    const detailsTop = 48;
+    const tableTop = 56;
+    const footerY = pageHeight - 34; // Reduced to leave approx 1.5cm-2cm empty space at bottom
+    const rowsPerColumn = 15;
+    const columnsPerPage = 4;
     const rowsPerPage = rowsPerColumn * columnsPerPage;
     const totalPages = Math.max(1, Math.ceil(presentRows.length / rowsPerPage));
 
@@ -409,30 +409,42 @@ export default function AttendancePage() {
 
       if (bannerDataUrl) {
         const props = doc.getImageProperties(bannerDataUrl);
-        const bannerHeight = 36;
+        const bannerHeight = 28; // Reduced height to prevent overlapping
         const bannerWidth = (props.width * bannerHeight) / props.height;
         doc.addImage(bannerDataUrl, 'PNG', margin, headerTop, bannerWidth, bannerHeight);
       }
 
       if (logoDataUrl) {
         const props = doc.getImageProperties(logoDataUrl);
-        const logoHeight = 16;
+        const logoHeight = 16; // Slightly increased for alignment
         const logoWidth = (props.width * logoHeight) / props.height;
-        doc.addImage(logoDataUrl, 'PNG', pageWidth - margin - logoWidth, headerTop, logoWidth, logoHeight);
+        // Aligning logo top with banner top by using the same headerTop
+        doc.addImage(logoDataUrl, 'PNG', pageWidth - margin - logoWidth, headerTop + 4, logoWidth, logoHeight);
       }
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.text(`Examination Date: ${block.meta.examDate || attendanceDate}`, margin, detailsTop);
-      doc.text(`Session: ${block.meta.examSession}`, margin + 95, detailsTop);
-      doc.text(`Course Code: ${block.meta.courseCode || 'NO_CODE'}`, margin + 135, detailsTop);
-      doc.text(`Course Name: ${block.meta.courseName}`, margin, detailsTop + 6);
+      doc.setFont('timesnewroman', 'italic', "bold");
+      doc.setFontSize(18);
+      doc.text('Office of the Controller of Examinations', pageWidth / 2, headerTop + 15, { align: 'center' });
 
+      doc.setFontSize(10);
+      const metaYStart = headerTop + 36; // Moving meta text below the COE header
+      doc.text(`Course / Branch`, margin, metaYStart);
+      doc.text(`Course Code & Name`, margin, metaYStart + 5);
+      doc.text(`Date & Session`, margin, metaYStart + 10);
+
+      doc.setFont('helvetica', 'normal');
+      doc.text(`: ${block.meta.department}`, margin + 40, metaYStart);
+      doc.text(`: ${block.meta.courseCode} - ${block.meta.courseName}`, margin + 40, metaYStart + 5);
+      doc.text(`: ${block.meta.examDate} & ${block.meta.examSession}`, margin + 40, metaYStart + 10);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Semester - ${semester.toUpperCase()}`, pageWidth - margin, metaYStart + 10, { align: 'right' });
+      doc.text(`Station:  TRICHY`, pageWidth - margin, metaYStart + 15, { align: 'right' });
       const usableWidth = pageWidth - margin * 2;
-      const groupGap = 4;
-      const groupWidth = (usableWidth - groupGap * 2) / 3;
-      const snoWidth = 12;
-      const attendanceWidth = 22;
+      const groupGap = 3;
+      const groupWidth = (usableWidth - groupGap * 3) / 4;
+      const snoWidth = 10;
+      const attendanceWidth = 18;
       const regWidth = groupWidth - snoWidth - attendanceWidth;
 
       const tableBottom = footerY - 10;
@@ -455,11 +467,11 @@ export default function AttendancePage() {
         doc.line(groupX + snoWidth, tableTop, groupX + snoWidth, tableTop + headerHeight);
         doc.line(groupX + snoWidth + regWidth, tableTop, groupX + snoWidth + regWidth, tableTop + headerHeight);
 
-        doc.setFontSize(9);
-        doc.text('S.No', groupX + 3, tableTop + 4.7);
-        doc.text('Register Number', groupX + snoWidth + 2, tableTop + 4.7);
-        doc.text('Attendance', groupX + snoWidth + regWidth + 2, tableTop + 4.7);
-
+        doc.setFontSize(8.5);
+        doc.text('S.No', groupX + 1.5, tableTop + 4.7);
+        doc.text('REG No', groupX + snoWidth + 1.5, tableTop + 4.7);
+        doc.text('Attendance', groupX + snoWidth + regWidth + 0.5, tableTop + 3.2);
+        
         for (let r = 0; r < rowsInGroup; r += 1) {
           const y = tableTop + headerHeight + r * rowHeight;
           doc.rect(groupX, y, groupWidth, rowHeight);
@@ -479,13 +491,29 @@ export default function AttendancePage() {
         }
       }
 
-      const lineY = footerY - 4;
-      doc.line(margin, lineY, margin + 55, lineY);
-      doc.line(pageWidth - margin - 55, lineY, pageWidth - margin, lineY);
+      
+      doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('Chief Superintendent', margin, footerY + 2);
-      doc.text('COE', pageWidth - margin - 10, footerY + 2);
+      const blockPresent = presentRows.length;
+      const blockAbsent = block.rows.length - presentRows.length;
+      doc.text(`Total no. of registered students: ${block.rows.length} (Present: ${blockPresent}, Absent: ${blockAbsent})`, margin, tableTop - 2);
+      
+
+      // Bottom info boxes
+      const boxWidth = (pageWidth - margin * 2) / 4;
+      const boxHeight = 20;
+      doc.rect(margin, footerY, pageWidth - margin * 2, boxHeight);
+      doc.line(margin + boxWidth, footerY, margin + boxWidth, footerY + boxHeight);
+      doc.line(margin + boxWidth * 2, footerY, margin + boxWidth * 2, footerY + boxHeight);
+      doc.line(margin + boxWidth * 3, footerY, margin + boxWidth * 3, footerY + boxHeight);
+
+      doc.setFontSize(8);
+      doc.text(`Absent: ${blockAbsent}`, margin + boxWidth * 1 + 2, footerY + 5);
+      doc.text('Scripts:', margin + boxWidth * 1 + 2, footerY + 15);
+
+      doc.text('Name & Signature Checked By', margin + 2, footerY + 5);
+      doc.text('Name & Signature Verified By AUR', margin + boxWidth * 2 + 2, footerY + 5);
+      doc.text('Signature of Chief Superintendent:', margin + boxWidth * 3 + 2, footerY + 5);
     }
 
     const fileName = sanitizeFileName(
