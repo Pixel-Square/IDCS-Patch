@@ -9,15 +9,15 @@ import krLogoSrc from '../../assets/krlogo.png';
 import newBannerSrc from '../../assets/new_banner.png';
 import { getAttendanceFilterKey, readCourseAbsenteesMap } from './attendanceStore';
 import { getSemesterStartSequence, generateDummyNumber } from './dummySequence';
+import fetchWithAuth from '../../services/fetchAuth';
 
-const SEMESTERS = ['SEM1', 'SEM2', 'SEM3', 'SEM4', 'SEM5', 'SEM6', 'SEM7', 'SEM8'] as const;
 const SHUFFLED_LIST_KEY = 'coe-students-shuffled-list-v1';
 
 const DEPARTMENT_DUMMY_DIGITS: Record<string, string> = {
   AIDS: '1',
   AIML: '2',
-  CSE: '3',
-  CIVIL: '4',
+  CIVIL: '3',
+  CSE: '4',
   ECE: '5',
   EEE: '6',
   IT: '7',

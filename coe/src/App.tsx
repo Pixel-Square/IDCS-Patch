@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import ArrearList from './pages/COE/ArrearList';
+import AssigningPage from './pages/COE/AssigningPage';
 import AttendancePage from './pages/COE/AttendancePage';
 import BarScan from './pages/COE/BarScan';
 import BarScanMarkEntry from './pages/COE/BarScanMarkEntry';
@@ -15,6 +16,7 @@ import OnePageReport from './pages/COE/OnePageReport';
 import ProfilePage from './pages/ProfilePage';
 import QueriesPage from './pages/QueriesPage';
 import RetrivalPage from './pages/COE/RetrivalPage';
+import DataViewPage from './pages/DataViewPage';
 import { logout } from './services/auth';
 import StudentsList from './pages/COE/StudentsList';
 
@@ -64,9 +66,9 @@ function Shell({ children }: { children: React.ReactNode }) {
     { to: '/coe/students', label: 'Students' },
     { to: '/coe/arrears', label: 'Arrears' },
     { to: '/coe/bundle-allocation', label: 'Bundles' },
+    { to: '/coe/assigning', label: 'Assigning' },
     { to: '/coe/bar-scan', label: 'Bar Scan' },
     { to: '/coe/one-page-report', label: 'One Page Report' },
-    { to: '/coe/retrival', label: 'Retrival Logs' },
   ];
 
   const bottomLinks = [{ to: '/queries', label: 'Raise Token' }];
@@ -130,7 +132,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             isDesktopSidebarCollapsed ? 'lg:-translate-x-full' : 'lg:translate-x-0'
           } ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
         >
-          <div className="flex h-full flex-col">
+          <div className="flex h-full flex-col overflow-y-auto scrollbar-thin scrollbar-thumb-white/30 scrollbar-track-transparent hover:scrollbar-thumb-white/50">
             <div className="mb-4 flex items-center justify-between lg:hidden">
               <span className="text-sm font-semibold text-white/70">Menu</span>
               <button
@@ -268,6 +270,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/dashboard" element={<RequireAuth><DashboardPage /></RequireAuth>} />
         <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+        <Route path="/data-view" element={<RequireAuth><DataViewPage /></RequireAuth>} />
         <Route path="/queries" element={<RequireAuth><QueriesPage /></RequireAuth>} />
         <Route path="/coe" element={<RequireAuth><CoePortalPage user={readCachedUser()} /></RequireAuth>} />
         <Route path="/coe/students" element={<RequireAuth><StudentsList /></RequireAuth>} />
@@ -275,6 +278,7 @@ export default function App() {
         <Route path="/coe/attendance" element={<RequireAuth><AttendancePage /></RequireAuth>} />
         <Route path="/coe/arrears" element={<RequireAuth><ArrearList /></RequireAuth>} />
         <Route path="/coe/bundle-allocation" element={<RequireAuth><BundleAllocation /></RequireAuth>} />
+        <Route path="/coe/assigning" element={<RequireAuth><AssigningPage /></RequireAuth>} />
         <Route path="/coe/bundle-barcodes" element={<RequireAuth><BundleBarcodeView /></RequireAuth>} />
         <Route path="/coe/bar-scan" element={<RequireAuth><BarScan /></RequireAuth>} />
         <Route path="/coe/bar-scan/entry" element={<RequireAuth><BarScanMarkEntry /></RequireAuth>} />
