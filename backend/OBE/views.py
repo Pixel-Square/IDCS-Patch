@@ -111,6 +111,7 @@ from accounts.utils import get_user_permissions
 from django.core.files.storage import default_storage
 from django.conf import settings
 import os
+from .services.final_internal_marks import recompute_final_internal_marks
 
 
 def _student_display_name(user) -> str:
@@ -1673,6 +1674,92 @@ def _require_obe_master_permission(request):
     if not _has_obe_master_permission(getattr(request, 'user', None)):
         return Response({'detail': 'OBE Master permission required.'}, status=status.HTTP_403_FORBIDDEN)
     return None
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def iqac_sync_final_internal_marks(request):
+    """Recompute and persist final internal marks (out of 40) for assigned subjects.
+
+    Optional body filters:
+      - teaching_assignment_id
+      - subject_code
+      - semester
+    """
+    denied = _require_obe_master_permission(request)
+    if denied is not None:
+        return denied
+
+    data = request.data if isinstance(request.data, dict) else {}
+    filters = {}
+
+    if data.get('teaching_assignment_id') not in (None, ''):
+        try:
+            filters['teaching_assignment_id'] = int(data.get('teaching_assignment_id'))
+        except Exception:
+            return Response({'detail': 'Invalid teaching_assignment_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if data.get('subject_code') not in (None, ''):
+        filters['subject_code'] = str(data.get('subject_code')).strip()
+
+    if data.get('semester') not in (None, ''):
+        try:
+            filters['semester'] = int(data.get('semester'))
+        except Exception:
+            return Response({'detail': 'Invalid semester'}, status=status.HTTP_400_BAD_REQUEST)
+
+    result = recompute_final_internal_marks(actor_user_id=getattr(request.user, 'id', None), filters=filters)
+    return Response({'detail': 'Final internal marks synced successfully.', **result}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def final_internal_marks_by_student(request, student_id: int):
+    """Return student-wise stored final internal marks grouped by assigned subject."""
+    denied = _require_obe_master_permission(request)
+    if denied is not None:
+        return denied
+
+    try:
+        sid = int(student_id)
+    except Exception:
+        return Response({'detail': 'Invalid student_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from .models import FinalInternalMark
+
+    rows = (
+        FinalInternalMark.objects.filter(student_id=sid)
+        .select_related('subject', 'teaching_assignment', 'student', 'student__user')
+        .order_by('subject__code', 'teaching_assignment_id')
+    )
+
+    out = []
+    for r in rows:
+        ta = getattr(r, 'teaching_assignment', None)
+        sec = getattr(getattr(ta, 'section', None), 'name', None) if ta else None
+        out.append(
+            {
+                'course_code': getattr(getattr(r, 'subject', None), 'code', None),
+                'course_name': getattr(getattr(r, 'subject', None), 'name', None),
+                'teaching_assignment_id': getattr(r, 'teaching_assignment_id', None),
+                'section': sec,
+                'final_internal_mark': float(r.final_mark) if getattr(r, 'final_mark', None) is not None else None,
+                'max_mark': float(r.max_mark) if getattr(r, 'max_mark', None) is not None else None,
+                'computed_at': getattr(r, 'computed_at', None),
+            }
+        )
+
+    student_obj = rows.first().student if rows.exists() else None
+    student_name = _student_display_name(getattr(student_obj, 'user', None)) if student_obj else None
+    reg_no = getattr(student_obj, 'reg_no', None) if student_obj else None
+
+    return Response(
+        {
+            'student': {'id': sid, 'reg_no': reg_no, 'name': student_name},
+            'courses': out,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 
 def _require_publish_owner(request):

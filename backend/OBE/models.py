@@ -167,6 +167,53 @@ class InternalMarkMapping(models.Model):
                 db_table = 'obe_internal_mark_mapping'
 
 
+class FinalInternalMark(models.Model):
+    """Persisted final internal mark per student and assigned subject.
+
+    Stored as the final internal total (out of 40) for a specific
+    subject + teaching assignment scope.
+    """
+
+    subject = models.ForeignKey('academics.Subject', on_delete=models.CASCADE, related_name='final_internal_marks')
+    teaching_assignment = models.ForeignKey(
+        'academics.TeachingAssignment',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='final_internal_marks',
+    )
+    student = models.ForeignKey('academics.StudentProfile', on_delete=models.CASCADE, related_name='final_internal_marks')
+
+    # Final internal mark displayed in Internal Mark page (total column).
+    final_mark = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    max_mark = models.DecimalField(max_digits=6, decimal_places=2, default=40)
+
+    computed_from = models.CharField(max_length=32, default='SYSTEM', blank=True)
+    computed_by = models.IntegerField(null=True, blank=True)
+    computed_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'obe_final_internal_mark'
+        constraints = [
+            UniqueConstraint(
+                fields=['subject', 'student', 'teaching_assignment'],
+                condition=Q(teaching_assignment__isnull=False),
+                name='unique_final_internal_mark_subject_student_ta',
+            ),
+            UniqueConstraint(
+                fields=['subject', 'student'],
+                condition=Q(teaching_assignment__isnull=True),
+                name='unique_final_internal_mark_subject_student_legacy',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['subject', 'student']),
+            models.Index(fields=['teaching_assignment', 'student']),
+            models.Index(fields=['computed_at']),
+        ]
+
+
 class Cia1Mark(models.Model):
     subject = models.ForeignKey('academics.Subject', on_delete=models.CASCADE, related_name='cia1_marks')
     teaching_assignment = models.ForeignKey(

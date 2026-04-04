@@ -114,7 +114,11 @@ class Command(BaseCommand):
                     # assign section via StudentSectionAssignment by creating a new assignment
                     # use get_current_section_assignment property for existing
                     from academics.models import StudentSectionAssignment
-                    assignment = StudentSectionAssignment(student=sp, section=section)
+                    assignment = StudentSectionAssignment(
+                        student=sp,
+                        section=section,
+                        section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
+                    )
                     assignment.save()
 
                     # assign STUDENT role if not already

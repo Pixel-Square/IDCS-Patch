@@ -94,6 +94,7 @@ class Command(BaseCommand):
             StudentSectionAssignment.objects
             .filter(
                 end_date__isnull=True,
+                section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
                 section__managing_department=sh_dept,
                 section__batch__name=batch_name,
             )
@@ -194,6 +195,7 @@ class Command(BaseCommand):
                     StudentSectionAssignment.objects.create(
                         student=student,
                         section=target_section,
+                        section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
                         start_date=date.today(),
                     )
                     self.stdout.write(

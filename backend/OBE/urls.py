@@ -122,6 +122,8 @@ urlpatterns = [
     path('iqac/class-type-weights/save', views.class_type_weights_upsert),
     path('iqac/internal-mark-mapping/<str:subject_id>', views.internal_mark_mapping_get),
     path('iqac/internal-mark-mapping/<str:subject_id>/save', views.internal_mark_mapping_upsert),
+    path('iqac/final-internal-marks/sync', views.iqac_sync_final_internal_marks),
+    path('iqac/final-internal-marks/student/<int:student_id>', views.final_internal_marks_by_student),
 
     # IQAC QP Pattern config
     path('iqac/qp-pattern', views.qp_pattern_get),

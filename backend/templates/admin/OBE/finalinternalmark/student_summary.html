@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+
+  <div style="margin-bottom: 16px;">
+    <strong>Student:</strong>
+    {% if student %}
+      {{ student.reg_no }}
+      {% if student.user %}
+        - {{ student.user.get_full_name|default:student.user.username }}
+      {% endif %}
+    {% else %}
+      Unknown
+    {% endif %}
+  </div>
+
+  <table class="adminlist" style="width: 100%; border-collapse: collapse;">
+    <thead>
+      <tr>
+        <th style="text-align: left; padding: 8px; border-bottom: 1px solid #ddd;">Course Code</th>
+        <th style="text-align: left; padding: 8px; border-bottom: 1px solid #ddd;">Course Name</th>
+        <th style="text-align: left; padding: 8px; border-bottom: 1px solid #ddd;">Section</th>
+        <th style="text-align: left; padding: 8px; border-bottom: 1px solid #ddd;">Final Internal Mark</th>
+        <th style="text-align: left; padding: 8px; border-bottom: 1px solid #ddd;">Max Mark</th>
+        <th style="text-align: left; padding: 8px; border-bottom: 1px solid #ddd;">Computed At</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">{{ row.subject.code|default:"-" }}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">{{ row.subject.name|default:"-" }}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">{{ row.teaching_assignment.section.name|default:"-" }}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">{{ row.final_mark }}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">{{ row.max_mark }}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">{{ row.computed_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top: 16px;">
+    <a href="../">Back to Final Internal Marks</a>
+  </div>
+{% endblock %}

@@ -251,7 +251,12 @@ class StudentProfileAdmin(admin.ModelAdmin):
                     )
                     # keep history assignment too (optional, but better for later changes)
                     if section_obj is not None:
-                        StudentSectionAssignment.objects.create(student=sp, section=section_obj, start_date=today)
+                        StudentSectionAssignment.objects.create(
+                            student=sp,
+                            section=section_obj,
+                            section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
+                            start_date=today,
+                        )
                     created += 1
             except Exception as e:
                 failed.append({'index': idx, 'user_id': user_id, 'error': str(e)})
@@ -532,16 +537,30 @@ class StudentProfileAdmin(admin.ModelAdmin):
                             # create or update a StudentSectionAssignment for this student
                             try:
                                 today = timezone.now().date()
-                                existing = StudentSectionAssignment.objects.filter(student=sp, end_date__isnull=True).first()
+                                existing = StudentSectionAssignment.objects.filter(
+                                    student=sp,
+                                    end_date__isnull=True,
+                                    section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
+                                ).first()
                                 if existing:
                                     # If existing assignment is for a different section, close it and create new one
                                     if existing.section_id != sec.id:
                                         existing.end_date = today
                                         existing.save(update_fields=['end_date'])
-                                        StudentSectionAssignment.objects.create(student=sp, section=sec, start_date=today)
+                                        StudentSectionAssignment.objects.create(
+                                            student=sp,
+                                            section=sec,
+                                            section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
+                                            start_date=today,
+                                        )
                                 else:
                                     # No active assignment, create new one
-                                    StudentSectionAssignment.objects.create(student=sp, section=sec, start_date=today)
+                                    StudentSectionAssignment.objects.create(
+                                        student=sp,
+                                        section=sec,
+                                        section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
+                                        start_date=today,
+                                    )
                             except Exception as e:
                                 # Log the error but continue with import
                                 errors.append(f'Row {i}: Section assignment warning - {str(e)}')

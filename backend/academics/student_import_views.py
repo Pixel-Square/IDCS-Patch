@@ -376,13 +376,16 @@ class StudentBulkImportView(APIView):
                         # Create/update active section assignment so student appears in list
                         if section:
                             active = StudentSectionAssignment.objects.filter(
-                                student=existing, end_date__isnull=True
+                                student=existing,
+                                end_date__isnull=True,
+                                section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
                             ).first()
                             if not active or active.section_id != section.id:
                                 # save() auto-closes previous active assignment
                                 StudentSectionAssignment.objects.create(
                                     student=existing,
                                     section=section,
+                                    section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
                                 )
 
                         if existing.user:
@@ -471,6 +474,7 @@ class StudentBulkImportView(APIView):
                             StudentSectionAssignment.objects.create(
                                 student=new_profile,
                                 section=section,
+                                section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
                             )
 
                         # Assign STUDENT role so the account has proper access

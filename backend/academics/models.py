@@ -550,10 +550,11 @@ def _sync_section_assignment_on_profile_save(sender, instance: StudentProfile, c
         if instance.section is None:
             return
         
-        # Check if there's already an active assignment for this section
+        # Check if there's already an active PRIMARY assignment for this section
         active_assignment = StudentSectionAssignment.objects.filter(
             student=instance,
-            end_date__isnull=True
+            end_date__isnull=True,
+            section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
         ).select_related('section').first()
         
         # If active assignment exists and matches the current section, no action needed
@@ -571,6 +572,7 @@ def _sync_section_assignment_on_profile_save(sender, instance: StudentProfile, c
             StudentSectionAssignment.objects.create(
                 student=instance,
                 section=instance.section,
+                section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
                 start_date=today
             )
     except Exception:

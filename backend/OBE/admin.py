@@ -1,12 +1,16 @@
 from django.apps import apps
 from django.contrib import admin
 from django.contrib.admin.sites import AlreadyRegistered
+from django.http import Http404
+from django.template.response import TemplateResponse
+from django.urls import path
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.http import urlencode
 from django import forms
 
-from .models import Cia1Mark, ObeMarkTableLock, ClassTypeWeights
+from .models import Cia1Mark, ObeMarkTableLock, ClassTypeWeights, FinalInternalMark
+from .services.final_internal_marks import recompute_final_internal_marks
 
 
 @admin.register(Cia1Mark)
@@ -253,6 +257,109 @@ class ClassTypeWeightsAdmin(admin.ModelAdmin):
         )
 
     internal_mark_weights_display.short_description = 'Internal Mark Weights (structured view)'
+
+
+@admin.register(FinalInternalMark)
+class FinalInternalMarkAdmin(admin.ModelAdmin):
+    list_display = (
+        'student_summary_link',
+        'course_code',
+        'course_name',
+        'section_name',
+        'final_mark',
+        'max_mark',
+        'computed_at',
+    )
+    list_filter = ('subject__semester', 'subject', 'teaching_assignment__academic_year')
+    search_fields = (
+        'student__reg_no',
+        'student__user__username',
+        'student__user__first_name',
+        'student__user__last_name',
+        'subject__code',
+        'subject__name',
+    )
+    readonly_fields = ('created_at', 'computed_at')
+    actions = ('recompute_final_internal_marks_action',)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('student__user', 'subject', 'teaching_assignment__section')
+
+    def student_summary_link(self, obj):
+        sid = getattr(obj, 'student_id', None)
+        if not sid:
+            return '-'
+        try:
+            url = reverse('admin:obe_finalinternalmark_student_summary', args=[sid])
+        except Exception:
+            return str(getattr(obj, 'student', '-') or '-')
+        reg = getattr(getattr(obj, 'student', None), 'reg_no', '') or ''
+        user = getattr(getattr(obj, 'student', None), 'user', None)
+        name = (f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip() if user else '') or getattr(user, 'username', '')
+        label = f"{reg} - {name}".strip(' -')
+        return format_html('<a href="{}">{}</a>', url, label or sid)
+
+    student_summary_link.short_description = 'Student'
+
+    def course_code(self, obj):
+        return getattr(getattr(obj, 'subject', None), 'code', '-')
+
+    course_code.short_description = 'Course Code'
+
+    def course_name(self, obj):
+        return getattr(getattr(obj, 'subject', None), 'name', '-')
+
+    course_name.short_description = 'Course Name'
+
+    def section_name(self, obj):
+        return getattr(getattr(getattr(obj, 'teaching_assignment', None), 'section', None), 'name', '-')
+
+    section_name.short_description = 'Section'
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                'student/<int:student_id>/',
+                self.admin_site.admin_view(self.student_summary_view),
+                name='obe_finalinternalmark_student_summary',
+            )
+        ]
+        return custom + urls
+
+    def student_summary_view(self, request, student_id: int):
+        qs = (
+            FinalInternalMark.objects.filter(student_id=student_id)
+            .select_related('student__user', 'subject', 'teaching_assignment__section')
+            .order_by('subject__code', 'teaching_assignment_id')
+        )
+        if not qs.exists():
+            raise Http404('No final internal marks found for this student.')
+
+        first = qs.first()
+        student = getattr(first, 'student', None)
+        context = {
+            **self.admin_site.each_context(request),
+            'opts': self.model._meta,
+            'title': 'Student Final Internal Marks',
+            'student': student,
+            'rows': qs,
+        }
+        return TemplateResponse(request, 'admin/OBE/finalinternalmark/student_summary.html', context)
+
+    def recompute_final_internal_marks_action(self, request, queryset):
+        result = recompute_final_internal_marks(actor_user_id=getattr(request.user, 'id', None))
+        self.message_user(
+            request,
+            (
+                f"Final internal marks synced: "
+                f"TAs={result.get('processed_teaching_assignments', 0)}, "
+                f"rows={result.get('upserted_rows', 0)}, "
+                f"deleted={result.get('deleted_rows', 0)}"
+            ),
+        )
+
+    recompute_final_internal_marks_action.short_description = 'Recompute stored final internal marks (all active assignments)'
 
 
 # ---------------------------------------------------------------------------

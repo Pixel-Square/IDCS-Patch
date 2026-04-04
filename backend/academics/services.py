@@ -4,7 +4,11 @@ from django.utils import timezone
 
 
 def get_current_section(student: StudentProfile) -> Optional[StudentSectionAssignment]:
-    return StudentSectionAssignment.objects.filter(student=student, end_date__isnull=True).select_related('section').first()
+    return StudentSectionAssignment.objects.filter(
+        student=student,
+        end_date__isnull=True,
+        section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
+    ).select_related('section').order_by('-start_date').first()
 
 
 def get_current_department(staff: StaffProfile) -> Optional[StaffDepartmentAssignment]:

@@ -11,9 +11,12 @@ from django.db import models
 from django.db import transaction
 import logging
 from django.http import Http404
+from django.http import HttpResponse
 from django.utils import timezone
 from datetime import timedelta
 import decimal
+import io
+import zipfile
 
 from .permissions import IsHODOfDepartment
 
@@ -609,6 +612,397 @@ class TeachingAssignmentStudentsView(APIView):
         })
 
 
+class IqacInternalMarksBulkExportView(APIView):
+    """Download filtered internal marks as ZIP of per-course Excel files.
+
+    Query params:
+      regulation: string (optional)
+      semester: int (optional)
+      department_id: int (optional)
+      section_id: int (optional)
+      batch: string (optional)
+      academic_year: string/int (optional)
+    """
+
+    permission_classes = (IsAuthenticated,)
+
+    @staticmethod
+    def _safe_text(value):
+        return str(value or '').strip()
+
+    @staticmethod
+    def _safe_float(value):
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _safe_filename(value: str) -> str:
+        allowed = []
+        for ch in str(value or ''):
+            if ch.isalnum() or ch in ('_', '-', '.', ' '):
+                allowed.append(ch)
+            else:
+                allowed.append('_')
+        out = ''.join(allowed).strip().replace(' ', '_')
+        return out or 'export'
+
+    @staticmethod
+    def _study_year_from_semester(semester_number):
+        try:
+            n = int(semester_number)
+            if n <= 0:
+                return None
+            return str((n + 1) // 2)
+        except Exception:
+            return None
+
+    def _resolve_course(self, ta):
+        code = ''
+        name = ''
+        subj = getattr(ta, 'subject', None)
+        if subj is not None:
+            code = self._safe_text(getattr(subj, 'code', ''))
+            name = self._safe_text(getattr(subj, 'name', ''))
+        if not code and getattr(ta, 'curriculum_row', None) is not None:
+            row = ta.curriculum_row
+            code = self._safe_text(getattr(row, 'course_code', ''))
+            name = self._safe_text(getattr(row, 'course_name', ''))
+        if not code and getattr(ta, 'elective_subject', None) is not None:
+            es = ta.elective_subject
+            code = self._safe_text(getattr(es, 'course_code', ''))
+            name = self._safe_text(getattr(es, 'course_name', ''))
+        return (code.upper(), name or code)
+
+    def _student_rows_for_ta(self, ta):
+        from .models import StudentSectionAssignment, StudentProfile
+
+        students = []
+        existing_ids = set()
+        if getattr(ta, 'section_id', None):
+            s_qs = (
+                StudentSectionAssignment.objects.filter(section_id=ta.section_id, end_date__isnull=True)
+                .exclude(student__status__in=['INACTIVE', 'DEBAR'])
+                .select_related('student__user')
+            )
+            for s in s_qs:
+                sp = s.student
+                u = getattr(sp, 'user', None)
+                name = ' '.join([
+                    self._safe_text(getattr(u, 'first_name', '')),
+                    self._safe_text(getattr(u, 'last_name', '')),
+                ]).strip() if u else ''
+                if not name:
+                    name = self._safe_text(getattr(u, 'username', '')) if u else ''
+                students.append({
+                    'id': sp.id,
+                    'reg_no': self._safe_text(getattr(sp, 'reg_no', '')),
+                    'name': name,
+                })
+                existing_ids.add(int(sp.id))
+
+            legacy_qs = StudentProfile.objects.filter(section_id=ta.section_id).exclude(status__in=['INACTIVE', 'DEBAR']).select_related('user')
+            for sp in legacy_qs:
+                try:
+                    sid = int(sp.id)
+                except Exception:
+                    continue
+                if sid in existing_ids:
+                    continue
+                u = getattr(sp, 'user', None)
+                name = ' '.join([
+                    self._safe_text(getattr(u, 'first_name', '')),
+                    self._safe_text(getattr(u, 'last_name', '')),
+                ]).strip() if u else ''
+                if not name:
+                    name = self._safe_text(getattr(u, 'username', '')) if u else ''
+                students.append({
+                    'id': sp.id,
+                    'reg_no': self._safe_text(getattr(sp, 'reg_no', '')),
+                    'name': name,
+                })
+
+        students.sort(key=lambda r: (self._safe_text(r.get('reg_no')), self._safe_text(r.get('name'))))
+        return students
+
+    def _assessment_map(self, model, field_name: str, subject_id: int, student_ids, ta_id: int):
+        from django.db.models import Q
+
+        out = {}
+        if not subject_id or not student_ids:
+            return out
+
+        base = model.objects.filter(subject_id=subject_id, student_id__in=student_ids)
+        scoped = base.filter(Q(teaching_assignment_id=ta_id) | Q(teaching_assignment__isnull=True)).values('student_id', 'teaching_assignment_id', field_name)
+        for row in scoped:
+            sid = int(row.get('student_id'))
+            current = out.get(sid)
+            val = self._safe_float(row.get(field_name))
+            is_ta = row.get('teaching_assignment_id') == ta_id
+            if current is None:
+                out[sid] = {'value': val, 'is_ta': is_ta}
+                continue
+            if current.get('is_ta'):
+                continue
+            if is_ta:
+                out[sid] = {'value': val, 'is_ta': True}
+            elif current.get('value') is None and val is not None:
+                out[sid] = {'value': val, 'is_ta': False}
+
+        missing = [sid for sid in student_ids if sid not in out]
+        if missing:
+            for row in base.filter(student_id__in=missing).values('student_id', field_name):
+                sid = int(row.get('student_id'))
+                if sid in out:
+                    continue
+                out[sid] = {'value': self._safe_float(row.get(field_name)), 'is_ta': False}
+
+        return {sid: data.get('value') for sid, data in out.items()}
+
+    def _extract_model_total_for_student(self, data, student_id):
+        if not isinstance(data, dict):
+            return None
+        sid = str(student_id)
+
+        marks = data.get('marks')
+        if isinstance(marks, dict):
+            qmarks = marks.get(sid) or marks.get(student_id)
+            if isinstance(qmarks, dict):
+                total = 0.0
+                has_any = False
+                for v in qmarks.values():
+                    n = self._safe_float(v)
+                    if n is not None:
+                        total += n
+                        has_any = True
+                return round(total, 2) if has_any else None
+
+        sheet = data.get('sheet') if isinstance(data, dict) else None
+        if isinstance(sheet, dict):
+            rows = sheet.get('rowsByStudentId')
+            if isinstance(rows, dict):
+                row = rows.get(sid) or rows.get(student_id)
+                if isinstance(row, dict):
+                    direct = self._safe_float(row.get('ciaExam'))
+                    if direct is not None:
+                        return round(direct, 2)
+
+        return None
+
+    def get(self, request):
+        if not _user_is_iqac_admin(request.user):
+            return Response({'detail': 'Only IQAC/OBE master can download this export.'}, status=403)
+
+        from openpyxl import Workbook
+        from OBE.models import (
+            Cia1Mark,
+            Cia2Mark,
+            Ssa1Mark,
+            Ssa2Mark,
+            Review1Mark,
+            Review2Mark,
+            Formative1Mark,
+            Formative2Mark,
+            ModelPublishedSheet,
+        )
+        from .models import Subject
+
+        regulation = self._safe_text(request.query_params.get('regulation'))
+        semester = self._safe_text(request.query_params.get('semester'))
+        department_id = self._safe_text(request.query_params.get('department_id'))
+        section_id = self._safe_text(request.query_params.get('section_id'))
+        batch = self._safe_text(request.query_params.get('batch'))
+        academic_year = self._safe_text(request.query_params.get('academic_year'))
+
+        qs = TeachingAssignment.objects.filter(is_active=True, section__isnull=False).select_related(
+            'subject',
+            'curriculum_row',
+            'elective_subject',
+            'section',
+            'section__semester',
+            'section__batch',
+            'section__batch__regulation',
+            'section__batch__course__department',
+        )
+
+        if section_id:
+            try:
+                qs = qs.filter(section_id=int(section_id))
+            except Exception:
+                return Response({'detail': 'Invalid section_id'}, status=400)
+        if semester:
+            try:
+                qs = qs.filter(section__semester__number=int(semester))
+            except Exception:
+                return Response({'detail': 'Invalid semester'}, status=400)
+        if department_id:
+            try:
+                qs = qs.filter(section__batch__course__department_id=int(department_id))
+            except Exception:
+                return Response({'detail': 'Invalid department_id'}, status=400)
+        if batch:
+            qs = qs.filter(section__batch__name__iexact=batch)
+        if regulation:
+            qs = qs.filter(
+                Q(section__batch__regulation__name__iexact=regulation)
+                | Q(section__batch__regulation__code__iexact=regulation)
+            )
+
+        tas = list(qs.order_by('section__batch__name', 'section__name', 'id'))
+
+        if academic_year:
+            filtered = []
+            for ta in tas:
+                sem_no = getattr(getattr(ta, 'section', None), 'semester', None)
+                sem_num = getattr(sem_no, 'number', None)
+                yr = self._study_year_from_semester(sem_num)
+                if yr and yr == academic_year:
+                    filtered.append(ta)
+            tas = filtered
+
+        if not tas:
+            return Response({'detail': 'No teaching assignments found for selected filters.'}, status=404)
+
+        zip_buffer = io.BytesIO()
+        file_count = 0
+
+        grouped = {}
+        for ta in tas:
+            code, course_name = self._resolve_course(ta)
+            if not code:
+                continue
+            section_obj = getattr(ta, 'section', None)
+            batch_obj = getattr(section_obj, 'batch', None) if section_obj is not None else None
+            dept_obj = getattr(getattr(batch_obj, 'course', None), 'department', None) if batch_obj is not None else None
+            dept_id = getattr(dept_obj, 'id', None)
+            dept_name = self._safe_text(getattr(dept_obj, 'short_name', None) or getattr(dept_obj, 'code', None) or getattr(dept_obj, 'name', None) or 'N/A')
+            sem_no = getattr(getattr(section_obj, 'semester', None), 'number', None)
+            reg_obj = getattr(batch_obj, 'regulation', None) if batch_obj is not None else None
+            reg_label = self._safe_text(getattr(reg_obj, 'code', None) or getattr(reg_obj, 'name', None) or '')
+            batch_name = self._safe_text(getattr(batch_obj, 'name', None) or '')
+
+            key = (code, course_name, sem_no, dept_id, dept_name, reg_label, batch_name)
+            grouped.setdefault(key, []).append(ta)
+
+        with zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+            for key, course_tas in grouped.items():
+                code, course_name, sem_no, _dept_id, dept_name, reg_label, batch_name = key
+
+                subject = Subject.objects.filter(code__iexact=code).first()
+                if subject is None:
+                    continue
+
+                merged_students = {}
+
+                for ta in course_tas:
+                    students = self._student_rows_for_ta(ta)
+                    if not students:
+                        continue
+
+                    student_ids = [int(s['id']) for s in students]
+                    if not student_ids:
+                        continue
+
+                    cia1 = self._assessment_map(Cia1Mark, 'mark', subject.id, student_ids, ta.id)
+                    cia2 = self._assessment_map(Cia2Mark, 'mark', subject.id, student_ids, ta.id)
+                    ssa1 = self._assessment_map(Ssa1Mark, 'mark', subject.id, student_ids, ta.id)
+                    ssa2 = self._assessment_map(Ssa2Mark, 'mark', subject.id, student_ids, ta.id)
+                    review1 = self._assessment_map(Review1Mark, 'mark', subject.id, student_ids, ta.id)
+                    review2 = self._assessment_map(Review2Mark, 'mark', subject.id, student_ids, ta.id)
+                    formative1 = self._assessment_map(Formative1Mark, 'total', subject.id, student_ids, ta.id)
+                    formative2 = self._assessment_map(Formative2Mark, 'total', subject.id, student_ids, ta.id)
+
+                    model_map = {}
+                    model_qs = ModelPublishedSheet.objects.filter(subject_id=subject.id)
+                    model_qs = model_qs.filter(Q(teaching_assignment_id=ta.id) | Q(teaching_assignment__isnull=True)).order_by('-updated_at')
+                    model_row = model_qs.first()
+                    if model_row is not None:
+                        data = getattr(model_row, 'data', None)
+                        for sid in student_ids:
+                            model_map[sid] = self._extract_model_total_for_student(data, sid)
+
+                    section_name = self._safe_text(getattr(getattr(ta, 'section', None), 'name', None) or 'N/A')
+
+                    for s in students:
+                        sid = int(s.get('id'))
+                        parts = [
+                            formative1.get(sid),
+                            formative2.get(sid),
+                            ssa1.get(sid),
+                            ssa2.get(sid),
+                            review1.get(sid),
+                            review2.get(sid),
+                            cia1.get(sid),
+                            cia2.get(sid),
+                            model_map.get(sid),
+                        ]
+                        parts = [p for p in parts if p is not None]
+                        total = round(sum(parts), 2) if parts else None
+
+                        prev = merged_students.get(sid)
+                        if prev is None:
+                            merged_students[sid] = {
+                                'reg_no': self._safe_text(s.get('reg_no')),
+                                'name': self._safe_text(s.get('name')),
+                                'section': section_name,
+                                'total': total,
+                            }
+                        else:
+                            if prev.get('total') is None and total is not None:
+                                prev['total'] = total
+
+                if not merged_students:
+                    continue
+
+                rows = sorted(merged_students.values(), key=lambda r: (self._safe_text(r.get('reg_no')), self._safe_text(r.get('name'))))
+
+                wb = Workbook()
+                ws = wb.active
+                ws.title = 'Internal Marks'
+                ws.append(['S.no', 'Register number', 'Student name', 'Section', 'Final Internal mark'])
+
+                for idx, row in enumerate(rows, start=1):
+                    ws.append([
+                        idx,
+                        self._safe_text(row.get('reg_no')),
+                        self._safe_text(row.get('name')),
+                        self._safe_text(row.get('section')),
+                        row.get('total'),
+                    ])
+
+                ws.auto_filter.ref = f"A1:E{ws.max_row}"
+                ws.freeze_panes = 'A2'
+
+                meta = []
+                if reg_label:
+                    meta.append(reg_label)
+                if sem_no:
+                    meta.append(f"SEM{sem_no}")
+                if batch_name:
+                    meta.append(batch_name)
+                if dept_name:
+                    meta.append(dept_name)
+                base_name = f"{code}_{course_name}_{'_'.join(meta)}"
+                filename = f"{self._safe_filename(base_name)[:140]}.xlsx"
+
+                wb_buf = io.BytesIO()
+                wb.save(wb_buf)
+                wb_buf.seek(0)
+                zf.writestr(filename, wb_buf.read())
+                file_count += 1
+
+        if file_count == 0:
+            return Response({'detail': 'No exportable internal marks found for selected filters.'}, status=404)
+
+        zip_buffer.seek(0)
+        response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+        response['Content-Disposition'] = 'attachment; filename="internal_marks_export.zip"'
+        return response
+
+
 class SectionAdvisorViewSet(viewsets.ModelViewSet):
     queryset = SectionAdvisor.objects.select_related('section__batch__course__department', 'advisor')
     serializer_class = SectionAdvisorSerializer
@@ -1029,6 +1423,12 @@ class TeachingAssignmentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+
+        # Academic Controller (IQAC / OBE master) needs full assignment visibility
+        # even when the user does not have a linked staff profile.
+        if _user_is_iqac_admin(user):
+            return self.queryset
+
         staff_profile = getattr(user, 'staff_profile', None)
         if not staff_profile:
             return TeachingAssignment.objects.none()

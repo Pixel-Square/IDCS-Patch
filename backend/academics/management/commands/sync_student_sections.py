@@ -34,7 +34,8 @@ class Command(BaseCommand):
             # Get active assignment
             active = StudentSectionAssignment.objects.filter(
                 student=sp, 
-                end_date__isnull=True
+                end_date__isnull=True,
+                section_type=StudentSectionAssignment.SECTION_TYPE_PRIMARY,
             ).order_by('-start_date').first()
             
             # Determine expected section
