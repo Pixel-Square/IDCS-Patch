@@ -1,11 +1,5 @@
 from django.contrib import admin
-from .models import (
-    FeedbackForm,
-    FeedbackFormSubmission,
-    FeedbackQuestion,
-    FeedbackQuestionOption,
-    FeedbackResponse,
-)
+from .models import FeedbackForm, FeedbackQuestion, FeedbackResponse
 
 
 class FeedbackQuestionInline(admin.TabularInline):
@@ -245,18 +239,4 @@ class FeedbackResponseAdmin(admin.ModelAdmin):
             'question',
             'user',
         )
-
-
-@admin.register(FeedbackQuestionOption)
-class FeedbackQuestionOptionAdmin(admin.ModelAdmin):
-    list_display = ('question', 'option_text', 'order', 'is_active')
-    list_filter = ('is_active', 'created_at')
-    search_fields = ('question__question', 'option_text')
-
-
-@admin.register(FeedbackFormSubmission)
-class FeedbackFormSubmissionAdmin(admin.ModelAdmin):
-    list_display = ('feedback_form', 'student', 'submission_key', 'submitted_at', 'status')
-    list_filter = ('status', 'submitted_at')
-    search_fields = ('submission_key', 'student__username', 'feedback_form__id')
 
