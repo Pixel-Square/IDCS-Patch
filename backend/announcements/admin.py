@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Announcement
+from .models import Announcement, AnnouncementReadStatus
 
 
 @admin.register(Announcement)
@@ -25,3 +25,10 @@ class AnnouncementAdmin(admin.ModelAdmin):
     def has_attachment(self, obj):
         return bool(obj.attachment)
     has_attachment.boolean = True
+
+
+@admin.register(AnnouncementReadStatus)
+class AnnouncementReadStatusAdmin(admin.ModelAdmin):
+    list_display = ('announcement', 'user', 'is_read', 'read_at', 'created_at')
+    list_filter = ('is_read', 'read_at', 'created_at')
+    search_fields = ('announcement__title', 'user__username')

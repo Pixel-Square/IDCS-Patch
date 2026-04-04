@@ -6,8 +6,10 @@ from .models import (
     SalaryEMIPlan,
     SalaryEarnType,
     SalaryFormulaConfig,
+    SalaryMonthPublish,
     SalaryMonthlyInput,
     SalaryPFConfig,
+    SalaryPublishedReceipt,
     StaffSalaryDeclaration,
 )
 
@@ -20,3 +22,5 @@ admin.site.register(SalaryDeductionType)
 admin.site.register(SalaryEarnType)
 admin.site.register(SalaryEMIPlan)
 admin.site.register(SalaryMonthlyInput)
+admin.site.register(SalaryMonthPublish)
+admin.site.register(SalaryPublishedReceipt)
