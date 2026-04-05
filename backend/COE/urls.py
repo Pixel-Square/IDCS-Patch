@@ -8,6 +8,7 @@ from .views import (
 )
 from .assignments_views import CoeAssignmentStoreView
 from .views_save import CoeResetExamDummies, CoeSaveExamDummies
+from .external_staff_views import ExternalStaffListView, AssignExternalCodesView, ExternalStaffDbMirrorView
 
 urlpatterns = [
     path('portal/', CoePortalContextView.as_view(), name='coe_portal_context'),
@@ -18,4 +19,7 @@ urlpatterns = [
     path('save-dummies/', CoeSaveExamDummies.as_view(), name='coe_save_dummies'),
     path('reset-dummies/', CoeResetExamDummies.as_view(), name='coe_reset_dummies'),
     path('assignments/', CoeAssignmentStoreView.as_view(), name='coe_assignments'),
+    path('external-staff/', ExternalStaffListView.as_view(), name='coe_external_staff'),
+    path('external-staff/db-mirror/', ExternalStaffDbMirrorView.as_view(), name='coe_external_staff_db_mirror'),
+    path('external-staff/assign-codes/', AssignExternalCodesView.as_view(), name='coe_assign_external_codes'),
 ]

@@ -425,6 +425,7 @@ STAFF_STATUS_CHOICES = (
     ('INACTIVE', 'Inactive'),
     ('ALUMNI', 'Alumni'),
     ('RESIGNED', 'Resigned'),
+    ('EXTERNAL', 'External'),
 )
 
 STUDENT_STATUS_CHOICES = (
@@ -704,6 +705,9 @@ class StaffProfile(models.Model):
     # RFID UID assigned via IDCSScan hardware scanner (for staff)
     rfid_uid = models.CharField(max_length=32, blank=True, default='', db_index=True,
                                 help_text='RFID card UID (e.g. 539EA5BB) assigned by the physical scanner.')
+    # 6-digit login code for External Staff (used in ESV portal)
+    login_code = models.CharField(max_length=6, blank=True, default='', db_index=True,
+                                  help_text='Random 6-digit code for external staff login.')
 
     def __str__(self):
         return f"Staff {self.staff_id} ({self.user.username})"

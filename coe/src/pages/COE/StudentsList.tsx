@@ -616,6 +616,28 @@ export default function StudentsList() {
             };
           });
 
+          // Inject Additional Students for this Course
+          const filterKeyInternal = getCurrentFilterKey();
+          const bundleStore = readCourseBundleDummyStore();
+          const additionalData = bundleStore[filterKeyInternal]?.[course.course_code];
+          if (additionalData && additionalData.courseDummies) {
+            additionalData.courseDummies.forEach((d: string) => {
+              const p = persistedByDummy[d];
+              if (p) {
+                if (!students.some(st => st.dummy === d)) {
+                  students.push({
+                    id: Math.random(),
+                    reg_no: p.reg_no,
+                    name: p.name,
+                    enrollmentId: `ADD::${course.course_code}::${d}`,
+                    dummy: d,
+                    is_arrear: false
+                  } as any);
+                }
+              }
+            });
+          }
+
           const isCourseShuffled = students.some((student, index) => {
             const original = sourceStudents[index];
             const saved = savedByDummy.get(student.dummy);

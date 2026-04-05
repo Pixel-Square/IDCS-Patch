@@ -1,6 +1,25 @@
 from django.contrib import admin
 from .models import CoeArrearStudent, CoeAssignmentStore, CoeExamDummy
+from academics.models import StaffProfile
 
+class ExternalStaffProfile(StaffProfile):
+	class Meta:
+		proxy = True
+		verbose_name = 'External Staff Profile'
+		verbose_name_plural = 'External Staff Profiles'
+
+@admin.register(ExternalStaffProfile)
+class ExternalStaffProfileAdmin(admin.ModelAdmin):
+	list_display = ('staff_id', 'get_full_name', 'department', 'login_code', 'status')
+	search_fields = ('staff_id', 'user__first_name', 'user__last_name', 'login_code')
+	list_filter = ('department', 'status')
+
+	def get_queryset(self, request):
+		return super().get_queryset(request).filter(status='EXTERNAL')
+
+	def get_full_name(self, obj):
+		return f"{obj.user.first_name} {obj.user.last_name}"
+	get_full_name.short_description = 'Name'
 
 @admin.register(CoeExamDummy)
 class CoeExamDummyAdmin(admin.ModelAdmin):
