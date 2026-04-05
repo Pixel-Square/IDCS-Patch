@@ -476,14 +476,22 @@ class IdentifierTokenObtainPairSerializer(serializers.Serializer):
                 StudentProfile = StaffProfile = None
 
             if StudentProfile is not None:
-                sp = StudentProfile.objects.filter(reg_no__iexact=identifier).select_related('user').first()
-                if sp:
-                    user = sp.user
+                try:
+                    sp = StudentProfile.objects.filter(reg_no__iexact=identifier).select_related('user').first()
+                    if sp:
+                        user = sp.user
+                except Exception:
+                    # Avoid propagating DB/model mismatches as HTTP 500 in auth flow.
+                    sp = None
 
             if user is None and StaffProfile is not None:
-                st = StaffProfile.objects.filter(staff_id__iexact=identifier).select_related('user').first()
-                if st:
-                    user = st.user
+                try:
+                    st = StaffProfile.objects.filter(staff_id__iexact=identifier).select_related('user').first()
+                    if st:
+                        user = st.user
+                except Exception:
+                    # Avoid propagating DB/model mismatches as HTTP 500 in auth flow.
+                    st = None
 
         # generic error message to avoid leaking which part failed
         invalid_msg = 'Unable to log in with provided credentials.'

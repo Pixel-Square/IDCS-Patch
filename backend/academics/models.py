@@ -738,6 +738,8 @@ class StaffProfile(models.Model):
         related_name='staff_profile'
     )
     staff_id = models.CharField(max_length=64, unique=True, db_index=True)
+    # Internal ID used for internal shuffling/identity mapping workflows.
+    internal_id = models.CharField(max_length=16, unique=True, db_index=True, null=True, blank=True)
     department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True, related_name='staff')
     designation = models.CharField(max_length=128, blank=True)
     status = models.CharField(max_length=16, choices=STAFF_STATUS_CHOICES, default='ACTIVE')
@@ -796,7 +798,20 @@ class StaffProfile(models.Model):
         if hasattr(self, 'status') and self.status == 'ALUMNI':
             raise ValidationError({'status': 'Staff cannot have status ALUMNI.'})
 
+    @classmethod
+    def generate_unique_internal_id(cls):
+        """Generate a unique 7-character uppercase alphanumeric internal ID."""
+        alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        for _ in range(200):
+            candidate = ''.join(secrets.choice(alphabet) for _ in range(7))
+            if not cls.objects.filter(internal_id=candidate).exists():
+                return candidate
+        raise ValidationError({'internal_id': 'Unable to generate a unique internal ID. Please try again.'})
+
     def save(self, *args, **kwargs):
+        if not self.internal_id:
+            self.internal_id = self.generate_unique_internal_id()
+
         # Validate staff_id uniqueness when changed
         if self.pk:
             try:

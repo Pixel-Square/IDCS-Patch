@@ -1227,7 +1227,7 @@ class StaffProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = StaffProfile
         fields = [
-            'id', 'staff_id', 'department', 'designation', 'status',
+            'id', 'staff_id', 'internal_id', 'department', 'designation', 'status',
             'mobile_number', 'mobile_number_verified_at', 'profile_image', 'rfid_uid',
             # Write-only user fields
             'username', 'password', 'first_name', 'last_name', 'email',
@@ -1236,7 +1236,7 @@ class StaffProfileSerializer(serializers.ModelSerializer):
             # Roles
             'roles', 'user_roles',
         ]
-        read_only_fields = ['id', 'mobile_number_verified_at']
+        read_only_fields = ['id', 'mobile_number_verified_at', 'internal_id']
     
     def get_user_roles(self, obj):
         """Get user roles."""

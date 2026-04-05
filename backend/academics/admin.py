@@ -674,8 +674,8 @@ class StudentProfileAdmin(admin.ModelAdmin):
 class StaffProfileAdmin(admin.ModelAdmin):
     form = StaffProfileForm
     change_list_template = 'admin/academics/staffprofile_change_list.html'
-    list_display = ('staff_id', 'rfid_uid', 'get_full_name', 'current_department_display', 'designation', 'status')
-    search_fields = ('staff_id', 'rfid_uid', 'user__username', 'user__email', 'user__first_name', 'user__last_name')
+    list_display = ('staff_id', 'internal_id', 'rfid_uid', 'get_full_name', 'current_department_display', 'designation', 'status')
+    search_fields = ('staff_id', 'internal_id', 'rfid_uid', 'user__username', 'user__email', 'user__first_name', 'user__last_name')
     list_filter = ('department', 'designation')
     
     def get_queryset(self, request):

@@ -7,6 +7,7 @@ import StaffImportModal from '../components/StaffImportModal'
 type StaffMember = {
   id: number
   staff_id: string
+  internal_id?: string | null
   user: {
     username: string
     first_name: string
@@ -96,6 +97,10 @@ export default function StaffsPage() {
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [notificationMessage, setNotificationMessage] = useState('')
   const [notificationType, setNotificationType] = useState<'success' | 'error'>('success')
+  const [shuffleModalOpen, setShuffleModalOpen] = useState(false)
+  const [shufflePassword, setShufflePassword] = useState('')
+  const [shuffleSubmitting, setShuffleSubmitting] = useState(false)
+  const [shuffleError, setShuffleError] = useState<string | null>(null)
 
   // Auto-dismiss notification after 5 seconds
   useEffect(() => {
@@ -111,12 +116,15 @@ export default function StaffsPage() {
     fetchStaffs()
   }, [includeNonTeaching])
 
-  async function fetchStaffs() {
+  const withCacheBust = (url: string) => `${url}${url.includes('?') ? '&' : '?'}_ts=${Date.now()}`
+
+  async function fetchStaffs(forceFresh = false) {
     try {
       setLoading(true)
       setError(null)
       const qp = includeNonTeaching ? '?include_non_teaching=true' : ''
-      const res = await fetchWithAuth(`/api/academics/staffs-page/${qp}`)
+      const baseUrl = `/api/academics/staffs-page/${qp}`
+      const res = await fetchWithAuth(forceFresh ? withCacheBust(baseUrl) : baseUrl)
       
       if (!res.ok) {
         if (res.status === 403) {
@@ -221,7 +229,70 @@ export default function StaffsPage() {
 
   const handleModalSuccess = async () => {
     // Refresh the staff list
-    await fetchStaffs()
+    await fetchStaffs(true)
+  }
+
+  const handleShuffleInternalIds = async () => {
+    setShuffleError(null)
+    const password = shufflePassword.trim()
+    if (!password) {
+      setShuffleError('Password is required.')
+      return
+    }
+
+    setShuffleSubmitting(true)
+    try {
+      const body: Record<string, unknown> = { password }
+      if (typeof currentDeptId === 'number') {
+        body.department_id = currentDeptId
+      }
+
+      const endpoints = [
+        '/api/academics/staffs/shuffle-internal-id/',
+        '/api/academics/staffs/shuffle-internal-id',
+        '/api/academics/staff/shuffle-internal-id/',
+        '/api/academics/staff/shuffle-internal-id',
+        '/api/academics/shuffle-internal-id/',
+        '/api/academics/shuffle-internal-id',
+      ]
+
+      let res: Response | null = null
+      for (const endpoint of endpoints) {
+        const attempt = await fetchWithAuth(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (attempt.status !== 404) {
+          res = attempt
+          break
+        }
+      }
+
+      if (!res) {
+        setShuffleError('Shuffle API endpoint not found (404). Please update/restart backend service.')
+        return
+      }
+
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setShuffleError(data.detail || 'Failed to shuffle internal IDs.')
+        return
+      }
+
+      setShuffleModalOpen(false)
+      setShufflePassword('')
+      await Promise.all([fetchStaffs(true), refreshAllStaff(true)])
+
+      setNotificationMessage(data.detail || 'Internal IDs shuffled successfully.')
+      setNotificationType('success')
+      setNotificationOpen(true)
+    } catch (err) {
+      console.error('Error shuffling internal IDs:', err)
+      setShuffleError('An error occurred while shuffling internal IDs.')
+    } finally {
+      setShuffleSubmitting(false)
+    }
   }
 
   const handleListAllStaff = async () => {
@@ -231,7 +302,7 @@ export default function StaffsPage() {
     setAllStaffSearch('')
 
     try {
-      const res = await fetchWithAuth('/api/academics/all-staff/')
+      const res = await fetchWithAuth(withCacheBust('/api/academics/all-staff/'))
       if (!res.ok) {
         setAllStaffError('Failed to load staff list.')
         return
@@ -246,9 +317,10 @@ export default function StaffsPage() {
     }
   }
 
-  const refreshAllStaff = async () => {
+  const refreshAllStaff = async (forceFresh = false) => {
     try {
-      const res = await fetchWithAuth('/api/academics/all-staff/')
+      const baseUrl = '/api/academics/all-staff/'
+      const res = await fetchWithAuth(forceFresh ? withCacheBust(baseUrl) : baseUrl)
       if (res.ok) {
         const data = await res.json()
         setAllStaff(data.results || [])
@@ -373,8 +445,6 @@ export default function StaffsPage() {
       }
 
       // Has current department - show swap confirmation
-      const currentDeptInfo = `${staff.current_department.short_name || staff.current_department.code || staff.current_department.name}`
-      
       setConfirmModalData({
         title: '⚠️ Department Swap Confirmation',
         message: 'This will reassign the staff member\'s primary department. Is this intentional and not accidental?',
@@ -450,15 +520,32 @@ export default function StaffsPage() {
                 <p className="text-sm text-gray-600">View staff members by department</p>
               </div>
             </div>
-            {canImport && (
-              <button
-                onClick={() => setIsImportModalOpen(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                title="Import Staff from Excel/CSV"
-              >
-                <Upload className="h-4 w-4" />
-                <span className="text-sm font-medium">Import Staff</span>
-              </button>
+            {(canEdit || canImport) && (
+              <div className="flex items-center gap-2">
+                {canEdit && (
+                  <button
+                    onClick={() => {
+                      setShuffleModalOpen(true)
+                      setShufflePassword('')
+                      setShuffleError(null)
+                    }}
+                    className="flex items-center space-x-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+                    title="Shuffle internal IDs"
+                  >
+                    <span className="text-sm font-medium">Shuffle ID</span>
+                  </button>
+                )}
+                {canImport && (
+                  <button
+                    onClick={() => setIsImportModalOpen(true)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    title="Import Staff from Excel/CSV"
+                  >
+                    <Upload className="h-4 w-4" />
+                    <span className="text-sm font-medium">Import Staff</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -612,6 +699,9 @@ export default function StaffsPage() {
                             Staff ID
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Internal ID
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Name
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -640,6 +730,9 @@ export default function StaffsPage() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                               {staff.staff_id}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-indigo-700">
+                              {staff.internal_id || '—'}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                               {getStaffDisplayName(staff)}
@@ -787,6 +880,9 @@ export default function StaffsPage() {
                           Staff ID
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Internal ID
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Name
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -810,6 +906,9 @@ export default function StaffsPage() {
                         <tr key={staff.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             {staff.staff_id}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-indigo-700">
+                            {staff.internal_id || '—'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {getStaffDisplayName(staff)}
@@ -1064,6 +1163,9 @@ export default function StaffsPage() {
                           Staff ID
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Internal ID
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Name
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1095,6 +1197,9 @@ export default function StaffsPage() {
                         <tr key={staff.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             {staff.staff_id}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-indigo-700">
+                            {staff.internal_id || '—'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {getStaffDisplayName(staff)}
@@ -1275,6 +1380,64 @@ export default function StaffsPage() {
                 className="px-4 py-2 text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors font-medium"
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Shuffle Internal ID Modal */}
+      {shuffleModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Shuffle Internal IDs</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                This will regenerate internal IDs for{' '}
+                {typeof currentDeptId === 'number' ? 'the selected department' : 'all visible staff'}.
+              </p>
+            </div>
+
+            <div className="px-6 py-4 space-y-3">
+              <p className="text-sm text-gray-700">
+                Please confirm this action by entering your account password.
+              </p>
+              <input
+                type="password"
+                value={shufflePassword}
+                onChange={(e) => setShufflePassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (!shuffleSubmitting) handleShuffleInternalIds()
+                  }
+                }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Enter password"
+                autoFocus
+              />
+              {shuffleError && <p className="text-sm text-red-600">{shuffleError}</p>}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  if (shuffleSubmitting) return
+                  setShuffleModalOpen(false)
+                  setShufflePassword('')
+                  setShuffleError(null)
+                }}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                disabled={shuffleSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleShuffleInternalIds}
+                className="px-4 py-2 text-sm text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50"
+                disabled={shuffleSubmitting}
+              >
+                {shuffleSubmitting ? 'Shuffling...' : 'Confirm Shuffle'}
               </button>
             </div>
           </div>

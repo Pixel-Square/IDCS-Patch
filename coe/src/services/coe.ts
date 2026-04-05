@@ -43,6 +43,7 @@ export type CoeSavedDummyMapItem = {
   dummy: string;
   reg_no: string;
   name: string;
+  department?: string | null;
   semester: string;
   qp_type: 'QP1' | 'QP2' | 'TCPR' | 'TCPL' | 'OE';
 };

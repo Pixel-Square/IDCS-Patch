@@ -511,6 +511,16 @@ class CoeStudentsCourseMapView(APIView):
             full = f"{str(getattr(u, 'first_name', '') or '').strip()} {str(getattr(u, 'last_name', '') or '').strip()}".strip()
             return full or str(getattr(u, 'username', '') or '')
 
+        def _student_department(sp):
+            dept = getattr(sp, 'home_department', None)
+            if not dept:
+                return None
+            return _normalize_department_label([
+                str(getattr(dept, 'short_name', '') or '').strip().upper(),
+                str(getattr(dept, 'code', '') or '').strip().upper(),
+                str(getattr(dept, 'name', '') or '').strip().upper(),
+            ])
+
         dept_course_map = defaultdict(dict)
 
         for ta in ta_qs:
@@ -540,13 +550,9 @@ class CoeStudentsCourseMapView(APIView):
             course_entry = dept_course_map[dept_name][course_key]
 
             students_for_ta = []
-            if getattr(ta, 'section_id', None):
-                assign_qs = StudentSectionAssignment.objects.filter(
-                    section=ta.section,
-                    end_date__isnull=True,
-                ).exclude(student__status__in=['INACTIVE', 'DEBAR']).select_related('student__user')
-                students_for_ta = [a.student for a in assign_qs]
-            elif getattr(ta, 'elective_subject_id', None):
+            # For elective courses, roster must come from ElectiveChoice mapping,
+            # not from full section roster.
+            if getattr(ta, 'elective_subject_id', None):
                 eqs = ElectiveChoice.objects.filter(
                     elective_subject_id=getattr(ta, 'elective_subject_id', None),
                     is_active=True,
@@ -557,9 +563,21 @@ class CoeStudentsCourseMapView(APIView):
                         eqs = eqs_ay
                 students_for_ta = [c.student for c in eqs if getattr(c, 'student', None) is not None]
 
+            # Fallback to section roster for non-elective courses
+            # (or elective rows with no active ElectiveChoice data).
+            if not students_for_ta and getattr(ta, 'section_id', None):
+                assign_qs = StudentSectionAssignment.objects.filter(
+                    section=ta.section,
+                    end_date__isnull=True,
+                ).exclude(student__status__in=['INACTIVE', 'DEBAR']).select_related('student__user')
+                students_for_ta = [a.student for a in assign_qs]
+
             for sp in students_for_ta:
                 sid = getattr(sp, 'id', None)
                 if sid is None:
+                    continue
+                student_dept = _student_department(sp)
+                if student_dept and student_dept != dept_name:
                     continue
                 course_entry['students_map'][sid] = {
                     'id': sid,
@@ -635,6 +653,9 @@ class CoeStudentsCourseMapView(APIView):
                 for sp in students_for_sec:
                     sid = getattr(sp, 'id', None)
                     if sid is None:
+                        continue
+                    student_dept = _student_department(sp)
+                    if student_dept and student_dept != dept_name:
                         continue
                     if sid not in course_entry['students_map']:
                         course_entry['students_map'][sid] = {
@@ -723,6 +744,17 @@ class CoeStudentsCourseMapView(APIView):
                 student = getattr(row, 'student', None)
                 if not student:
                     continue
+
+                # Scope saved dummy rows to the student's canonical department label
+                # so frontend remapping does not leak across departments in same semester.
+                student_dept = _normalize_department_label([
+                    str(getattr(getattr(student, 'home_department', None), 'short_name', '') or '').strip().upper(),
+                    str(getattr(getattr(student, 'home_department', None), 'code', '') or '').strip().upper(),
+                    str(getattr(getattr(student, 'home_department', None), 'name', '') or '').strip().upper(),
+                ])
+                if department_filter != 'ALL' and student_dept != department_filter:
+                    continue
+
                 user_obj = getattr(student, 'user', None)
                 first_name = str(getattr(user_obj, 'first_name', '') or '').strip() if user_obj else ''
                 last_name = str(getattr(user_obj, 'last_name', '') or '').strip() if user_obj else ''
@@ -732,6 +764,7 @@ class CoeStudentsCourseMapView(APIView):
                         'dummy': str(getattr(row, 'dummy_number', '') or ''),
                         'reg_no': str(getattr(student, 'reg_no', '') or ''),
                         'name': full_name or str(getattr(user_obj, 'username', '') or '') if user_obj else str(getattr(student, 'reg_no', '') or ''),
+                        'department': student_dept,
                         'semester': str(getattr(row, 'semester', '') or ''),
                         'qp_type': str(getattr(row, 'qp_type', 'QP1') or 'QP1').strip().upper(),
                     }

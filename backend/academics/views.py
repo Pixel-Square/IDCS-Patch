@@ -3052,6 +3052,7 @@ class StaffsPageView(APIView):
                 staffs.append({
                     'id': s.id,
                     'staff_id': s.staff_id,
+                    'internal_id': s.internal_id,
                     'user': user_data,
                     'user_id': s.user.id if s.user else None,
                     'designation': getattr(s, 'designation', None),
@@ -8174,6 +8175,7 @@ class AllStaffListView(APIView):
             results.append({
                 'id': s.id,
                 'staff_id': s.staff_id,
+                'internal_id': s.internal_id,
                 'user': user_data,
                 'user_roles': user_roles,
                 'designation': getattr(s, 'designation', None),
@@ -8183,6 +8185,119 @@ class AllStaffListView(APIView):
             })
 
         return Response({'results': results})
+
+
+class StaffInternalIdShuffleView(APIView):
+    """Shuffle internal IDs for staff members after password confirmation."""
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        user = request.user
+        perms = get_user_permissions(user)
+        has_ps_role = user.roles.filter(name__iexact='PS').exists()
+
+        if not (user.is_superuser or has_ps_role or 'academics.edit_staff' in perms):
+            return Response(
+                {'detail': 'You do not have permission to shuffle internal IDs.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        password = str(request.data.get('password') or '').strip()
+        if not password:
+            return Response(
+                {'detail': 'Password is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not user.check_password(password):
+            return Response(
+                {'detail': 'Invalid password.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        department_id = request.data.get('department_id')
+
+        staff_qs = StaffProfile.objects.all().order_by('id')
+
+        if department_id not in (None, '', 'all'):
+            try:
+                department_id = int(department_id)
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': 'Invalid department_id.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate department scope for non-superusers without view_all_staff.
+            if not user.is_superuser and not has_ps_role and 'academics.view_all_staff' not in perms:
+                allowed_dept_ids = get_user_effective_departments(user)
+                if not allowed_dept_ids or department_id not in allowed_dept_ids:
+                    return Response(
+                        {'detail': 'You can only shuffle IDs for departments you manage.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            staff_qs = staff_qs.filter(
+                Q(department_id=department_id) |
+                Q(department_assignments__department_id=department_id, department_assignments__end_date__isnull=True) |
+                Q(department_roles__department_id=department_id, department_roles__is_active=True)
+            ).distinct().order_by('id')
+        elif not user.is_superuser and not has_ps_role and 'academics.view_all_staff' not in perms:
+            # For scoped users, shuffle only departments they effectively manage.
+            allowed_dept_ids = get_user_effective_departments(user)
+            if not allowed_dept_ids:
+                return Response(
+                    {'detail': 'You are not mapped to any departments.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            staff_qs = staff_qs.filter(
+                Q(department_id__in=allowed_dept_ids) |
+                Q(department_assignments__department_id__in=allowed_dept_ids, department_assignments__end_date__isnull=True) |
+                Q(department_roles__department_id__in=allowed_dept_ids, department_roles__is_active=True)
+            ).distinct().order_by('id')
+
+        staff_list = list(staff_qs)
+        if not staff_list:
+            return Response({'detail': 'No staff records found to shuffle.', 'updated': 0}, status=status.HTTP_200_OK)
+
+        existing_ids = set(
+            StaffProfile.objects.exclude(internal_id__isnull=True).exclude(internal_id='').values_list('internal_id', flat=True)
+        )
+
+        with transaction.atomic():
+            for s in staff_list:
+                # Remove current value from occupied set so it can be reassigned.
+                if s.internal_id:
+                    existing_ids.discard(s.internal_id)
+
+            updates = []
+            for s in staff_list:
+                candidate = None
+                for _ in range(200):
+                    maybe = StaffProfile.generate_unique_internal_id()
+                    if maybe not in existing_ids:
+                        candidate = maybe
+                        break
+                if not candidate:
+                    return Response(
+                        {'detail': 'Unable to generate unique internal IDs. Try again.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+
+                existing_ids.add(candidate)
+                s.internal_id = candidate
+                updates.append(s)
+
+            StaffProfile.objects.bulk_update(updates, ['internal_id'])
+
+        return Response(
+            {
+                'detail': f'Internal IDs shuffled successfully for {len(staff_list)} staff member(s).',
+                'updated': len(staff_list),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class StaffDepartmentAssignView(APIView):

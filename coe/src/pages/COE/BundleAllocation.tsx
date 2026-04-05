@@ -15,6 +15,8 @@ import { getSemesterStartSequence, generateDummyNumber } from './dummySequence';
 const DEPARTMENT_DUMMY_DIGITS: Record<string, string> = {
   AIDS: '1',
   AIML: '2',
+  RE: '9',
+  SH: '0',
   CIVIL: '3',
   CSE: '4',
   ECE: '5',

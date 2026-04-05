@@ -35,6 +35,8 @@ import fetchWithAuth from '../../services/fetchAuth';
 const DEPARTMENT_DUMMY_DIGITS: Record<string, string> = {
   AIDS: '1',
   AIML: '2',
+  RE: '9',
+  SH: '0',
   CIVIL: '3',
   CSE: '4',
   ECE: '5',
@@ -334,13 +336,18 @@ export default function StudentsList() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const marginX = 14; 
-    const topY = 16;
-    const contentStartY = 31.0; // Shifted 2.5mm up from 33.5
+    const topY = 14;
+    const contentStartY = 29.0;
     const bottomMargin = 10;
     const colGap = 12; 
     const colWidth = (pageWidth - marginX * 2 - colGap) / 2;
-    const rowHeight = 12; // Reduced further to accommodate more gap
-    const rowGap = 12.25; // Increased from 12.15 to shift the last rows down by 1mm (10 gaps * 0.1mm)
+    const rightColumnShift = 6; // mm (0.6 cm)
+    const rowsPerPage = 11;
+    const rowHeight = 12;
+    // Keep 11 rows and maximize vertical gap so the last row sits near bottom margin.
+    const rowGap = Number(
+      (((pageHeight - bottomMargin - contentStartY - rowHeight) / (rowsPerPage - 1)) - rowHeight).toFixed(2)
+    );
 
     const drawHeader = (deptName: string, course: AugCourse) => {
       doc.setFont('helvetica', 'bold');
@@ -368,7 +375,6 @@ export default function StudentsList() {
       });
 
       // Page 1: 2 Columns with Barcodes
-      const rowsPerPage = 11;
       for (let i = 0; i < students.length; i += rowsPerPage * 2) {
         if (i > 0) {
           doc.addPage();
@@ -388,7 +394,7 @@ export default function StudentsList() {
           // Student index for Right Column (skips the 'rowsPerPage' of the first column)
           const rightIdx = i + row + rowsPerPage;
           if (rightIdx < students.length) {
-            drawCoursePdfEntry(doc, marginX + colWidth + colGap, yPos, colWidth, students[rightIdx]);
+            drawCoursePdfEntry(doc, marginX + colWidth + colGap + rightColumnShift, yPos, colWidth, students[rightIdx]);
           }
         }
       }
@@ -495,14 +501,17 @@ export default function StudentsList() {
     let globalSequence = startSequence;
 
     const persistedByDummy = getPersistedShuffledForFilter(getCurrentFilterKey());
-    const savedByDummy = new Map(
-      (data.saved_dummies || [])
-        .filter((row) => row.semester === semester)
-        .map((row) => [row.dummy, row])
-    );
 
     const departments: AugDept[] = data.departments.map((deptBlock) => {
-      const deptCode = DEPARTMENT_DUMMY_DIGITS[deptBlock.department] || '9';
+      const savedByDummy = new Map(
+        (data.saved_dummies || [])
+          .filter(
+            (row) =>
+              row.semester === semester
+              && (!row.department || String(row.department).trim().toUpperCase() === String(deptBlock.department).trim().toUpperCase())
+          )
+          .map((row) => [row.dummy, row])
+      );
 
       const courses: AugCourse[] = deptBlock.courses
         .filter((course) => {
@@ -532,7 +541,7 @@ export default function StudentsList() {
           const students: AugStudent[] = sourceStudents.map((student) => {
             globalSequence += 1;
             const enrollmentId = `ROW::${globalSequence}`;
-            const dummy = generateDummyNumber(department, globalSequence);
+            const dummy = generateDummyNumber(deptBlock.department, globalSequence);
             const saved = savedByDummy.get(dummy);
             const persisted = persistedByDummy[dummy];
 
